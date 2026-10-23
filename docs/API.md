@@ -28,7 +28,8 @@
     "phone": "+8613800000000",   // 脱敏显示由前端处理
     "signedIn": true,            // 是否已登录（有 session）
     "me": { "id": "123", "username": "neo", "firstName": "Neo" } | null,
-    "connected": false,          // 当前是否有活跃 MTProto 连接
+    "connected": false,          // 当前是否有活跃 MTProto 连接（真值；空闲时就是 false）
+    "lastConnectedAt": 1761234567890, // 最近一次成功连接的时间，null 表示还没连过
     "pendingLogin": null | { "phone": "+861...", "stage": "code" | "password" },
     "dc": 5 | null,             // 账号归属的 DC（登录时探测到才填）
     "lastError": "字符串或 null"

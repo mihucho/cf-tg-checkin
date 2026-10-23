@@ -482,11 +482,12 @@ function renderOverview() {
     ],
   });
 
+  const runtime = (state.data && state.data.runtime) || {};
   const mtproto = !account.signedIn
     ? { dot: "fail", text: "未登录" }
     : account.connected
       ? { dot: "ok", text: "已连接" }
-      : { dot: "warn", text: "待连接" };
+      : { dot: "idle", text: "空闲（按需连接）" };
 
   const grid = el(
     "div",
@@ -532,7 +533,10 @@ function renderOverview() {
       label: "触发器",
       dot: settings.triggerEnabled ? "ok" : "idle",
       value: settings.triggerEnabled ? "监听中" : "已停止",
-      foot: `来源 ${controlChatLabel(settings)} · 每 ${Number(settings.pollSeconds) || 60} 秒轮询 · 步骤检测 ${Number(settings.stepPollSeconds) || 3}s/最长 ${Number(settings.stepWaitSeconds) || 30}s`,
+      foot: `来源 ${controlChatLabel(settings)} · 每 ${Number(settings.pollSeconds) || 60} 秒轮询${
+        runtime && runtime.nextPollAt ? `（下次 ${formatClock(runtime.nextPollAt)}）` : ""
+      }`,
+      sub: `步骤检测 ${Number(settings.stepPollSeconds) || 3}s / 最长 ${Number(settings.stepWaitSeconds) || 30}s`,
     }),
   );
 
@@ -588,13 +592,14 @@ function renderOverview() {
   );
 }
 
-function statCard({ label, dot, value, foot }) {
+function statCard({ label, dot, value, foot, sub }) {
   return el(
     "section",
     { class: "card stat" },
     el("div", { class: "stat-label" }, label),
     el("div", { class: "stat-value" }, dot ? el("span", { class: `dot ${dot}` }) : null, value),
     foot ? el("div", { class: "stat-foot" }, foot) : null,
+    sub ? el("div", { class: "stat-foot stat-sub" }, sub) : null,
   );
 }
 
@@ -1424,7 +1429,14 @@ function profileCard(account) {
         el(
           "div",
           { class: "meta-list" },
-          metaRow("连接状态", account.connected ? "已连接（MTProto 会话活跃）" : "待连接（收到任务时会自动连接）"),
+          metaRow(
+            "连接状态",
+            account.connected
+              ? "已连接（MTProto 会话活跃）"
+              : account.lastConnectedAt
+                ? `空闲（按需连接，上次成功连接 ${formatRelative(account.lastConnectedAt)}）`
+                : "空闲（按需连接：收到任务或下次轮询时自动连上）",
+          ),
           metaRow("用户 id", String(me.id ?? "—")),
           metaRow("手机号", account.phone ? maskPhone(account.phone) : "—"),
           metaRow("apiId", account.apiId ? String(account.apiId) : "—"),

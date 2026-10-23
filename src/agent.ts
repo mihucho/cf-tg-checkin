@@ -102,6 +102,8 @@ export class TgAgent implements DurableObject {
   private cachedClientKey: string | null = null;
   private cachedClientTouchedAt = 0;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 当前是否真的有活跃的 MTProto 连接（内存态，驱逐后自然为 false） */
+  private connected = false;
 
   constructor(
     private readonly ctx: DurableObjectState,
@@ -457,16 +459,22 @@ export class TgAgent implements DurableObject {
     const client = createTgClient(creds);
     try {
       await client.connect();
+      this.connected = true;
+      this.store.setKv("connection:lastOkAt", String(Date.now()));
       this.restoreEntities(client);
       const result = await fn(client);
       this.afterUse(client);
       return result;
     } catch (error) {
+      this.connected = false;
       this.store.setKv(KV_LAST_ERROR, errorMessage(error));
       throw error;
     } finally {
       if (CLIENT_IDLE_REUSE_MS > 0) this.keepWarm(client);
-      else await client.disconnect().catch(() => undefined);
+      else {
+        await client.disconnect().catch(() => undefined);
+        this.connected = false;
+      }
     }
   }
 
@@ -514,6 +522,7 @@ export class TgAgent implements DurableObject {
     const client = this.cachedClient;
     this.cachedClient = null;
     this.cachedClientKey = null;
+    this.connected = false;
     if (client) await client.disconnect().catch(() => undefined);
   }
 
@@ -1277,6 +1286,14 @@ export class TgAgent implements DurableObject {
 
   // ---------------------------------------------------------------- 状态
 
+  /** 下一次触发器轮询时间（没登录 / 关了触发消息就是 null） */
+  private nextPollAt(): number | null {
+    const settings = this.store.getSettings();
+    if (!settings.triggerEnabled || !this.store.getKv(KV_SESSION)) return null;
+    const lastPoll = Number(this.store.getKv("trigger:lastPoll") ?? 0);
+    return lastPoll ? lastPoll + this.pollIntervalMs() : Date.now();
+  }
+
   private async buildState(): Promise<AgentState> {
     const settings = this.store.getSettings();
     const tasks = this.store.listTasks();
@@ -1295,7 +1312,8 @@ export class TgAgent implements DurableObject {
         phone: pending?.phone ?? this.store.getKv(KV_PHONE),
         signedIn: !!this.session() && !!me,
         me,
-        connected: false,
+        connected: this.connected,
+        lastConnectedAt: Number(this.store.getKv("connection:lastOkAt") ?? 0) || null,
         pendingLogin: pending ? { phone: pending.phone, stage: pending.stage } : null,
         dc: Number(this.store.getKv("account:dc") ?? 0) || null,
         lastError: this.store.getKv(KV_LAST_ERROR),
@@ -1313,6 +1331,8 @@ export class TgAgent implements DurableObject {
       runtime: {
         colo: this.store.getKv("runtime:colo"),
         locationHint: this.env.DO_LOCATION_HINT ?? null,
+        nextPollAt: this.nextPollAt(),
+        pollSeconds: settings.pollSeconds,
       },
     };
   }

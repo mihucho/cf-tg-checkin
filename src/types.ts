@@ -116,6 +116,8 @@ export interface AccountInfo {
   signedIn: boolean;
   me: { id: string; username: string | null; firstName: string } | null;
   connected: boolean;
+  /** 最近一次成功连接的时间（断开后用来显示"多久前连过"） */
+  lastConnectedAt?: number | null;
   pendingLogin: { phone: string; stage: "code" | "password" } | null;
   /** Telegram 账号归属的数据中心（登录时探测到才会填） */
   dc?: number | null;
@@ -135,7 +137,13 @@ export interface AgentState {
   };
   now: number;
   /** 运行时信息：最近一次请求来自哪个 colo、DO 创建区域提示 */
-  runtime?: { colo: string | null; locationHint: string | null };
+  runtime?: {
+    colo: string | null;
+    locationHint: string | null;
+    /** 下一次触发器轮询时间（毫秒），没登录/关了就为 null */
+    nextPollAt?: number | null;
+    pollSeconds?: number;
+  };
 }
 
 export const DEFAULT_SETTINGS: Settings = {

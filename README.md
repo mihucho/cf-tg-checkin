@@ -202,6 +202,10 @@ Telegram 的 userbot 协议是 MTProto，需要 TCP 连接；而 Workers 是无�
 
 ## 常见问题
 
+**"空闲/待连接"状态下还能从 Telegram 建任务吗？** 能。触发器轮询由 DO alarm 驱动，到点会现场连接
+（session 里的 auth key，1 RTT）、读完消息再断开；"空闲"只表示此刻没有 socket，最迟一个轮询周期
+（默认 60 秒，可调）就会生效。前提是**登录了 Telegram 且开了「允许用 Telegram 消息管理任务」**。
+
 **需要服务器吗？** 不需要。整套东西跑在 Cloudflare 上，免费额度对个人足够（DO 请求 + 每次执行一次连接）。
 
 **会被 Telegram 封号吗？** 换 IP 本身不是封号因素；风险在"机房 IP 登录用户账号"和异常行为（群发/刷量）。

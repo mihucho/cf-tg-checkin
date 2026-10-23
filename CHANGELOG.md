@@ -11,6 +11,13 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-24
+
+- 修正「MTProto 连接」状态：之前 `connected` 是硬编码的 `false`（永远显示"待连接"），
+  现在反映真实连接状态，并显示「上次成功连接 x 分钟前」
+- 概览的触发器卡片显示「下次轮询 HH:MM:SS」，不再让人误以为"必须在连接状态才能用"
+- `/api/state` 增加 `account.lastConnectedAt` 与 `runtime.nextPollAt` / `runtime.pollSeconds`
+
 ## [0.3.1] - 2026-10-24
 
 - Turnstile 支持**在设置页直接配置**（Site Key / Secret Key / 清除），保存即生效，无需重新部署
