@@ -41,6 +41,12 @@ const KV_PHONE = "account:phone";
 const KV_LAST_ERROR = "account:lastError";
 /** 控制会话里最近一次"转发/回复过来的目标"（先转发机器人、再单独发配置时用） */
 const KV_TRIGGER_TARGET = "trigger:target";
+/**
+ * 实体缓存（[markedId, accessHash, username, phone, name]）。
+ * teleproto 把这份缓存放在 session 对象里，StringSession.save() 不会带上它，
+ * 而我们的 client 每次执行都是新建的 —— 不落地的话数字 id 永远解析不出来。
+ */
+const KV_ENTITIES = "entities:cache";
 
 const REPLY_MARKERS = ["✅", "❌", "⚠️", "📋", "💡", "⚙️", "🔧", "📝", "🚀", "⏰", "🗑️"];
 
@@ -336,7 +342,9 @@ export class TgAgent implements DurableObject {
     const client = createTgClient(creds);
     try {
       await client.connect();
+      this.restoreEntities(client);
       const result = await fn(client);
+      this.persistEntities(client);
       this.persistSession(client);
       this.store.deleteKv(KV_LAST_ERROR);
       return result;
@@ -401,6 +409,44 @@ export class TgAgent implements DurableObject {
     }
 
     throw lastError ?? new Error("登录失败");
+  }
+
+  /** 把落地的实体缓存灌回新 client 的 session */
+  private restoreEntities(client: TelegramClient): void {
+    try {
+      const rows = this.store.getJson<Array<[string, string, string | null, string | null, string | null]>>(
+        KV_ENTITIES,
+        [],
+      );
+      if (!rows.length) return;
+      const cache = (client.session as unknown as { _entities?: Map<string, unknown> })._entities;
+      if (!cache) return;
+      for (const row of rows) {
+        if (row?.[0]) cache.set(String(row[0]), row);
+      }
+    } catch {
+      /* 缓存不可用就算了 */
+    }
+  }
+
+  /** 把 session 里的实体缓存落地，下次连接直接用 */
+  private persistEntities(client: TelegramClient): void {
+    try {
+      const cache = (client.session as unknown as { _entities?: Map<string, unknown[]> })._entities;
+      if (!cache || cache.size === 0) return;
+      const rows = [...cache.values()]
+        .slice(-600)
+        .map((row) => [
+          row[0] != null ? String(row[0]) : "",
+          row[1] != null ? String(row[1]) : "",
+          (row[2] as string | null) ?? null,
+          (row[3] as string | null) ?? null,
+          (row[4] as string | null) ?? null,
+        ]);
+      this.store.setJson(KV_ENTITIES, rows);
+    } catch {
+      /* 忽略 */
+    }
   }
 
   private persistSession(client: TelegramClient): void {

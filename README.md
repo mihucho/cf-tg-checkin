@@ -32,6 +32,7 @@ Telegram 的 userbot（用户账号）协议是 MTProto，需要 TCP 长连接�
 | Durable Object 会被驱逐，长连接保不住 | **每次操作重新连接**：DO alarm 醒来 → 连上（用 session 里的 auth key，1 RTT）→ 干活 → 断开 |
 | 定时任务 | DO alarm 做精确调度（`nextRunAt` 落库），Cron Trigger 只作兜底 |
 | 收不到 updates 推送 | 不依赖推送：点按钮前用 `messages.getHistory` 轮询机器人回复；触发器靠轮询控制会话 |
+| 没有常驻连接 → 实体缓存是空的 | teleproto 解析数字 id 需要 `access_hash`。目标里存 `@username`/`access_hash`，并把实体缓存落地到 DO，解析失败时再用 `getDialogs()` 预热重试 |
 
 ---
 

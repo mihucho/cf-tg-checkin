@@ -258,7 +258,7 @@ curl -s https://cf-tg-checkin.<你的子域>.workers.dev/api/version
 | 验证码一直「不正确」 | 用最新一次收到的码；超过 10 分钟要重新获取 |
 | 登录报 `PHONE_MIGRATE_5` / `NETWORK_MIGRATE_n` | 账号归属的数据中心不是默认的 DC2。程序会自动切到目标 DC 重试，并记住 DC；如果仍失败，重新点一次「获取验证码」（此时验证码会直接在正确的 DC 上申请） |
 | 任务日志一直是「还没登录 Telegram」 | session 被踢（在别的设备退出登录）→ 账号页重新登录 |
-| `Could not find the input entity for {"userId":…}` | 任务目标只有数字 id（私有机器人没有 @username，或老任务没存 access_hash）。新版会自动用 @username / access_hash 解析，并在执行前用对话列表补全；仍失败就把任务目标改成 `@机器人用户名` |
+| `Could not find the input entity for {"userId":…}` | 数字 id 解析需要 `access_hash`，而它只有"见过"对方才有（我们的连接每次执行都是新建的）。现在的三层兜底：`@username` → 落地在 DO 里的实体缓存 → `getDialogs()` 预热后重试；仍失败就把任务目标改成 `@机器人用户名`，或先在 Telegram 里和它对话一次 |
 | 收藏夹发指令没反应 | 触发器轮询默认 60 秒；检查设置里的「触发器开关」「控制会话」；看日志页 |
 | 点按钮步骤失败 | 机器人可能改版了；日志里会列出当时可点的按钮文本，照着重配 `btn:...` |
 | 部署后 404 / 页面白屏 | `public/` 没一起上传；确认 `wrangler.jsonc` 的 `assets.directory` |
