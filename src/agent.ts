@@ -970,46 +970,45 @@ export class TgAgent implements DurableObject {
   }
 
   /**
-   * 解析任务目标前先"体检"。
+   * 解析任务目标（每次运行只解析一次）。
    *
-   * 早期版本建的任务可能只存了数字 id（没有 username / access_hash），
-   * 而数字 id 在新连接上无法直接解析（"Could not find the input entity"）。
-   * 这里用对话列表反查一次，把 username / access_hash 补进任务里，之后就正常了。
+   * - 解析本身有兜底：@username → access_hash → getDialogs 预热后重试（见 executor.resolveEntity）
+   * - 解析成功后顺手把 username / accessHash 回填进任务，下次就不必再靠 getDialogs
    */
-  private async healTarget(client: TelegramClient, task: Task): Promise<Task> {
-    try {
-      await resolveEntity(client, task.target);
-      if (task.target.username || task.target.accessHash) return task;
-    } catch {
-      /* 解析失败，继续尝试补全 */
-    }
+  private async ensureTarget(
+    client: TelegramClient,
+    task: Task,
+  ): Promise<{ entity: Awaited<ReturnType<typeof resolveEntity>>; task: Task }> {
+    const entity = await resolveEntity(client, task.target);
 
-    try {
-      const dialogs = (await client.getDialogs({ limit: 200 })) as Array<{ entity?: unknown }>;
-      for (const dialog of dialogs) {
-        const entity = dialog?.entity;
-        if (!entity) continue;
-        const peerId = await client.getPeerId(entity as never).catch(() => null);
-        if (!peerId || String(peerId) !== String(task.target.id)) continue;
-        const target = await this.toTarget(client, entity, "");
-        if (!target.username && !target.accessHash) continue;
-        const updated = this.store.updateTask(task.id, { target }, Date.now());
+    // 目标里缺 username/accessHash 时补一次，之后每次解析都能直接命中
+    if (!task.target.username && !task.target.accessHash) {
+      const peerId = await client.getPeerId(entity as never).catch(() => null);
+      const anyEntity = entity as unknown as { username?: string; accessHash?: unknown };
+      const patch: Target = {
+        ...task.target,
+        id: peerId ? String(peerId) : task.target.id,
+        username: anyEntity.username,
+        ...(anyEntity.accessHash !== undefined && anyEntity.accessHash !== null
+          ? { accessHash: String(anyEntity.accessHash) }
+          : {}),
+      };
+      if (JSON.stringify(patch) !== JSON.stringify(task.target)) {
+        const updated = this.store.updateTask(task.id, { target: patch }, Date.now());
         this.store.addLog({
           taskId: task.id,
           taskName: task.name,
           at: Date.now(),
           ok: true,
           level: "info",
-          message: `目标已自动补全：${target.username ? `@${target.username}` : target.id}`,
+          message: `目标已自动补全：${patch.username ? `@${patch.username}` : patch.id}`,
           detail: null,
         });
-        return updated ?? { ...task, target };
+        return { entity, task: updated ?? { ...task, target: patch } };
       }
-    } catch {
-      /* 补全失败就按原样继续，让上层报错 */
     }
 
-    return task;
+    return { entity, task };
   }
 
   private async runSingleTask(
@@ -1025,10 +1024,12 @@ export class TgAgent implements DurableObject {
     let log: LogEntry;
     try {
       const settings = this.store.getSettings();
-      task = await this.healTarget(client, task);
+      const prepared = await this.ensureTarget(client, task);
+      task = prepared.task;
       const outcome = await executeTask(client, task, {
         previousSent,
         hooks,
+        entity: prepared.entity,
         pollIntervalMs: (settings.stepPollSeconds ?? 3) * 1000,
         stepWaitMs: (settings.stepWaitSeconds ?? 30) * 1000,
       });

@@ -425,6 +425,8 @@ function pickRandom(options: string[]): string {
 export interface ExecuteOptions {
   /** 上一次运行发出的消息 id，用于按需清理 */
   previousSent?: number[];
+  /** 已经解析好的目标实体（agent 侧解析一次后传进来，避免重复 getEntity/getDialogs） */
+  entity?: EntityLike;
   hooks: ExecHooks;
   /** 等待下一步按钮时，每次检测的间隔（毫秒，默认 3000） */
   pollIntervalMs?: number;
@@ -444,7 +446,7 @@ export async function executeTask(
     hooks.log(level, message);
   };
 
-  const entity = await resolveEntity(client, task.target);
+  const entity = options.entity ?? (await resolveEntity(client, task.target));
   const chatId = String((entity as { id?: unknown }).id ?? task.target.id);
   const timeoutMs = Math.max(5, Math.min(90, task.timeoutSeconds || 25)) * 1000;
   /** 每等待一次机器人回复的超时时间（从每次等待开始算，不被步骤间隔吃掉） */
