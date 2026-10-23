@@ -101,6 +101,12 @@ export interface Settings {
   stepPollSeconds: number;
   /** 单次最多等待多少秒（默认 30） */
   stepWaitSeconds: number;
+  /** Turnstile 站点 key（公开，会下发前端） */
+  turnstileSiteKey: string;
+  /** Turnstile 密钥：只在服务端用，接口永远不回传（用 turnstileSecretConfigured 表示有没有） */
+  turnstileSecretKey: string;
+  /** 只读标记：接口返回时告知前端"密钥已配置" */
+  turnstileSecretConfigured?: boolean;
 }
 
 export interface AccountInfo {
@@ -141,4 +147,6 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultTarget: "",
   stepPollSeconds: 3,
   stepWaitSeconds: 30,
+  turnstileSiteKey: "",
+  turnstileSecretKey: "",
 };

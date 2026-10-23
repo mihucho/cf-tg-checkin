@@ -11,6 +11,13 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-24
+
+- Turnstile 支持**在设置页直接配置**（Site Key / Secret Key / 清除），保存即生效，无需重新部署
+- 环境变量仍然优先于设置页（两者都配时用 env）；Secret 只存服务端，接口恒回传空串 + `turnstileSecretConfigured` 标记
+- Worker 侧对 Turnstile 配置做 30 秒缓存，设置保存后立即失效
+- 前端进登录页时若本地没有 Site Key 会现拉 `/api/session`，配置完登出即可看到验证框
+
 ## [0.3.0] - 2026-10-24
 
 - 新增 **Cloudflare Turnstile** 人机验证（可选）：配 `TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY` 后

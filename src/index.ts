@@ -109,12 +109,42 @@ interface TurnstileConfig {
   secretKey: string;
 }
 
-/** 两个 key 都配了才启用 Turnstile（只配一半视为没配，避免半残状态把人挡在门外） */
-function turnstileOf(env: Env): TurnstileConfig | null {
-  const siteKey = env.TURNSTILE_SITE_KEY?.trim();
-  const secretKey = env.TURNSTILE_SECRET_KEY?.trim();
+/**
+ * Turnstile 配置来源：**环境变量优先**（运维场景），否则用设置页里存的。
+ * 两个 key 都齐了才启用 —— 只配一半视为没配，避免半残配置把人锁在门外。
+ *
+ * 设置页存在 DO 里，这里查一次并缓存 30 秒（登录是低频操作，够用且不啰嗦）。
+ */
+let turnstileCache: { at: number; value: TurnstileConfig | null } | null = null;
+
+function turnstileFromEnv(env: Env): TurnstileConfig | null {
+  const siteKey = (env.TURNSTILE_SITE_KEY ?? "").trim();
+  const secretKey = (env.TURNSTILE_SECRET_KEY ?? "").trim();
   if (!siteKey || !secretKey) return null;
   return { siteKey, secretKey };
+}
+
+async function turnstileOf(env: Env): Promise<TurnstileConfig | null> {
+  const fromEnv = turnstileFromEnv(env);
+  if (fromEnv) return fromEnv;
+
+  if (turnstileCache && Date.now() - turnstileCache.at < 30_000) return turnstileCache.value;
+
+  let value: TurnstileConfig | null = null;
+  try {
+    const response = await agentStub(env).fetch("https://agent/auth/turnstile", { method: "GET" });
+    const data = (await response.json()) as { siteKey?: string | null; secretKey?: string | null };
+    if (data.siteKey && data.secretKey) value = { siteKey: data.siteKey, secretKey: data.secretKey };
+  } catch {
+    value = null;
+  }
+  turnstileCache = { at: Date.now(), value };
+  return value;
+}
+
+/** 设置页改了配置后清掉缓存，立刻生效 */
+function invalidateTurnstileCache() {
+  turnstileCache = null;
 }
 
 const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
@@ -246,7 +276,7 @@ export default {
         authenticated: await isAuthenticated(request, env),
         needsSetup: !secretOf(env),
         // 站点 key 是公开信息；配了才会在登录页渲染 Turnstile
-        turnstileSiteKey: turnstileOf(env)?.siteKey ?? null,
+        turnstileSiteKey: (await turnstileOf(env))?.siteKey ?? null,
       });
     }
 
@@ -280,7 +310,7 @@ export default {
       }
 
       // 人机验证（配置了才要求）：失败也算一次登录失败，防止被拿来刷
-      const turnstile = turnstileOf(env);
+      const turnstile = await turnstileOf(env);
       if (turnstile) {
         const checked = await verifyTurnstile(turnstile, turnstileToken, ip);
         if (!checked.ok) {
@@ -332,7 +362,10 @@ export default {
     }
 
     try {
-      return await proxyToAgent(request, env, url);
+      const response = await proxyToAgent(request, env, url);
+      // 设置页可能改了 Turnstile 配置，清掉缓存让下一次登录立刻用新值
+      if (url.pathname === "/api/settings") invalidateTurnstileCache();
+      return response;
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 500);
     }
