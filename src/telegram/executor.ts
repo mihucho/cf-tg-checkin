@@ -138,6 +138,8 @@ export interface ButtonInfo {
   query?: string;
   /** TL 里的类名，排查时有用 */
   className?: string;
+  /** layer 232: KeyboardInlineButton 里的 type 类名（InlineButtonTypeCallback 等） */
+  typeClassName?: string;
 }
 
 /** 去掉空格、emoji、标点后的文本，用于按钮匹配（机器人常在按钮前加图标） */
@@ -177,26 +179,33 @@ export function flattenButtons(message: Api.Message): ButtonInfo[] {
     const buttons = Array.isArray(row.buttons) ? row.buttons : [];
     buttons.forEach((raw, columnIndex) => {
       const button = raw as ButtonLike;
-      const className = button.className ?? "";
-      const type = button.type;
+      const className = button.className ?? "KeyboardButton";
+      const type = button.type as Record<string, unknown> | undefined;
+      const typeClassName = typeof type?.className === "string" ? type.className : undefined;
       const text = String(button.text ?? "");
 
-      // 回调数据：老结构直接在按钮上，新结构在 type 里
-      const data =
-        button.data ?? (type?.className === "InlineButtonTypeCallback" ? type.data : undefined);
-      // 链接
-      const url =
-        button.url ??
-        (type?.className === "InlineButtonTypeUrl" || type?.className === "InlineButtonTypeWebView"
-          ? type.url
-          : undefined);
+      // 不依赖类名判断：谁的字段有值就是哪种按钮（layer 232 换过结构，
+      // 老结构把 data/url 直接放按钮上，新结构放在 type 里）
+      const data = (button.data ?? type?.data) as Buffer | Uint8Array | undefined;
+      const url = (button.url ?? type?.url) as string | undefined;
+      const query = type?.query as string | undefined;
 
       let kind: ButtonInfo["kind"] = "other";
-      if (data !== undefined && data !== null) kind = "callback";
-      else if (url) kind = /WebView/i.test(type?.className ?? className) ? "webview" : "url";
-      else if (type?.className === "InlineButtonTypeSwitchInline") kind = "switch";
-      else if (/WebView/i.test(className) || /WebView/i.test(type?.className ?? "")) kind = "webview";
-      else if (type === undefined) kind = "text"; // 普通键盘按钮（reply keyboard）
+      if (data !== undefined && data !== null) {
+        kind = "callback";
+      } else if (url) {
+        kind = /WebView/i.test(`${typeClassName ?? ""}${className}`) ? "webview" : "url";
+      } else if (query !== undefined) {
+        kind = "switch";
+      } else if (
+        !type ||
+        typeClassName === "ButtonTypeDefault" ||
+        // 老结构的普通键盘按钮没有任何 type 字段
+        className === "KeyboardButton"
+      ) {
+        // 普通键盘按钮（reply keyboard）："点击" = 把按钮文本当成消息发出去
+        kind = "text";
+      }
 
       result.push({
         row: rowIndex,
@@ -205,8 +214,9 @@ export function flattenButtons(message: Api.Message): ButtonInfo[] {
         kind,
         data: data ? Buffer.from(data as Uint8Array) : undefined,
         url,
-        query: type?.className === "InlineButtonTypeSwitchInline" ? type.query : undefined,
+        query,
         className,
+        typeClassName,
       });
     });
   });
@@ -241,7 +251,37 @@ export function selectButton(buttons: ButtonInfo[], step: Step): ButtonInfo | nu
 }
 
 export function describeButtons(buttons: ButtonInfo[]): string {
-  return buttons.map((button) => `[${button.row},${button.column}] ${button.text}`).join(" / ");
+  return buttons
+    .map((button) => {
+      const meta = [button.kind, button.typeClassName ?? button.className].filter(Boolean).join(",");
+      return `[${button.row},${button.column}] ${button.text || "(无文本)"} (${meta})`;
+    })
+    .join(" / ");
+}
+
+/** 把原始 replyMarkup 压成一行短文本，用于日志排查 */
+export function describeRawMarkup(message: Api.Message, limit = 700): string {
+  try {
+    const markup = (message as { replyMarkup?: unknown }).replyMarkup;
+    if (!markup) return "无 replyMarkup";
+    const json = JSON.stringify(markup, (_key, value) => {
+      if (value && typeof value === "object" && "className" in value) {
+        const obj = value as { className?: string; data?: unknown; url?: unknown; text?: unknown; type?: unknown };
+        return {
+          className: obj.className,
+          text: obj.text,
+          url: obj.url,
+          hasData: obj.data !== undefined,
+          dataLength: obj.data && typeof obj === "object" && "length" in (obj.data as object) ? (obj.data as { length?: number }).length : undefined,
+          type: obj.type,
+        };
+      }
+      return value;
+    });
+    return json.length > limit ? `${json.slice(0, limit)}…` : json;
+  } catch (error) {
+    return `原始 markup 序列化失败：${errorMessage(error)}`;
+  }
 }
 
 /** 同一套按钮的"指纹"：用来判断点完之后菜单到底变没变（机器人常原地编辑同一条消息） */
@@ -307,6 +347,35 @@ async function waitForInteractive(
   return null;
 }
 
+/**
+ * 兜底：用 teleproto 自带的 `message.buttons` + `MessageButton.click()`。
+ * HumanTG 适配器就是走这条路（它对按钮类型、switch_inline、password 的处理更全）。
+ * 我们的手写实现覆盖不到的类型（或 layer 差异）就交给它。
+ */
+async function clickWithTeleprotoHelper(
+  message: Api.Message,
+  button: ButtonInfo,
+): Promise<string | null> {
+  const grid = (message as unknown as { buttons?: Array<Array<{ text?: string; click?: () => Promise<unknown> }>> }).buttons;
+  if (!Array.isArray(grid) || !grid.length) return null;
+
+  const flat = grid.flat().filter(Boolean);
+  const wanted = normalizeButtonText(button.text);
+  const match =
+    flat.find((item) => normalizeButtonText(String(item?.text ?? "")) === wanted) ??
+    (wanted ? flat.find((item) => normalizeButtonText(String(item?.text ?? "")).includes(wanted)) : undefined) ??
+    flat.find((_, index) => index === button.row === undefined);
+  const target = match ?? grid[button.row]?.[button.column];
+  if (!target || typeof target.click !== "function") return null;
+
+  try {
+    const result = (await target.click()) as { message?: string } | undefined;
+    return result && typeof result === "object" && result.message ? `机器人回应：${String(result.message).slice(0, 200)}` : "";
+  } catch (error) {
+    return `teleproto 点击失败：${errorMessage(error)}`;
+  }
+}
+
 async function clickButton(
   client: TelegramClient,
   entity: EntityLike,
@@ -314,23 +383,38 @@ async function clickButton(
   button: ButtonInfo,
 ): Promise<string> {
   if (button.kind === "callback") {
-    const peer = await client.getInputEntity(entity as never);
-    const answer = (await client.invoke(
-      new Api.messages.GetBotCallbackAnswer({
-        peer: peer as Api.TypeEntityLike,
-        msgId: message.id,
-        data: button.data,
-      }),
-    )) as { message?: string };
-    return answer?.message ? `机器人回应：${String(answer.message).slice(0, 200)}` : "";
+    try {
+      const peer = await client.getInputEntity(entity as never);
+      const answer = (await client.invoke(
+        new Api.messages.GetBotCallbackAnswer({
+          peer: peer as Api.TypeEntityLike,
+          msgId: message.id,
+          data: button.data,
+        }),
+      )) as { message?: string };
+      return answer?.message ? `机器人回应：${String(answer.message).slice(0, 200)}` : "";
+    } catch (error) {
+      const fallback = await clickWithTeleprotoHelper(message, button);
+      if (fallback !== null) return `直接调用失败（${errorMessage(error)}），改用 teleproto 助手：${fallback || "已点击"}`;
+      throw error;
+    }
   }
   if (button.kind === "text") {
+    // reply keyboard：点它的等价操作就是把按钮文本（含 emoji 前缀）发出去
     await client.sendMessage(entity as never, { message: button.text, parseMode: false });
-    return "";
+    return `已按键盘按钮发送「${button.text}」`;
   }
   if (button.kind === "url") return `「${button.text}」是链接按钮，跳过：${button.url ?? ""}`;
   if (button.kind === "webview") return `「${button.text}」是 webview 按钮，跳过`;
   if (button.kind === "switch") return `「${button.text}」是 switch_inline 按钮，跳过`;
+  const fallback = await clickWithTeleprotoHelper(message, button);
+  if (fallback !== null) return `类型未识别，改用 teleproto 助手：${fallback || "已点击"}`;
+
+  // 最后兜底：当成普通键盘按钮，把文本发出去（多数机器人靠文本匹配）
+  if (button.text) {
+    await client.sendMessage(entity as never, { message: button.text, parseMode: false });
+    return `类型未识别（${button.typeClassName ?? button.className}），已按键盘按钮发送「${button.text}」`;
+  }
   return `「${button.text}」类型不支持点击`;
 }
 
@@ -437,6 +521,7 @@ export async function executeTask(
           const button = selectButton(candidate.buttons, step);
           if (!button) {
             note("warn", `步骤${stepNo} 没找到按钮「${step.text ?? `${step.row},${step.column}`}」`);
+            note("warn", `原始 markup：${describeRawMarkup(candidate.message)}`);
             break;
           }
           const clickNote = await clickButton(client, entity, candidate.message, button);
