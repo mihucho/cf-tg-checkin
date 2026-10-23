@@ -11,6 +11,13 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-24
+
+- 触发识别过程写进日志：新建任务时记一条「触发器创建任务 #id」，detail 里是完整链路
+  （触发文本 → 推断到的目标 → 解析结果 or **失败原因** → 调度 → 动作）
+- `enrichTarget` 不再静默吞异常：解析失败会把错误原文写进日志
+- 解析兜底加一层：`contacts.resolveUsername` 失败时，直接在自己最近 200 个对话里按 username 找实体
+
 ## [0.3.3] - 2026-10-24
 
 - 修「从链接建任务抓不到机器人显示名」：`https://t.me/xxx_bot 7.40 /sign` 这类消息里，

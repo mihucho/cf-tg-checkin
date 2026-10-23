@@ -928,7 +928,33 @@ export class TgAgent implements DurableObject {
         return;
       }
       case "create": {
-        const task = this.createTask(await this.enrichTarget(client, result.task as TaskInput));
+        const trace: string[] = [];
+        const incoming = result.task as TaskInput;
+        trace.push(`触发文本：${text.replace(/\n/g, " / ").slice(0, 120)}`);
+        trace.push(
+          `推断到的目标：${
+            hint
+              ? `${hint.title ?? ""}${hint.title && hint.username ? " " : ""}${hint.username ? `@${hint.username}` : ""}（kind=${hint.kind} id=${hint.id}${
+                  hint.accessHash ? " hash=有" : ""
+                }）`.trim()
+              : "无（使用记住的目标 / 默认目标）"
+          }`,
+        );
+        const enriched = await this.enrichTarget(client, incoming, trace);
+        trace.push(`目标最终：${JSON.stringify(enriched.target)}`);
+        trace.push(`调度：${JSON.stringify(enriched.schedule)}`);
+        trace.push(`动作：${(enriched.steps ?? []).map((step) => step.type).join(" → ")}`);
+
+        const task = this.createTask(enriched);
+        this.store.addLog({
+          taskId: task.id,
+          taskName: task.name,
+          at: Date.now(),
+          ok: true,
+          level: "info",
+          message: `触发器创建任务 #${task.id}`,
+          detail: trace.join("\n"),
+        });
         await reply(
           `✅ 已创建任务 #${task.id}\n${task.name}\n⏰ ${formatInTimezone(task.nextRunAt, settings.timezone)}（${settings.timezone >= 0 ? "+" : ""}${settings.timezone}）\n${result.explanation ?? ""}`.trim(),
         );
@@ -1112,13 +1138,24 @@ export class TgAgent implements DurableObject {
    * 没有显示名 —— 直接建任务就会得到 `@xxx_bot 签到` 这种名字。
    * 这里用当前连接把实体解析出来，补上 title / access_hash。
    */
-  private async enrichTarget(client: TelegramClient, input: TaskInput): Promise<TaskInput> {
-    if (input.target.title && input.target.accessHash) return input;
+  private async enrichTarget(client: TelegramClient, input: TaskInput, trace?: string[]): Promise<TaskInput> {
+    const label = input.target.username ? `@${input.target.username}` : input.target.id;
+    if (input.target.title && input.target.accessHash) {
+      trace?.push(`目标已带显示名：${input.target.title}（${label}）`);
+      return input;
+    }
     try {
+      trace?.push(`解析目标 ${label} …`);
       const entity = await resolveEntity(client, input.target);
       const target = await this.toTarget(client, entity, input.target.id);
+      trace?.push(
+        `解析成功：kind=${target.kind} id=${target.id} title=${target.title ?? "（无）"} ` +
+          `username=${target.username ? `@${target.username}` : "（无）"} access_hash=${target.accessHash ? "有" : "无"}`,
+      );
       return { ...input, target: { ...target, id: target.id || input.target.id } };
-    } catch {
+    } catch (error) {
+      // 不再静默丢弃：把原因写进日志
+      trace?.push(`解析失败：${errorMessage(error)}`);
       return input;
     }
   }
