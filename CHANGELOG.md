@@ -11,6 +11,12 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-10-24
+
+- 日志列表改为**游标分页**：`/api/logs?before=<id>&level=&taskId=`，前端「加载更早的日志」
+  （比页码稳，插入新日志不会跳行）；新增「全部 / 成功 / 失败」筛选
+- 服务端日志保留条数 500 → 2000
+
 ## [0.2.2] - 2026-10-24
 
 安全加固（详见 [SECURITY.md](SECURITY.md)，含实测记录）：

@@ -163,7 +163,13 @@ export class TgAgent implements DurableObject {
         }
         if (suffix === "/logs" && method === "GET") {
           const limit = intParam(url.searchParams.get("limit"), 20, 1, 100);
-          return json({ logs: this.store.listLogs(limit, id) });
+          return json({
+            logs: this.store.listLogs({
+              limit,
+              taskId: id,
+              beforeId: intParam(url.searchParams.get("before"), 0, 0, Number.MAX_SAFE_INTEGER) || null,
+            }),
+          });
         }
         if (!suffix && (method === "PATCH" || method === "PUT")) {
           const patch = (await request.json()) as Partial<TaskInput>;
@@ -179,8 +185,13 @@ export class TgAgent implements DurableObject {
       }
 
       if (path === "/logs" && method === "GET") {
-        const limit = intParam(url.searchParams.get("limit"), 100, 1, 500);
-        return json({ logs: this.store.listLogs(limit) });
+        const limit = intParam(url.searchParams.get("limit"), 50, 1, 200);
+        const beforeId = intParam(url.searchParams.get("before"), 0, 0, Number.MAX_SAFE_INTEGER) || null;
+        const level = url.searchParams.get("level");
+        const taskIdParam = intParam(url.searchParams.get("taskId"), 0, 0, Number.MAX_SAFE_INTEGER) || null;
+        const logs = this.store.listLogs({ limit, beforeId, level, taskId: taskIdParam });
+        // 只有"这一页满了"才可能有更早的；否则前端会一直显示「加载更多」
+        return json({ logs, nextBefore: logs.length === limit ? logs[logs.length - 1].id : null });
       }
       if (path === "/logs/clear" && method === "POST") {
         this.store.clearLogs();
@@ -1276,7 +1287,7 @@ export class TgAgent implements DurableObject {
       },
       settings,
       tasks,
-      logs: this.store.listLogs(50),
+      logs: this.store.listLogs({ limit: 50 }),
       stats: {
         totalTasks: tasks.length,
         enabledTasks: tasks.filter((task) => task.enabled).length,
