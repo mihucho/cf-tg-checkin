@@ -434,7 +434,7 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
     source: "trigger",
   };
 
-  const targetLabel = resolvedTarget.username ? `@${resolvedTarget.username}` : resolvedTarget.title || resolvedTarget.id;
+  const targetLabel = resolvedTarget.title || (resolvedTarget.username ? `@${resolvedTarget.username}` : resolvedTarget.id);
   const keywords = successKeywords.length ? `，成功关键词：${successKeywords.join(" / ")}` : "";
   const explanation = `${scheduleLabel || "每天"} → ${targetLabel}：${describeSteps(steps)}${keywords}`;
 
@@ -442,7 +442,8 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
 }
 
 export function defaultName(target: Target, scheduleLabel: string, steps: Step[]): string {
-  const targetLabel = target.username ? `@${target.username}` : target.title || target.id;
+  // 优先用群名 / 机器人显示名，其次 @username，最后才是数字 id
+  const targetLabel = target.title || (target.username ? `@${target.username}` : target.id);
   const firstText = steps.find((step) => step.type === "text")?.text;
   const firstRandom = steps.find((step) => step.type === "random")?.options?.[0];
   const action = firstText || (firstRandom ? `随机消息` : "按键");

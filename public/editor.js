@@ -771,6 +771,24 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
     toast(message, { kind: "error" });
   }
 
+  /** 目标显示名：群名 / 机器人名 → @username → id */
+  function targetDisplayName(target) {
+    if (!target) return "";
+    return target.title || (target.username ? `@${target.username}` : "") || String(target.id || "");
+  }
+
+  /** 任务名为空时，用「目标名 + 第一个动作」自动生成 */
+  function suggestName() {
+    const target = model.resolved && model.resolvedFor === model.targetQuery.trim() ? model.resolved : null;
+    const base = targetDisplayName(target) || model.targetQuery.trim();
+    if (!base) return "";
+    const firstText = (model.steps.find((step) => step.type === "text") || {}).text || "";
+    const firstRandom = (model.steps.find((step) => step.type === "random") || {}).options?.[0] || "";
+    const action = firstText || firstRandom || "签到";
+    const name = `${base} ${action}`.trim();
+    return name.length > 40 ? name.slice(0, 40) : name;
+  }
+
   function buildTarget() {
     const query = model.targetQuery.trim();
     if (!query) return null;
@@ -843,8 +861,12 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
     errorBox.hidden = true;
     await withLoading(saveButton, async () => {
       try {
-        const name = model.name.trim();
-        if (!name) throw new Error("请填写任务名称");
+        let name = model.name.trim();
+        if (!name) {
+          name = suggestName();
+          if (!name) throw new Error("请填写任务名称");
+          model.name = name;
+        }
         const target = buildTarget();
         if (!target) throw new Error("请填写任务目标，或使用设置里的默认目标");
         const schedule = buildSchedule();
