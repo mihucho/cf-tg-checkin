@@ -353,19 +353,41 @@ export class Store {
       entry.message,
       entry.detail,
     );
-    this.sql.exec("DELETE FROM logs WHERE id <= (SELECT MAX(id) - 500 FROM logs)");
+    // 只保留最近 2000 条，避免 DO 存储无限增长
+    this.sql.exec("DELETE FROM logs WHERE id <= (SELECT MAX(id) - 2000 FROM logs)");
     const row = this.sql.exec<LogRow>("SELECT * FROM logs ORDER BY id DESC LIMIT 1").toArray()[0];
     return rowToLog(row);
   }
 
-  listLogs(limit = 100, taskId?: number): LogEntry[] {
-    const bounded = Math.max(1, Math.min(500, limit));
-    const rows = taskId
-      ? this.sql
-          .exec<LogRow>("SELECT * FROM logs WHERE task_id = ? ORDER BY id DESC LIMIT ?", taskId, bounded)
-          .toArray()
-      : this.sql.exec<LogRow>("SELECT * FROM logs ORDER BY id DESC LIMIT ?", bounded).toArray();
-    return rows.map(rowToLog);
+  /**
+   * 日志列表（游标分页）。
+   * @param options.beforeId 只取 id 更小的（「加载更多」）—— 比 page/pageSize 稳，插入新日志不会跳行
+   * @param options.level "ok"（成功）/ "fail"（失败）/ 具体 level
+   */
+  listLogs(
+    options: { limit?: number; beforeId?: number | null; taskId?: number | null; level?: string | null } = {},
+  ): LogEntry[] {
+    const limit = Math.max(1, Math.min(200, options.limit ?? 100));
+    const where: string[] = [];
+    const bindings: SqlStorageValue[] = [];
+
+    if (options.taskId) {
+      where.push("task_id = ?");
+      bindings.push(options.taskId);
+    }
+    if (options.beforeId) {
+      where.push("id < ?");
+      bindings.push(options.beforeId);
+    }
+    if (options.level === "ok") where.push("ok = 1");
+    else if (options.level === "fail") where.push("ok = 0");
+    else if (options.level) {
+      where.push("level = ?");
+      bindings.push(options.level);
+    }
+
+    const sql = `SELECT * FROM logs ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY id DESC LIMIT ?`;
+    return this.rows<LogRow>(sql, ...bindings, limit).map(rowToLog);
   }
 
   clearLogs(): void {

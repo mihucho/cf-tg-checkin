@@ -39,7 +39,9 @@ const state = {
   build: null, // 构建信息（/api/version），用于排查线上版本
   data: null,
   view: "overview",
-  logs: null, // 日志 tab 拉取的 100 条；概览用 state.data.logs（最新 50）
+  logs: null, // 日志 tab 拉取的列表；概览用 state.data.logs（最新 50）
+  logsNextBefore: null, // 「加载更多」游标（比页码稳：新日志插入不会跳行）
+  logLevel: "", // "" | "ok" | "fail"
   expandedLogs: new Set(),
   refreshing: false,
   accountStep: 1,
@@ -792,10 +794,15 @@ async function runTick(button) {
 
 /* --------------------------------------------------------------- 日志 */
 
-async function loadLogs({ silent = false } = {}) {
+async function loadLogs({ silent = false, append = false } = {}) {
   try {
-    const res = await api("/api/logs?limit=100");
-    state.logs = Array.isArray(res && res.logs) ? res.logs : [];
+    const params = new URLSearchParams({ limit: "50" });
+    if (state.logLevel) params.set("level", state.logLevel);
+    if (append && state.logsNextBefore) params.set("before", String(state.logsNextBefore));
+    const res = await api(`/api/logs?${params.toString()}`);
+    const logs = Array.isArray(res && res.logs) ? res.logs : [];
+    state.logs = append && Array.isArray(state.logs) ? [...state.logs, ...logs] : logs;
+    state.logsNextBefore = res && res.nextBefore ? res.nextBefore : null;
   } catch (error) {
     if (!silent) toast(error.message || "读取日志失败", { kind: "error" });
   }
@@ -811,7 +818,9 @@ function renderLogs() {
 
   const header = pageHead({
     title: "日志",
-    description: logs.length ? `最近 ${logs.length} 条执行记录，点击可展开细节。` : "执行记录与错误细节。",
+    description: logs.length
+      ? `已加载 ${logs.length} 条${state.logsNextBefore ? "（还有更早的）" : ""}，点击行可展开细节。服务端只保留最近 2000 条。`
+      : "执行记录与错误细节。",
     actions: [
       btn("刷新", {
         iconName: "refresh",
@@ -820,6 +829,31 @@ function renderLogs() {
       btn("清空日志", { iconName: "trash", className: "is-danger", onClick: clearLogs }),
     ],
   });
+
+  const filters = el(
+    "div",
+    { class: "log-filters" },
+    ...[
+      ["", "全部"],
+      ["ok", "成功"],
+      ["fail", "失败"],
+    ].map(([value, label]) =>
+      el(
+        "button",
+        {
+          class: `chip${state.logLevel === value ? " is-active" : ""}`,
+          type: "button",
+          onclick: async (event) => {
+            state.logLevel = value;
+            state.logs = null;
+            state.logsNextBefore = null;
+            await withLoading(event.currentTarget, () => loadLogs(), { silent: true });
+          },
+        },
+        label,
+      ),
+    ),
+  );
 
   if (!logs.length) {
     return frag(
@@ -837,7 +871,26 @@ function renderLogs() {
     );
   }
 
-  return frag(header, el("div", { class: "card log-card" }, el("ul", { class: "log-list" }, logs.map(logItem))));
+  return frag(
+    header,
+    filters,
+    el("div", { class: "card log-card" }, el("ul", { class: "log-list" }, logs.map(logItem))),
+    state.logsNextBefore
+      ? el(
+          "div",
+          { class: "log-more" },
+          el(
+            "button",
+            {
+              class: "btn",
+              type: "button",
+              onclick: (event) => withLoading(event.currentTarget, () => loadLogs({ append: true })),
+            },
+            "加载更早的日志",
+          ),
+        )
+      : null,
+  );
 }
 
 function logItem(log) {

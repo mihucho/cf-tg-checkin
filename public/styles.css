@@ -2447,6 +2447,44 @@ input[type="radio"] {
   }
 }
 
+/* 日志筛选芯片 + 加载更多 */
+.log-filters {
+  display: flex;
+  gap: 6px;
+  margin: -4px 0 12px;
+}
+
+.chip {
+  appearance: none;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-2, rgba(255, 255, 255, 0.66));
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.chip:hover,
+.chip:focus-visible {
+  color: var(--text, #fff);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.chip.is-active {
+  color: var(--accent, #5cc8bd);
+  border-color: rgba(92, 200, 189, 0.45);
+  background: rgba(92, 200, 189, 0.1);
+}
+
+.log-more {
+  display: flex;
+  justify-content: center;
+  margin: 14px 0 4px;
+}
+
 /* 最近结果单元格里的「步骤日志」入口 */
 .result-cell {
   display: grid;

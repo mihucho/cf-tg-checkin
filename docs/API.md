@@ -130,8 +130,12 @@
 
 | 方法 | 路径 | 响应 |
 | --- | --- | --- |
-| GET | `/api/logs?limit=100` | `{ logs: [LogEntry] }` |
+| GET | `/api/logs?limit=50&before=<id>&level=ok\|fail&taskId=<id>` | `{ logs: [LogEntry], nextBefore: number \| null }` |
 | POST | `/api/logs/clear` | `{ ok: true }` |
+
+日志用**游标分页**（`before` = 上一页最后一条的 id，不是页码）：
+新日志插入不会导致翻页跳行；`nextBefore` 为 `null` 表示没有更早的了。
+服务端只保留最近 2000 条。
 
 ## 设置
 
