@@ -116,7 +116,7 @@ export class TgAgent implements DurableObject {
         if (!task) return jsonError("任务不存在", 404);
 
         if (suffix === "/run" && method === "POST") {
-          const log = await this.serialize(() => this.runTasks([task]));
+          const log = await this.serialize(() => this.runTasks([task], undefined, { manual: true }));
           await this.scheduleNextAlarm();
           return json({ ok: log[0]?.ok ?? false, log: log[0] });
         }
@@ -711,7 +711,7 @@ export class TgAgent implements DurableObject {
           return;
         }
         const task = this.store.getTask(found.id)!;
-        const [log] = await this.runTasks([task], client);
+        const [log] = await this.runTasks([task], client, { manual: true });
         await reply(`${log.ok ? "✅" : "❌"} 任务 #${task.id} ${task.name}\n${log.message}${log.detail ? `\n${log.detail}` : ""}`.slice(0, 3500));
         return;
       }
@@ -875,11 +875,20 @@ export class TgAgent implements DurableObject {
     return this.store.updateTask(id, { ...normalized, nextRunAt }, Date.now());
   }
 
-  private async runTasks(tasks: Task[], client?: TelegramClient): Promise<LogEntry[]> {
+  /**
+   * @param options.manual 手动触发（界面按钮 / Telegram 命令）。
+   *   手动跑一次不应该打乱定时：只有「已经到期」或「本来就没排期」的任务才重算 nextRunAt，
+   *   也不会把 once 任务提前消费掉。
+   */
+  private async runTasks(
+    tasks: Task[],
+    client?: TelegramClient,
+    options: { manual?: boolean } = {},
+  ): Promise<LogEntry[]> {
     const runner = async (tg: TelegramClient): Promise<LogEntry[]> => {
       const results: LogEntry[] = [];
       for (const task of tasks) {
-        results.push(await this.runSingleTask(tg, task));
+        results.push(await this.runSingleTask(tg, task, options));
       }
       return results;
     };
@@ -906,10 +915,14 @@ export class TgAgent implements DurableObject {
   private async runAllTasks(): Promise<LogEntry[]> {
     const tasks = this.store.listTasks().filter((task) => task.enabled);
     if (!tasks.length) return [];
-    return this.runTasks(tasks);
+    return this.runTasks(tasks, undefined, { manual: true });
   }
 
-  private async runSingleTask(client: TelegramClient, task: Task): Promise<LogEntry> {
+  private async runSingleTask(
+    client: TelegramClient,
+    task: Task,
+    options: { manual?: boolean } = {},
+  ): Promise<LogEntry> {
     const settings = this.store.getSettings();
     const sentKey = `task:${task.id}:sent`;
     const previousSent = this.store.getJson<number[]>(sentKey, []);
@@ -952,9 +965,11 @@ export class TgAgent implements DurableObject {
       });
     }
 
-    // 计算下一次执行
+    // 计算下一次执行：手动跑一次不打乱定时
+    const wasDue = task.nextRunAt !== null && task.nextRunAt <= Date.now();
+    const shouldReschedule = !options.manual || wasDue;
     const fresh = this.store.getTask(task.id);
-    if (fresh) {
+    if (fresh && shouldReschedule) {
       if (fresh.schedule.kind === "once") {
         this.store.updateTask(fresh.id, { enabled: false, nextRunAt: null }, Date.now());
       } else if (fresh.enabled) {
