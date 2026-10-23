@@ -47,6 +47,17 @@ const KV_TRIGGER_TARGET = "trigger:target";
  * 而我们的 client 每次执行都是新建的 —— 不落地的话数字 id 永远解析不出来。
  */
 const KV_ENTITIES = "entities:cache";
+/**
+ * 连接复用窗口（毫秒）。
+ *
+ * DO 里的长连接是可行的（Cloudflare 2026 起，活跃的 outbound 连接会阻止驱逐，
+ * 单连接上限 15 分钟），但会被部署/迁移/驱逐随时打断，所以不当成可用性前提。
+ * 这里只做「短时间内复用」：连着点几个任务、或一次 tick 里跑多个任务时不必反复重连；
+ * 空闲超过这个时间就主动断开，省得白占 DO 常驻时长。
+ *
+ * 设成 0 表示每次操作都新建连接。
+ */
+const CLIENT_IDLE_REUSE_MS = 30_000;
 
 const REPLY_MARKERS = ["✅", "❌", "⚠️", "📋", "💡", "⚙️", "🔧", "📝", "🚀", "⏰", "🗑️"];
 
@@ -69,6 +80,11 @@ function isOwnReply(text: string): boolean {
 export class TgAgent implements DurableObject {
   private readonly store: Store;
   private queue: Promise<unknown> = Promise.resolve();
+  /** 复用的 client（见 CLIENT_IDLE_REUSE_MS） */
+  private cachedClient: TelegramClient | null = null;
+  private cachedClientKey: string | null = null;
+  private cachedClientTouchedAt = 0;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly ctx: DurableObjectState,
@@ -336,24 +352,98 @@ export class TgAgent implements DurableObject {
   }
 
   /** 一次操作一个连接：连上 → 干活 → 保存 session → 断开 */
+  /**
+   * 一次操作用一个连接；如果上一个操作刚结束不久（CLIENT_IDLE_REUSE_MS 内），
+   * 直接复用仍然活着的 client，省掉一次重连 + 实体缓存回灌。
+   *
+   * 复用失败（socket 被 CM 掐断、DO 侧被驱逐前的半死状态）时自动重连重试一次。
+   */
   private async withClient<T>(fn: (client: TelegramClient) => Promise<T>): Promise<T> {
     const creds = this.requireCredentials();
     if (!creds.session) throw new Error("还没登录 Telegram");
+
+    const reusable = this.reusableClient(creds);
+    if (reusable) {
+      try {
+        const result = await fn(reusable);
+        this.afterUse(reusable);
+        return result;
+      } catch (error) {
+        // 复用的连接可能已经半死：丢掉它，重连一次再试
+        this.store.setKv(KV_LAST_ERROR, errorMessage(error));
+        await this.dropClient();
+        return this.runWithFreshClient(creds, fn);
+      }
+    }
+
+    return this.runWithFreshClient(creds, fn);
+  }
+
+  private async runWithFreshClient<T>(
+    creds: { apiId: number; apiHash: string; session: string },
+    fn: (client: TelegramClient) => Promise<T>,
+  ): Promise<T> {
     const client = createTgClient(creds);
     try {
       await client.connect();
       this.restoreEntities(client);
       const result = await fn(client);
-      this.persistEntities(client);
-      this.persistSession(client);
-      this.store.deleteKv(KV_LAST_ERROR);
+      this.afterUse(client);
       return result;
     } catch (error) {
       this.store.setKv(KV_LAST_ERROR, errorMessage(error));
       throw error;
     } finally {
-      await client.disconnect().catch(() => undefined);
+      if (CLIENT_IDLE_REUSE_MS > 0) this.keepWarm(client);
+      else await client.disconnect().catch(() => undefined);
     }
+  }
+
+  private reusableClient(creds: { apiId: number; session: string }): TelegramClient | null {
+    if (CLIENT_IDLE_REUSE_MS <= 0) return null;
+    const client = this.cachedClient;
+    if (!client) return null;
+    if (this.cachedClientKey !== `${creds.apiId}:${creds.session}`) return null;
+    if (!client.connected) return null;
+    return client;
+  }
+
+  /** 保存 session / 实体缓存，并刷新"最近使用"时间 */
+  private afterUse(client: TelegramClient): void {
+    this.persistEntities(client);
+    this.persistSession(client);
+    this.store.deleteKv(KV_LAST_ERROR);
+    this.cachedClientTouchedAt = Date.now();
+  }
+
+  private keepWarm(client: TelegramClient): void {
+    this.cachedClient = client;
+    this.cachedClientKey = this.credentialsKey();
+    this.cachedClientTouchedAt = Date.now();
+    if (this.idleTimer !== null) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      const idleFor = Date.now() - this.cachedClientTouchedAt;
+      if (idleFor >= CLIENT_IDLE_REUSE_MS) void this.dropClient();
+      else this.keepWarm(this.cachedClient as TelegramClient);
+    }, CLIENT_IDLE_REUSE_MS);
+  }
+
+  private credentialsKey(): string {
+    const creds = this.credentials();
+    return `${creds.apiId}:${this.session()}`;
+  }
+
+  /** 丢弃缓存的连接（登录态变化、出错、空闲超时都会走这里） */
+  private async dropClient(): Promise<void> {
+    if (this.idleTimer !== null) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+    const client = this.cachedClient;
+    this.cachedClient = null;
+    this.cachedClientKey = null;
+    if (client) await client.disconnect().catch(() => undefined);
   }
 
   /**
@@ -582,6 +672,7 @@ export class TgAgent implements DurableObject {
         /* 忽略：本地登出优先 */
       }
     }
+    await this.dropClient();
     this.store.deleteKv(KV_SESSION);
     this.store.deleteKv(KV_ME);
     this.store.deleteKv(KV_PENDING);
