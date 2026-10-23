@@ -102,6 +102,27 @@ test("默认步骤间隔 3 秒，可用 #delay 覆盖", () => {
   if (off.ok) assert.equal(off.result.task!.stepDelaySeconds, 0);
 });
 
+test("时间可以写在链接/目标后面", () => {
+  const withLink = parseTrigger("https://t.me/sheeridvn_bot 9 /start btn:个人信息 btn:签到", {});
+  assert.equal(withLink.ok, true);
+  if (!withLink.ok) return;
+  const task = withLink.result.task!;
+  assert.deepEqual(task.schedule, { kind: "daily", time: "09:00", jitterSeconds: 0 });
+  assert.equal(task.target.username, "sheeridvn_bot");
+  assert.deepEqual(task.steps, [
+    { type: "text", text: "/start" },
+    { type: "click", text: "个人信息" },
+    { type: "click", text: "签到" },
+  ]);
+
+  const handleFirst = parseTrigger("@sheeridvn_bot 9.30 签到", {});
+  assert.equal(handleFirst.ok, true);
+  if (!handleFirst.ok) return;
+  assert.equal(handleFirst.result.task!.schedule.time, "09:30");
+  assert.equal(handleFirst.result.task!.target.username, "sheeridvn_bot");
+  assert.deepEqual(handleFirst.result.task!.steps, [{ type: "text", text: "签到" }]);
+});
+
 test("按钮流水线：/start → 个人信息 → 签到", () => {
   const parsed = parseTrigger("9 /start btn:个人信息 btn:签到", { defaultTarget: "@jerry_bot" });
   assert.equal(parsed.ok, true);
@@ -340,10 +361,11 @@ test("目标推断：只有被回复的消息才看发送者", () => {
   const botMessage = { out: false, senderId: { className: "PeerUser", userId: 555 }, message: "签到成功" };
   // 触发消息本身是我发的 → 不看发送者
   assert.equal(messageTargetHint(botMessage, { allowSender: false }), null);
-  // 被回复的消息 → 发送者就是机器人
+  // 被回复的消息 → 发送者就是机器人（标记 fromSender，Agent 会再校验 bot 标志）
   assert.deepEqual(messageTargetHint(botMessage, { allowSender: true }), {
     kind: "peer",
     peer: { className: "PeerUser", userId: 555 },
+    fromSender: true,
   });
   // 我自己发的转发副本不进"发送者"分支
   assert.equal(messageTargetHint({ ...botMessage, out: true }, { allowSender: true }), null);

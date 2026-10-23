@@ -71,7 +71,7 @@ export function tokenize(input: string): string[] {
   return tokens;
 }
 
-interface TimeToken {
+export interface TimeToken {
   schedule: Schedule;
   label: string;
 }
@@ -102,6 +102,18 @@ export function parseTimeToken(token: string): TimeToken | null {
   if (time) {
     const label = formatTimeOfDay(time.hour, time.minute);
     return { schedule: { kind: "daily", time: label }, label: `每天 ${label}` };
+  }
+  return null;
+}
+
+/**
+ * 在 token 序列里找时间表达式（不要求出现在第一个位置）。
+ * 用户可以写 `https://t.me/xxx 9 /start ...` 或 `@bot 9.30 签到`。
+ */
+export function findTimeToken(tokens: string[]): { index: number; time: TimeToken } | null {
+  for (let index = 0; index < tokens.length; index++) {
+    const time = parseTimeToken(tokens[index]);
+    if (time) return { index, time };
   }
   return null;
 }
@@ -195,16 +207,12 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
   const command = matchCommand(tokens);
   if (command) return { ok: true, result: command };
 
-  let schedule: Schedule | null = null;
-  let scheduleLabel = "";
+  // 时间表达式可以出现在任意位置（链接/目标写在前面也认）
+  const timeMatch = findTimeToken(tokens);
+  const schedule: Schedule | null = timeMatch ? timeMatch.time.schedule : null;
+  const scheduleLabel = timeMatch ? timeMatch.time.label : "";
+  const timeIndex = timeMatch ? timeMatch.index : -1;
   let index = 0;
-
-  const time = parseTimeToken(tokens[0]);
-  if (time) {
-    schedule = time.schedule;
-    scheduleLabel = time.label;
-    index = 1;
-  }
 
   const steps: Step[] = [];
   const successKeywords: string[] = [];
@@ -232,6 +240,7 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
   };
 
   for (; index < tokens.length; index++) {
+    if (index === timeIndex) continue;
     const token = tokens[index];
     const lower = token.toLowerCase();
     const [rawKey, ...rest] = token.split(/[:：]/);
@@ -253,7 +262,9 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
       continue;
     }
 
-    if (token.startsWith("@") && !hasKey) {
+    // 裸链接 / @handle 先当目标处理。
+    // 注意要放在 split(":") 之前：否则 "https://t.me/x" 会被当成键值对（key=https）
+    if (/^(?:https?:\/\/|t\.me\/|telegram\.me\/|@)/i.test(token)) {
       target = targetFromId(token);
       continue;
     }
