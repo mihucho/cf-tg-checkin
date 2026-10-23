@@ -7,12 +7,13 @@
   "scripts": {
     "build": "node build.mjs",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "node build.mjs && node scripts/check-bundle.mjs && wrangler deploy",
     "start": "wrangler dev",
     "test": "node build.mjs --test && node dist/test.cjs",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test && node build.mjs",
-    "smoke": "node build.mjs --smoke && wrangler dev dist/smoke.mjs --port 8799"
+    "check": "npm run typecheck && npm test && node build.mjs && npm run check:bundle",
+    "smoke": "node build.mjs --smoke && wrangler dev --config wrangler.smoke.jsonc --port 8799",
+    "check:bundle": "node scripts/check-bundle.mjs"
   },
   "dependencies": {
     "teleproto": "^1.232.0"

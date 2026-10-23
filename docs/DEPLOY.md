@@ -121,10 +121,15 @@ npm run deploy                           # 打包 + 部署（wrangler 会先跑 
 
 | 场景 | 命令 / 位置 |
 | --- | --- |
-| 本地命令行 | `npx wrangler secret put ADMIN_PASSWORD` |
-| Cloudflare 控制台 | Worker → **Settings → Variables and Secrets → Add → Secret** |
+| 本地命令行（**最稳**） | `npx wrangler secret put ADMIN_PASSWORD` |
 | 一键部署按钮 | 部署向导里的 Secrets 一步 |
 | GitHub Actions | 见上面的 `secrets:` 参数 |
+| Cloudflare 控制台 | Worker → **Settings → Variables and Secrets → Add → Secret** |
+
+> ⚠️ **别在控制台变量页点「保存并部署 / Save and deploy」**。
+> 那一下会重新上传一次脚本，并且**会把当前 Worker 的脚本换掉**（见下面「报错：does not export class 'TgAgent'」）。
+> 需要用 `wrangler secret put`，它只更新密钥、不动脚本；实在要在控制台点，也请点 **Secret** 而不是普通变量，
+> 并在点之前确认线上版本是本仓库构建出来的。
 
 没有设置口令时，页面会显示「需要配置 ADMIN_PASSWORD」的提示，**任何人都无法登录**（这是故意设计）。
 设置完刷新页面即可，不用重新部署。
@@ -171,11 +176,70 @@ Worker → **Settings → Domains & Routes → Add → Custom Domain**，
 
 ---
 
+## 报错：`does not export class 'TgAgent'`
+
+```
+New version of script does not export class 'TgAgent' which is depended on by existing Durable Objects.
+Did you forget to include it? If you renamed it, try a rename-class migration.
+```
+
+**含义**：你账号里已经存在 `TgAgent` 的 Durable Object（说明之前成功部署过带这个类的版本），
+但**这次要上传的脚本里没有这个导出**。workerd 不会允许一个「丢掉已存在 DO 类」的版本上线。
+
+常见触发方式：
+
+| 场景 | 说明 |
+| --- | --- |
+| 在控制台「变量和密钥」页改了变量后点 **保存并部署** | 这一步会重新上传脚本，把线上版本换成一个不含 `TgAgent` 的产物 |
+| 部署了错误的入口 | 例如 `dist/smoke.mjs`（调试用的最小 Worker），而不是 `dist/worker.mjs` |
+| 部署了没构建 / 过期的产物 | `dist/` 是生成物且已 gitignore；直接 `wrangler deploy` 会由 `build.command` 自动构建，手动上传旧文件就会踩到 |
+| 改了 DO 类名但没加 migration | 需要 `renamed_classes` / `deleted_classes` |
+
+### 恢复步骤（保留已有数据）
+
+```bash
+npx wrangler login
+npm run deploy                       # 构建 + 自检 + 重新上传带 TgAgent 的正确版本
+npx wrangler secret put ADMIN_PASSWORD   # 之后再设口令，不会动脚本
+```
+
+`npm run deploy` 里带了一道自检（`scripts/check-bundle.mjs`），
+它读 `wrangler.jsonc` 里声明的 DO 类，逐个确认打包产物真的导出了它们，不通过就直接中断：
+
+```
+配置文件   wrangler.jsonc
+入口产物   dist/worker.mjs  (1357 KiB, gzip 368 KiB)
+需要导出   TgAgent
+✓ 产物导出检查通过
+```
+
+### 想彻底删掉这些 Durable Object
+
+改 `wrangler.jsonc` 的 migrations（会**删除**所有该类的 DO 数据，任务/日志/session 都会没）：
+
+```jsonc
+"migrations": [
+  { "tag": "v1", "new_sqlite_classes": ["TgAgent"] },
+  { "tag": "v2", "deleted_classes": ["TgAgent"] }
+]
+```
+
+改名则用：
+
+```jsonc
+{ "tag": "v2", "renamed_classes": [{ "from": "TgAgent", "to": "NewAgent" }] }
+```
+
+只想推倒重来最省事的办法是删掉 Worker 再重新部署（`npx wrangler delete --name cf-tg-checkin`）。
+
+---
+
 ## 排查表
 
 | 现象 | 原因 / 处理 |
 | --- | --- |
-| 页面只显示「需要配置 ADMIN_PASSWORD」 | 还没设 secret，见上面四种方法 |
+| 页面只显示「需要配置 ADMIN_PASSWORD」 | 还没设 secret，用 `wrangler secret put` 设置 |
+| `does not export class 'TgAgent'` | 见上面 **[专门小节](#报错does-not-export-class-tgagent)**；一般 `npm run deploy` 重传一次即可 |
 | 登录报 `API_ID_INVALID` | `apiId` 与 `apiHash` 不配套；回 my.telegram.org 重新复制 |
 | 验证码一直「不正确」 | 用最新一次收到的码；超过 10 分钟要重新获取 |
 | 任务日志一直是「还没登录 Telegram」 | session 被踢（在别的设备退出登录）→ 账号页重新登录 |
