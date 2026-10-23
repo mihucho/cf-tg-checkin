@@ -73,6 +73,16 @@ export function inputPeerFromTarget(target: Target | string): Api.TypeInputPeer 
   }
 }
 
+/**
+ * 解析目标实体。做法和 bncr 的 HumanTG 适配器一致（三层兜底）：
+ *
+ *   1. 直接 getEntity（命中 session 里的实体缓存最快）
+ *   2. 失败且是 "Could not find the input entity" → `getDialogs()` 预热缓存后重试
+ *      （teleproto 解析数字 id 需要 access_hash，而 access_hash 只有"见过"对方才有）
+ *   3. 还是不行就报出可操作的错误
+ *
+ * 我们的 client 每次执行都是新建的，所以第 2 步是常态，不能省。
+ */
 export async function resolveEntity(client: TelegramClient, target: Target | string): Promise<EntityLike> {
   const ref = targetRef(target);
   const peer = inputPeerFromTarget(target);
@@ -82,16 +92,37 @@ export async function resolveEntity(client: TelegramClient, target: Target | str
   if (ref) attempts.push(ref);
   if (peer) attempts.push(peer);
 
-  let lastError: unknown = null;
-  for (const attempt of attempts) {
-    try {
-      return (await client.getEntity(attempt as never)) as EntityLike;
-    } catch (error) {
-      lastError = error;
+  const tryAll = async (): Promise<{ entity?: EntityLike; error?: unknown }> => {
+    let lastError: unknown = null;
+    for (const attempt of attempts) {
+      try {
+        return { entity: (await client.getEntity(attempt as never)) as EntityLike };
+      } catch (error) {
+        lastError = error;
+      }
     }
+    return { error: lastError };
+  };
+
+  const first = await tryAll();
+  if (first.entity) return first.entity;
+
+  const message = errorMessage(first.error).toUpperCase();
+  const isEntityError = message.includes("INPUT ENTITY") || message.includes("COULD NOT FIND");
+
+  if (isEntityError) {
+    try {
+      // getDialogs 会把最近对话的实体写进 session 缓存
+      await client.getDialogs({ limit: 100 });
+    } catch {
+      /* 拉不到对话就继续走报错 */
+    }
+    const second = await tryAll();
+    if (second.entity) return second.entity;
   }
+
   throw new Error(
-    `无法解析目标「${ref || (peer ? "access_hash" : "")}」：${errorMessage(lastError)}；` +
+    `无法解析目标「${ref || (peer ? "access_hash" : "")}」：${errorMessage(first.error)}；` +
       `私有机器人请先在 Telegram 里和它对话，或把任务目标改成 @username`,
   );
 }

@@ -7,6 +7,7 @@ import { parseTimeOfDay, nextDaily, nextWindow, computeNextRun, formatTimeOfDay 
 import { parseTrigger, tokenize } from "../src/schedule/dsl.ts";
 import type { Target } from "../src/types.ts";
 import {
+  resolveEntity,
   flattenButtons,
   selectButton,
   describeButtons,
@@ -18,14 +19,10 @@ import { messageTargetHint, usernameFromLink } from "../src/telegram/targets.ts"
 
 let passed = 0;
 const failures: string[] = [];
+const cases: Array<[string, () => void | Promise<void>]> = [];
 
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-  } catch (error) {
-    failures.push(`${name}\n    ${error instanceof Error ? error.message : String(error)}`);
-  }
+function test(name: string, fn: () => void | Promise<void>) {
+  cases.push([name, fn]);
 }
 
 const TZ = 8;
@@ -465,10 +462,54 @@ test("inputPeerFromTarget：有 access_hash 才能构造出 InputPeer", () => {
   assert.equal(chat?.className, "InputPeerChat");
 });
 
+// ---------------------------------------------------------------- 实体解析（异步）
+test("resolveEntity：数字 id 解析失败时先 getDialogs 预热再重试", async () => {
+  const calls: string[] = [];
+  let warmed = false;
+  const client = {
+    getEntity: async (value: unknown) => {
+      const key = typeof value === "string" ? value : String((value as { className?: string })?.className);
+      calls.push(`getEntity:${key}`);
+      if (!warmed) throw new Error("Could not find the input entity for {\"userId\":\"8045138039\"}");
+      return { className: "User", id: "8045138039" };
+    },
+    getDialogs: async () => {
+      calls.push("getDialogs");
+      warmed = true;
+      return [];
+    },
+  } as unknown as Parameters<typeof resolveEntity>[0];
+
+  const entity = await resolveEntity(client, { kind: "user", id: "8045138039" });
+  assert.equal((entity as { id?: string }).id, "8045138039");
+  assert.deepEqual(calls, ["getEntity:8045138039", "getDialogs", "getEntity:8045138039"]);
+});
+
+test("resolveEntity：预热后仍失败时报可操作的错误", async () => {
+  const client = {
+    getEntity: async () => {
+      throw new Error("Could not find the input entity for 1");
+    },
+    getDialogs: async () => [],
+  } as unknown as Parameters<typeof resolveEntity>[0];
+
+  await assert.rejects(() => resolveEntity(client, { kind: "user", id: "1" }), /无法解析目标/);
+});
+
 // ---------------------------------------------------------------- 结果
-if (failures.length) {
-  console.error(`✗ ${failures.length} 个用例失败 / ${passed + failures.length}`);
-  for (const failure of failures) console.error(`  · ${failure}`);
-  process.exit(1);
-}
-console.log(`✓ ${passed} 个用例通过`);
+(async () => {
+  for (const [name, fn] of cases) {
+    try {
+      await fn();
+      passed++;
+    } catch (error) {
+      failures.push(`${name}\n    ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (failures.length) {
+    console.error(`✗ ${failures.length} 个用例失败 / ${passed + failures.length}`);
+    for (const failure of failures) console.error(`  · ${failure}`);
+    process.exit(1);
+  }
+  console.log(`✓ ${passed} 个用例通过`);
+})();
