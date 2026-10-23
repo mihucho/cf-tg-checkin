@@ -252,10 +252,19 @@ export class TgAgent implements DurableObject {
           return json({ ok: true, command: result.kind, argument: result.argument });
         }
         const now = Date.now();
+        // 试算也尽量把目标补全（显示名 / access_hash），和真正建任务时保持一致
+        let previewInput = result.task as TaskInput;
+        if (this.session()) {
+          try {
+            previewInput = await this.withClient((client) => this.enrichTarget(client, result.task as TaskInput));
+          } catch {
+            /* 没连上就按原样展示 */
+          }
+        }
         const preview: Task = {
-          ...result.task,
+          ...previewInput,
           id: 0,
-          nextRunAt: computeNextRun(result.task.schedule, now, settings.timezone),
+          nextRunAt: computeNextRun(previewInput.schedule, now, settings.timezone),
           lastRunAt: null,
           lastResult: null,
           lastMessage: null,
@@ -919,7 +928,7 @@ export class TgAgent implements DurableObject {
         return;
       }
       case "create": {
-        const task = this.createTask(result.task as TaskInput);
+        const task = this.createTask(await this.enrichTarget(client, result.task as TaskInput));
         await reply(
           `✅ 已创建任务 #${task.id}\n${task.name}\n⏰ ${formatInTimezone(task.nextRunAt, settings.timezone)}（${settings.timezone >= 0 ? "+" : ""}${settings.timezone}）\n${result.explanation ?? ""}`.trim(),
         );
@@ -1096,6 +1105,24 @@ export class TgAgent implements DurableObject {
 
   // ---------------------------------------------------------------- 任务
 
+  /**
+   * 补全目标任务信息。
+   *
+   * DSL 里从链接（`https://t.me/xxx_bot 9.30 签到`）解析出来的目标只有 username，
+   * 没有显示名 —— 直接建任务就会得到 `@xxx_bot 签到` 这种名字。
+   * 这里用当前连接把实体解析出来，补上 title / access_hash。
+   */
+  private async enrichTarget(client: TelegramClient, input: TaskInput): Promise<TaskInput> {
+    if (input.target.title && input.target.accessHash) return input;
+    try {
+      const entity = await resolveEntity(client, input.target);
+      const target = await this.toTarget(client, entity, input.target.id);
+      return { ...input, target: { ...target, id: target.id || input.target.id } };
+    } catch {
+      return input;
+    }
+  }
+
   private createTask(input: TaskInput): Task {
     const settings = this.store.getSettings();
     const now = Date.now();
@@ -1175,30 +1202,55 @@ export class TgAgent implements DurableObject {
   ): Promise<{ entity: Awaited<ReturnType<typeof resolveEntity>>; task: Task }> {
     const entity = await resolveEntity(client, task.target);
 
-    // 目标里缺 username/accessHash 时补一次，之后每次解析都能直接命中
-    if (!task.target.username && !task.target.accessHash) {
+    // 目标里缺 username / accessHash / 显示名时补一次，之后每次解析都能直接命中
+    if (!task.target.username || !task.target.accessHash || !task.target.title) {
       const peerId = await client.getPeerId(entity as never).catch(() => null);
-      const anyEntity = entity as unknown as { username?: string; accessHash?: unknown };
+      const anyEntity = entity as unknown as {
+        username?: string;
+        accessHash?: unknown;
+        title?: string;
+        firstName?: string;
+        lastName?: string;
+      };
+      const displayName =
+        anyEntity.title ||
+        [anyEntity.firstName, anyEntity.lastName].filter(Boolean).join(" ").trim() ||
+        undefined;
       const patch: Target = {
         ...task.target,
         id: peerId ? String(peerId) : task.target.id,
-        username: anyEntity.username,
-        ...(anyEntity.accessHash !== undefined && anyEntity.accessHash !== null
-          ? { accessHash: String(anyEntity.accessHash) }
-          : {}),
+        username: task.target.username ?? anyEntity.username,
+        title: task.target.title ?? displayName,
+        ...(task.target.accessHash
+          ? { accessHash: task.target.accessHash }
+          : anyEntity.accessHash !== undefined && anyEntity.accessHash !== null
+            ? { accessHash: String(anyEntity.accessHash) }
+            : {}),
       };
       if (JSON.stringify(patch) !== JSON.stringify(task.target)) {
-        const updated = this.store.updateTask(task.id, { target: patch }, Date.now());
+        // 任务名如果是当初按「@username + 动作」自动生成的，跟着换成显示名
+        const oldLabel = task.target.username ? `@${task.target.username}` : task.target.id;
+        const newLabel = patch.title || (patch.username ? `@${patch.username}` : patch.id);
+        const renameTo =
+          patch.title && newLabel && newLabel !== oldLabel && task.name.startsWith(oldLabel)
+            ? `${newLabel}${task.name.slice(oldLabel.length)}`
+            : null;
+
+        const updated = this.store.updateTask(
+          task.id,
+          renameTo ? { target: patch, name: renameTo } : { target: patch },
+          Date.now(),
+        );
         this.store.addLog({
           taskId: task.id,
-          taskName: task.name,
+          taskName: renameTo ?? task.name,
           at: Date.now(),
           ok: true,
           level: "info",
-          message: `目标已自动补全：${patch.username ? `@${patch.username}` : patch.id}`,
-          detail: null,
+          message: `目标已自动补全：${patch.title || (patch.username ? `@${patch.username}` : patch.id)}`,
+          detail: renameTo ? `任务名同步更新为「${renameTo}」` : null,
         });
-        return { entity, task: updated ?? { ...task, target: patch } };
+        return { entity, task: updated ?? { ...task, target: patch, ...(renameTo ? { name: renameTo } : {}) } };
       }
     }
 
