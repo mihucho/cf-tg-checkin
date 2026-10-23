@@ -2452,16 +2452,39 @@ input[type="radio"] {
   display: grid;
   gap: 3px;
   justify-items: start;
+  white-space: nowrap;
 }
 
+/* 用 button 实现，所以要清掉 UA 默认的灰底/边框，做成一枚低调的文字链接 */
 .result-detail-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: 11.5px;
+  line-height: 1.5;
+  white-space: nowrap;
   color: var(--text-3, rgba(255, 255, 255, 0.45));
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.18);
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition: color 120ms ease, text-decoration-color 120ms ease;
 }
 
 .result-detail-btn:hover,
 .result-detail-btn:focus-visible {
   color: var(--accent, #5cc8bd);
+  text-decoration-color: currentColor;
+}
+
+.result-detail-btn:focus-visible {
+  outline: 2px solid var(--accent, #5cc8bd);
+  outline-offset: 2px;
+  border-radius: 3px;
 }
 
 /* 最近一次运行的步骤日志（弹窗） */
