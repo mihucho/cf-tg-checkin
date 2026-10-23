@@ -808,6 +808,16 @@ export class TgAgent implements DurableObject {
     if (!cursor) {
       // 首次只记录游标，避免把历史消息全解析一遍
       this.store.setKv(cursorKey, String(highest));
+      // 把这件事写进日志：否则"发了配置却没反应"会让人以为是坏了
+      this.store.addLog({
+        taskId: null,
+        taskName: null,
+        at: Date.now(),
+        ok: true,
+        level: "info",
+        message: `触发器首次轮询：记录游标 #${highest}（之前的历史消息不处理，从现在开始监听）`,
+        detail: `控制会话：${controlRef}\n如果刚刚发过配置，请再发一次。`,
+      });
       const greetKey = `trigger:greeted:${controlRef}`;
       if (!this.store.getKv(greetKey)) {
         this.store.setKv(greetKey, "1");
@@ -819,6 +829,18 @@ export class TgAgent implements DurableObject {
     }
 
     const fresh = messages.filter((message) => message.id > cursor).sort((a, b) => a.id - b.id);
+    if (fresh.length) {
+      logs.push(`本轮轮询：${fresh.length} 条新消息（cursor=${cursor} → ${highest}）`);
+      this.store.addLog({
+        taskId: null,
+        taskName: null,
+        at: Date.now(),
+        ok: true,
+        level: "info",
+        message: `触发器轮询：发现 ${fresh.length} 条新消息`,
+        detail: fresh.map((item) => `#${item.id} ${(item.message ?? "").slice(0, 80).replace(/\n/g, " / ") || "（无文本）"}`).join("\n"),
+      });
+    }
     for (const message of fresh) {
       try {
         await this.handleTriggerMessage(client, entity, message, settings, logs);
@@ -847,9 +869,29 @@ export class TgAgent implements DurableObject {
     const raw = (message.message ?? "").trim();
     // 超长消息不解析（保护 CPU，也避免被拿来塞垃圾）
     const text = raw.slice(0, 2000);
+
+    /** 识别链路，最后统一写进日志 detail —— 出了问题能一眼看到卡在哪 */
+    const trace: string[] = [
+      `消息 #${message.id}：${text.replace(/\n/g, " / ").slice(0, 120) || "（无文本）"}`,
+      `out=${String(message.out)} senderId=${String(message.senderId ?? "—")} 控制会话=${settings.controlChat || "self"}`,
+    ];
+    const record = (ok: boolean, summary: string, extra?: { taskId?: number; taskName?: string }) => {
+      this.store.addLog({
+        taskId: extra?.taskId ?? null,
+        taskName: extra?.taskName ?? null,
+        at: Date.now(),
+        ok,
+        level: ok ? "info" : "warn",
+        message: summary,
+        detail: trace.join("\n"),
+      });
+    };
+
     if (!text || isOwnReply(text)) return;
 
     if (settings.adminUserId && String(message.senderId ?? "") && String(message.senderId) !== settings.adminUserId) {
+      trace.push(`忽略：发送者不是配置的 adminUserId（${settings.adminUserId}）`);
+      record(false, "忽略触发消息：发送者不是管理员");
       return;
     }
 
@@ -857,15 +899,8 @@ export class TgAgent implements DurableObject {
     // 否则群里任何人都能让我这个账号往任意聊天发消息（等于开放了发信能力）。
     const controlChatIsSelf = (settings.controlChat || "self") === "self";
     if (!controlChatIsSelf && !settings.adminUserId && !message.out) {
-      this.store.addLog({
-        taskId: null,
-        taskName: null,
-        at: Date.now(),
-        ok: false,
-        level: "warn",
-        message: "忽略了非本人发送的触发消息（群聊里请到设置填 adminUserId）",
-        detail: text.slice(0, 200),
-      });
+      trace.push("忽略：群聊控制会话未配 adminUserId，且消息不是本人发的");
+      record(false, "忽略触发消息：群聊里请到设置填 adminUserId");
       return;
     }
 
@@ -897,8 +932,12 @@ export class TgAgent implements DurableObject {
       if (hint) {
         this.store.setJson(KV_TRIGGER_TARGET, { target: hint, at: Date.now() });
         logs.push(`登记目标：${hint.username ?? hint.title ?? hint.id}`);
+        trace.push(`没有时间表达式 → 只登记目标：${JSON.stringify(hint)}`);
+        record(true, `登记目标：${hint.title || (hint.username ? `@${hint.username}` : hint.id)}`);
         return;
       }
+      trace.push("没有时间表达式，也没有可识别的目标 → 回帮助文本");
+      record(false, "触发消息无法识别（缺时间/目标），已回帮助文本");
       await reply(HELP_TEXT);
       return;
     }
@@ -909,8 +948,14 @@ export class TgAgent implements DurableObject {
       sourceChat: await this.toTarget(client, entity, ""),
     };
 
+    trace.push(
+      `上下文：推断目标=${hint ? JSON.stringify(hint) : "无"} 记住的目标=${this.rememberedTarget() ? "有" : "无"} 默认目标=${settings.defaultTarget || "无"}`,
+    );
+
     const parsed = parseTrigger(text, ctx);
     if (!parsed.ok) {
+      trace.push(`解析失败：${parsed.error}`);
+      record(false, `触发解析失败：${parsed.error}`);
       await reply(`⚠️ ${parsed.error}`);
       return;
     }
@@ -920,17 +965,19 @@ export class TgAgent implements DurableObject {
 
     switch (result.kind) {
       case "help": {
+        trace.push("命令：帮助");
+        record(true, "触发器命令：帮助");
         await reply(HELP_TEXT);
         return;
       }
       case "list": {
+        trace.push("命令：列表");
+        record(true, "触发器命令：列表");
         await reply(this.renderTaskList());
         return;
       }
       case "create": {
-        const trace: string[] = [];
         const incoming = result.task as TaskInput;
-        trace.push(`触发文本：${text.replace(/\n/g, " / ").slice(0, 120)}`);
         trace.push(
           `推断到的目标：${
             hint
@@ -946,15 +993,7 @@ export class TgAgent implements DurableObject {
         trace.push(`动作：${(enriched.steps ?? []).map((step) => step.type).join(" → ")}`);
 
         const task = this.createTask(enriched);
-        this.store.addLog({
-          taskId: task.id,
-          taskName: task.name,
-          at: Date.now(),
-          ok: true,
-          level: "info",
-          message: `触发器创建任务 #${task.id}`,
-          detail: trace.join("\n"),
-        });
+        record(true, `触发器创建任务 #${task.id}`, { taskId: task.id, taskName: task.name });
         await reply(
           `✅ 已创建任务 #${task.id}\n${task.name}\n⏰ ${formatInTimezone(task.nextRunAt, settings.timezone)}（${settings.timezone >= 0 ? "+" : ""}${settings.timezone}）\n${result.explanation ?? ""}`.trim(),
         );
@@ -970,6 +1009,8 @@ export class TgAgent implements DurableObject {
           return;
         }
         if (result.kind === "delete") {
+          trace.push(`命令：删除任务 #${found.id}`);
+          record(true, `触发器命令：删除 #${found.id}`, { taskId: found.id, taskName: found.name });
           this.store.deleteTask(found.id);
           await this.scheduleNextAlarm();
           await reply(`🗑️ 已删除任务 #${found.id} ${found.name}`);
@@ -982,6 +1023,8 @@ export class TgAgent implements DurableObject {
           return;
         }
         const task = this.store.getTask(found.id)!;
+        trace.push(`命令：立即执行任务 #${task.id}`);
+        record(true, `触发器命令：立即执行 #${task.id}`, { taskId: task.id, taskName: task.name });
         const [log] = await this.runTasks([task], client, { manual: true });
         await reply(`${log.ok ? "✅" : "❌"} 任务 #${task.id} ${task.name}\n${log.message}${log.detail ? `\n${log.detail}` : ""}`.slice(0, 3500));
         return;
@@ -1421,6 +1464,7 @@ export class TgAgent implements DurableObject {
         colo: this.store.getKv("runtime:colo"),
         locationHint: this.env.DO_LOCATION_HINT ?? null,
         nextPollAt: this.nextPollAt(),
+        lastPollAt: Number(this.store.getKv("trigger:lastPoll") ?? 0) || null,
         pollSeconds: settings.pollSeconds,
       },
     };
