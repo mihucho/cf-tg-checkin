@@ -1,0 +1,63 @@
+{
+  "name": "cf-tg-checkin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Telegram 定时签到系统，跑在 Cloudflare Workers + Durable Objects 上（teleproto / MTProto）",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "start": "wrangler dev",
+    "test": "node build.mjs --test && node dist/test.cjs",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test && node build.mjs",
+    "smoke": "node build.mjs --smoke && wrangler dev dist/smoke.mjs --port 8799"
+  },
+  "dependencies": {
+    "teleproto": "^1.232.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261019.1",
+    "@types/node": "^26.6.5",
+    "esbuild": "^0.24.2",
+    "typescript": "^5.7.3",
+    "wrangler": "^4.42.0"
+  },
+  "license": "MIT",
+  "author": "mihucho",
+  "homepage": "https://github.com/mihucho/cf-tg-checkin#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mihucho/cf-tg-checkin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mihucho/cf-tg-checkin/issues"
+  },
+  "keywords": [
+    "telegram",
+    "checkin",
+    "cloudflare-workers",
+    "durable-objects",
+    "mtproto",
+    "teleproto",
+    "userbot",
+    "cron"
+  ],
+  "cloudflare": {
+    "bindings": {
+      "ADMIN_PASSWORD": {
+        "description": "管理界面登录口令。用 `openssl rand -base64 24` 生成一个强口令。"
+      },
+      "SESSION_SECRET": {
+        "description": "可选：Cookie 签名密钥，留空则复用 ADMIN_PASSWORD。"
+      },
+      "TG_API_ID": {
+        "description": "可选：Telegram api_id（https://my.telegram.org），不填则稍后在管理界面填。"
+      },
+      "TG_API_HASH": {
+        "description": "可选：Telegram api_hash，不填则稍后在管理界面填。"
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+# ===== 必须 =====
+# 管理界面登录口令。部署到 Cloudflare 时会被识别为 Worker secret 并提示你填写。
+# 建议生成一个强口令：openssl rand -base64 24
+ADMIN_PASSWORD=change-me-please
+
+# ===== 可选 =====
+# 登录 Cookie 的 HMAC 密钥；留空则复用 ADMIN_PASSWORD
+# SESSION_SECRET=
+
+# 也可以把 Telegram apiId / apiHash 放这里（普通变量），省得在管理界面里填
+# TG_API_ID=
+# TG_API_HASH=

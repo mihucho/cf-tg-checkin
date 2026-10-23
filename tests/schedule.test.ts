@@ -1,0 +1,278 @@
+/**
+ * 纯逻辑单元测试（不依赖 workerd）：
+ *   node --experimental-strip-types tests/schedule.test.ts
+ */
+import assert from "node:assert/strict";
+import { parseTimeOfDay, nextDaily, nextWindow, computeNextRun, formatTimeOfDay } from "../src/schedule/time.ts";
+import { parseTrigger, tokenize } from "../src/schedule/dsl.ts";
+import type { Target } from "../src/types.ts";
+import { flattenButtons, selectButton, describeButtons } from "../src/telegram/executor.ts";
+
+let passed = 0;
+const failures: string[] = [];
+
+function test(name: string, fn: () => void) {
+  try {
+    fn();
+    passed++;
+  } catch (error) {
+    failures.push(`${name}\n    ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+const TZ = 8;
+const DAY = 86_400_000;
+
+// ---------------------------------------------------------------- 时间解析
+test("parseTimeOfDay 各种写法", () => {
+  assert.deepEqual(parseTimeOfDay("9.30"), { hour: 9, minute: 30 });
+  assert.deepEqual(parseTimeOfDay("09:30"), { hour: 9, minute: 30 });
+  assert.deepEqual(parseTimeOfDay("21：05"), { hour: 21, minute: 5 });
+  assert.deepEqual(parseTimeOfDay("0930"), { hour: 9, minute: 30 });
+  assert.deepEqual(parseTimeOfDay("2359"), { hour: 23, minute: 59 });
+  assert.equal(parseTimeOfDay("2400"), null);
+  assert.equal(parseTimeOfDay("签到"), null);
+  assert.equal(formatTimeOfDay(9, 5), "09:05");
+});
+
+test("nextDaily 取今天的未来时刻", () => {
+  // 2026-10-24T00:00:00+08:00
+  const now = Date.UTC(2026, 9, 23, 16, 0, 0);
+  const next = nextDaily("09:30", now, TZ);
+  assert.equal(next, Date.UTC(2026, 9, 24, 1, 30, 0));
+});
+
+test("nextDaily 过了今天时间点就顺延到明天", () => {
+  // 2026-10-24T10:00:00+08:00
+  const now = Date.UTC(2026, 9, 24, 2, 0, 0);
+  const next = nextDaily("09:30", now, TZ);
+  assert.equal(next, Date.UTC(2026, 9, 25, 1, 30, 0));
+  assert.equal(next - now, DAY - 30 * 60_000);
+});
+
+test("nextWindow 落在窗口内且用注入的随机函数", () => {
+  const now = Date.UTC(2026, 9, 23, 16, 0, 0); // 00:00 +08
+  const next = nextWindow("09:00", "10:00", now, TZ, (min, max) => (max <= 0 ? 0 : Math.floor((max - min) / 2)));
+  const localHour = new Date(next + TZ * 3_600_000).getUTCHours();
+  assert.equal(localHour, 9);
+});
+
+test("computeNextRun interval + jitter", () => {
+  const now = Date.UTC(2026, 9, 24, 0, 0, 0);
+  const plain = computeNextRun({ kind: "interval", intervalMinutes: 30 }, now, TZ, { withoutJitter: true });
+  assert.equal(plain - now, 30 * 60_000);
+  const jittered = computeNextRun({ kind: "interval", intervalMinutes: 30, jitterSeconds: 60 }, now, TZ, {
+    random: () => 30,
+  });
+  assert.equal(jittered - now, 30 * 60_000 + 30_000);
+});
+
+// ---------------------------------------------------------------- 触发解析
+test("tokenize 支持引号与全角引号", () => {
+  assert.deepEqual(tokenize('9.30 "早上好 各位" btn:签到'), ["9.30", "早上好 各位", "btn:签到"]);
+  assert.deepEqual(tokenize("9.30 “晚上好 各位”"), ["9.30", "晚上好 各位"]);
+});
+
+const bot: Target = { kind: "user", id: "jerry_bot", username: "jerry_bot" };
+
+test("最简触发：9.30 签到（目标来自转发）", () => {
+  const parsed = parseTrigger("9.30 签到", { forwarded: bot });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  const task = parsed.result.task!;
+  assert.deepEqual(task.schedule, { kind: "daily", time: "09:30", jitterSeconds: 0 });
+  assert.deepEqual(task.steps, [{ type: "text", text: "签到" }]);
+  assert.equal(task.target.id, "jerry_bot");
+  assert.equal(task.source, "trigger");
+});
+
+test("多步骤：发送 + 点按钮 + 等待 + 关键词", () => {
+  const parsed = parseTrigger("9.30 签到 btn:立即签到 wait:3 #kw:签到成功|今日已签到 #jitter:120 #delete:30 @x_bot", {});
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  const task = parsed.result.task!;
+  assert.deepEqual(task.steps, [
+    { type: "text", text: "签到" },
+    { type: "click", text: "立即签到" },
+    { type: "wait", seconds: 3 },
+  ]);
+  assert.deepEqual(task.successKeywords, ["签到成功", "今日已签到"]);
+  assert.equal(task.schedule.jitterSeconds, 120);
+  assert.equal(task.deleteAfterSeconds, 30);
+  assert.equal(task.target.username, "x_bot");
+});
+
+test("按行列点按钮 + 发数字", () => {
+  const parsed = parseTrigger("9.30 btn:0,1 num:2 @b", {});
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.deepEqual(parsed.result.task!.steps, [
+    { type: "click", row: 0, column: 1 },
+    { type: "number", value: "2" },
+  ]);
+});
+
+test("窗口 + 随机消息（每天一条随机内容）", () => {
+  const parsed = parseTrigger("8.30-9.30 rand:早上好|午安|晚上好 @group_bot", {});
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  const task = parsed.result.task!;
+  assert.deepEqual(task.schedule, { kind: "window", time: "08:30", windowEnd: "09:30", jitterSeconds: 0 });
+  assert.deepEqual(task.steps, [{ type: "random", options: ["早上好", "午安", "晚上好"] }]);
+});
+
+test("间隔任务：每2小时 / every30m / 2h", () => {
+  for (const [text, minutes] of [
+    ["每2小时 打卡 @b", 120],
+    ["每30分 打卡 @b", 30],
+    ["every30m 打卡 @b", 30],
+    ["2h 打卡 @b", 120],
+  ] as Array<[string, number]>) {
+    const parsed = parseTrigger(text, {});
+    assert.equal(parsed.ok, true, text);
+    if (!parsed.ok) continue;
+    assert.deepEqual(parsed.result.task!.schedule, {
+      kind: "interval",
+      intervalMinutes: minutes,
+      jitterSeconds: 0,
+    });
+  }
+});
+
+test("一次性任务：#once", () => {
+  const parsed = parseTrigger("9.30 once 签到 @b", {});
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.result.task!.schedule.kind, "once");
+});
+
+test("带空格文本需要引号", () => {
+  const parsed = parseTrigger('9.30 "签到 打卡" @b', {});
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.deepEqual(parsed.result.task!.steps, [{ type: "text", text: "签到 打卡" }]);
+});
+
+test("未加引号的连续词会拼成一句话", () => {
+  const parsed = parseTrigger("9.30 今日 签到 @b", {});
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.deepEqual(parsed.result.task!.steps, [{ type: "text", text: "今日 签到" }]);
+});
+
+test("缺时间 / 缺动作 / 缺目标 都要报错", () => {
+  const noTime = parseTrigger("签到", { forwarded: bot });
+  assert.equal(noTime.ok, false);
+
+  const noAction = parseTrigger("9.30", { forwarded: bot });
+  assert.equal(noAction.ok, false);
+
+  const noTarget = parseTrigger("9.30 签到", {});
+  assert.equal(noTarget.ok, false);
+});
+
+test("命令解析", () => {
+  const list = parseTrigger("列表", {});
+  assert.equal(list.ok, true);
+  if (list.ok) assert.equal(list.result.kind, "list");
+
+  const run = parseTrigger("立即 2", {});
+  assert.equal(run.ok, true);
+  if (run.ok) {
+    assert.equal(run.result.kind, "run");
+    assert.equal(run.result.argument, "2");
+  }
+
+  const del = parseTrigger("删除 测试签到", {});
+  assert.equal(del.ok, true);
+  if (del.ok) {
+    assert.equal(del.result.kind, "delete");
+    assert.equal(del.result.argument, "测试签到");
+  }
+});
+
+test("默认目标兜底", () => {
+  const parsed = parseTrigger("9.30 签到", { defaultTarget: "-1001234567890" });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.result.task!.target.id, "-1001234567890");
+  assert.equal(parsed.result.task!.target.kind, "channel");
+});
+
+// ---------------------------------------------------------------- 按钮解析
+function fakeMessage(replyMarkup: unknown) {
+  return { replyMarkup } as never;
+}
+
+test("flattenButtons 解析 inline 回调/链接按钮", () => {
+  const message = fakeMessage({
+    className: "ReplyInlineMarkup",
+    rows: [
+      { buttons: [{ className: "KeyboardButtonCallback", text: "签到", data: new Uint8Array([1, 2, 3]) }] },
+      {
+        buttons: [
+          { className: "KeyboardButtonUrl", text: "官网", url: "https://example.com" },
+          { className: "KeyboardButtonCallback", text: "立即签到", data: new Uint8Array([9]) },
+        ],
+      },
+    ],
+  });
+  const buttons = flattenButtons(message);
+  assert.equal(buttons.length, 3);
+  assert.deepEqual(
+    buttons.map((button) => [button.row, button.column, button.text, button.kind]),
+    [
+      [0, 0, "签到", "callback"],
+      [1, 0, "官网", "url"],
+      [1, 1, "立即签到", "callback"],
+    ],
+  );
+  assert.deepEqual([...buttons[0].data!], [1, 2, 3]);
+  assert.match(describeButtons(buttons), /立即签到/);
+});
+
+test("flattenButtons 解析普通键盘（reply keyboard）", () => {
+  const buttons = flattenButtons(
+    fakeMessage({
+      className: "ReplyKeyboardMarkup",
+      rows: [{ buttons: [{ className: "KeyboardButton", text: "确认" }] }],
+    }),
+  );
+  assert.equal(buttons.length, 1);
+  assert.equal(buttons[0].kind, "text");
+});
+
+test("flattenButtons 对没有按钮的消息返回空", () => {
+  assert.deepEqual(flattenButtons(fakeMessage(undefined)), []);
+  assert.deepEqual(flattenButtons(fakeMessage({ className: "ReplyKeyboardHide" })), []);
+});
+
+test("selectButton：精确 > 包含 > 不区分大小写 > 行列", () => {
+  const buttons = flattenButtons(
+    fakeMessage({
+      className: "ReplyInlineMarkup",
+      rows: [
+        { buttons: [{ className: "KeyboardButtonCallback", text: "Check In", data: new Uint8Array([1]) }] },
+        {
+          buttons: [
+            { className: "KeyboardButtonCallback", text: "立即签到", data: new Uint8Array([2]) },
+            { className: "KeyboardButtonCallback", text: "签到记录", data: new Uint8Array([3]) },
+          ],
+        },
+      ],
+    }),
+  );
+  assert.equal(selectButton(buttons, { type: "click", text: "立即签到" })?.column, 0);
+  assert.equal(selectButton(buttons, { type: "click", text: "记录" })?.text, "签到记录");
+  assert.equal(selectButton(buttons, { type: "click", text: "check in" })?.text, "Check In");
+  assert.equal(selectButton(buttons, { type: "click", row: 1, column: 1 })?.text, "签到记录");
+  assert.equal(selectButton(buttons, { type: "click", text: "不存在" }), null);
+});
+
+// ---------------------------------------------------------------- 结果
+if (failures.length) {
+  console.error(`✗ ${failures.length} 个用例失败 / ${passed + failures.length}`);
+  for (const failure of failures) console.error(`  · ${failure}`);
+  process.exit(1);
+}
+console.log(`✓ ${passed} 个用例通过`);
