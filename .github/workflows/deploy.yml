@@ -27,6 +27,8 @@ jobs:
       - run: npm test
       - name: Build bundle
         run: node build.mjs
+      - name: 检查产物里导出 Durable Object 类
+        run: npm run check:bundle
 
   deploy:
     name: Deploy to Cloudflare
@@ -43,6 +45,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: node build.mjs && npm run check:bundle
       - name: 检查是否配置了 Cloudflare 凭据
         id: creds
         run: |

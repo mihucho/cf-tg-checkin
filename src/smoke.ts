@@ -32,11 +32,3 @@ export default {
     return new Response(logs.join("\n---\n"), { headers: { "content-type": "text/plain; charset=utf-8" } });
   },
 };
-
-/** 占位，满足 wrangler.jsonc 里的 DO 绑定 */
-export class TgAgent {
-  constructor(_state: unknown, _env: unknown) {}
-  async fetch() {
-    return new Response("stub");
-  }
-}

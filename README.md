@@ -74,6 +74,10 @@ npm run deploy                             # 打包 + 部署
 | `SESSION_SECRET` | 登录 Cookie 的 HMAC 密钥，不填则复用 `ADMIN_PASSWORD` |
 | `TG_API_ID` / `TG_API_HASH` | 把 Telegram 应用凭据放环境变量，省得在界面填 |
 
+> 口令用 `npx wrangler secret put ADMIN_PASSWORD` 设置。
+> **不要**控制台变量页点「保存并部署」——那会重传脚本，可能撞上
+> `does not export class 'TgAgent'`（原因与恢复见 [docs/DEPLOY.md](docs/DEPLOY.md#报错does-not-export-class-tgagent)）。
+
 ### 本地开发
 
 ```bash
