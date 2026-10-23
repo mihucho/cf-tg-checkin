@@ -11,6 +11,15 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-10-24
+
+- 任务名改为「用补全后的目标重新生成」而不是事后改名：`ParsedTrigger.autoName` 标记名字是否自动生成，
+  自动的就在 enrichTarget 之后用 `defaultName(最终目标, 步骤)` 重算。
+  这样 `https://t.me/xxx_bot 7.40 /sign` 建出来直接是「签到小助手 /sign」，
+  之前那种「先算名字、后补目标」留下的 `@username` 前缀不会再出现
+- 写了 `#name:自定义` 的任务名不受影响
+- 试算 `/api/trigger/parse` 同样按最终目标重算名字
+
 ## [0.3.7] - 2026-10-24
 
 - 修「识别到显示名了，任务名还是 @username」：建任务时 `enrichTarget` 只补了目标、没改名字。

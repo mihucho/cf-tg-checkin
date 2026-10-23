@@ -14,7 +14,14 @@ import type { AccountInfo, AgentState, LogEntry, Settings, Target, Task, TaskInp
 import { createTgClient, createTgClientOnDc, errorMessage, migrateDcFromError } from "./telegram/client";
 import { executeTask, resolveEntity, type ExecHooks } from "./telegram/executor";
 import { computeNextRun, formatInTimezone } from "./schedule/time";
-import { findTimeToken, parseTrigger, renameForTarget, tokenize, type TriggerContext } from "./schedule/dsl";
+import {
+  defaultName,
+  findTimeToken,
+  parseTrigger,
+  renameForTarget,
+  tokenize,
+  type TriggerContext,
+} from "./schedule/dsl";
 import { messageTargetHint, usernameFromLink, type MessageLike, type MessageTargetHint } from "./telegram/targets";
 import type { Env } from "./env";
 
@@ -260,6 +267,9 @@ export class TgAgent implements DurableObject {
           } catch {
             /* 没连上就按原样展示 */
           }
+        }
+        if (result.autoName) {
+          previewInput = { ...previewInput, name: defaultName(previewInput.target, "", previewInput.steps ?? []) };
         }
         const preview: Task = {
           ...previewInput,
@@ -994,6 +1004,14 @@ export class TgAgent implements DurableObject {
           }`,
         );
         const enriched = await this.enrichTarget(client, incoming, trace);
+        // 自动生成的名字要用「补全后的目标」重新算，否则会留下旧标签（@username）
+        if (result.autoName) {
+          const regenerated = defaultName(enriched.target, "", enriched.steps ?? []);
+          if (regenerated !== enriched.name) {
+            trace.push(`任务名按最终目标生成：${regenerated}（原：${enriched.name}）`);
+            enriched.name = regenerated;
+          }
+        }
         trace.push(`目标最终：${JSON.stringify(enriched.target)}`);
         trace.push(`调度：${JSON.stringify(enriched.schedule)}`);
         trace.push(`动作：${(enriched.steps ?? []).map((step) => step.type).join(" → ")}`);
