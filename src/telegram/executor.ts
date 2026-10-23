@@ -117,6 +117,11 @@ export function describeButtons(buttons: ButtonInfo[]): string {
   return buttons.map((button) => `[${button.row},${button.column}] ${button.text}`).join(" / ");
 }
 
+/** 同一套按钮的"指纹"：用来判断点完之后菜单到底变没变（机器人常原地编辑同一条消息） */
+export function buttonSignature(buttons: ButtonInfo[]): string {
+  return buttons.map((button) => `${button.row},${button.column}:${button.kind}:${button.text}`).join("|");
+}
+
 async function fetchRecent(client: TelegramClient, entity: EntityLike, limit = 12): Promise<Api.Message[]> {
   const messages = (await client.getMessages(entity as never, { limit })) as Api.Message[];
   return messages.slice().sort((a, b) => a.id - b.id);
@@ -136,8 +141,16 @@ interface InteractiveMessage {
   buttons: ButtonInfo[];
 }
 
+interface InteractiveSkip {
+  msgId: number;
+  signature: string;
+}
+
 /**
- * 轮询等待「带按钮的最新消息」，同时容忍机器人编辑同一条消息（而不是发新消息）的情况。
+ * 轮询等待「带按钮的消息」，同时容忍机器人编辑同一条消息（而不是发新消息）的情况。
+ *
+ * @param skip 刚点过的那一套按钮：机器人若原地编辑同一条消息，按钮指纹变了才算"新菜单"，
+ *             否则会把同一个按钮再点一次。
  */
 async function waitForInteractive(
   client: TelegramClient,
@@ -145,8 +158,8 @@ async function waitForInteractive(
   afterId: number,
   deadline: number,
   hooks: ExecHooks,
+  options: { pollIntervalMs: number; skip?: InteractiveSkip },
 ): Promise<InteractiveMessage | null> {
-  let lastSeenId = afterId;
   while (Date.now() < deadline) {
     let messages: Api.Message[] = [];
     try {
@@ -154,13 +167,15 @@ async function waitForInteractive(
     } catch (error) {
       hooks.log("warn", `拉取消息失败：${errorMessage(error)}`);
     }
-    const candidates = messages.filter((message) => message.id >= lastSeenId || message.id > afterId);
+    const candidates = messages.filter((message) => message.id >= afterId);
     for (const message of candidates.slice().reverse()) {
       const buttons = flattenButtons(message);
-      if (buttons.length) return { message, buttons };
+      if (!buttons.length) continue;
+      const skip = options.skip;
+      if (skip && message.id === skip.msgId && buttonSignature(buttons) === skip.signature) continue;
+      return { message, buttons };
     }
-    if (candidates.length) lastSeenId = Math.max(lastSeenId, ...candidates.map((message) => message.id));
-    await sleep(1200);
+    await sleep(options.pollIntervalMs);
   }
   return null;
 }
@@ -199,6 +214,10 @@ export interface ExecuteOptions {
   /** 上一次运行发出的消息 id，用于按需清理 */
   previousSent?: number[];
   hooks: ExecHooks;
+  /** 等待下一步按钮时，每次检测的间隔（毫秒，默认 3000） */
+  pollIntervalMs?: number;
+  /** 单次最多等待多久（毫秒，默认 30000） */
+  stepWaitMs?: number;
 }
 
 export async function executeTask(
@@ -216,7 +235,12 @@ export async function executeTask(
   const entity = await resolveEntity(client, task.target);
   const chatId = String((entity as { id?: unknown }).id ?? task.target.id);
   const timeoutMs = Math.max(5, Math.min(90, task.timeoutSeconds || 25)) * 1000;
-  const deadline = Date.now() + timeoutMs;
+  /** 每等待一次机器人回复的超时时间（从每次等待开始算，不被步骤间隔吃掉） */
+  const interactiveDeadline = () => Date.now() + timeoutMs;
+  /** 检测间隔 / 单次最长等待（设置里可调，默认 3s 一次、最多 30s） */
+  const pollIntervalMs = Math.max(500, Math.min(30_000, options.pollIntervalMs ?? 3000));
+  const stepWaitDeadline = () => Date.now() + Math.max(pollIntervalMs, Math.min(300_000, options.stepWaitMs ?? 30_000));
+  const stepDelayMs = Math.max(0, Math.min(60, task.stepDelaySeconds ?? 3)) * 1000;
   const sent: number[] = [];
 
   if (task.cleanupPrevious && options.previousSent?.length) {
@@ -269,7 +293,10 @@ export async function executeTask(
         }
         case "click": {
           const candidate: InteractiveMessage | null =
-            interactive ?? (await waitForInteractive(client, entity, cursorId, deadline, hooks));
+            interactive ??
+            (await waitForInteractive(client, entity, cursorId, Math.min(interactiveDeadline(), stepWaitDeadline()), hooks, {
+              pollIntervalMs,
+            }));
           if (!candidate) {
             note("warn", `步骤${stepNo} 没有等到带按钮的消息`);
             break;
@@ -283,8 +310,23 @@ export async function executeTask(
           await clickButton(client, entity, candidate.message, button);
           note("info", `步骤${stepNo} 点击「${button.text}」`);
           cursorId = Math.max(cursorId, candidate.message.id);
-          // 点击后机器人通常会新发一条消息或编辑当前消息，重新等待交互消息
-          const next = await waitForInteractive(client, entity, cursorId, Math.min(deadline, Date.now() + 12_000), hooks);
+
+          // 点完之后机器人通常是「新发一条消息」或「原地编辑同一条消息」，
+          // 两种都等，但要排除"还是原来那套按钮"（否则下一步会重复点同一个按钮）
+          const next = await waitForInteractive(
+            client,
+            entity,
+            cursorId,
+            Math.min(interactiveDeadline(), stepWaitDeadline()),
+            hooks,
+            {
+              pollIntervalMs,
+              skip: { msgId: candidate.message.id, signature: buttonSignature(candidate.buttons) },
+            },
+          );
+          if (!next) {
+            note("warn", `步骤${stepNo} 点击后 ${Math.round((options.stepWaitMs ?? 30_000) / 1000)}s 内没有等到新的按钮菜单`);
+          }
           interactive = next ?? null;
           break;
         }
@@ -293,6 +335,13 @@ export async function executeTask(
       }
     } catch (error) {
       note("error", `步骤${stepNo} 失败：${errorMessage(error)}`);
+    }
+
+    // 步骤之间默认停一会儿，给机器人留出响应时间（wait 步骤本身就是等待，不叠加）
+    const isLastStep = index === task.steps.length - 1;
+    if (!isLastStep && step.type !== "wait" && stepDelayMs > 0) {
+      note("info", `步骤间等待 ${Math.round(stepDelayMs / 1000)}s`);
+      await sleep(stepDelayMs);
     }
   }
 

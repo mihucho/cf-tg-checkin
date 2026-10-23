@@ -780,6 +780,15 @@ input[type="radio"] {
   gap: 14px;
 }
 
+.form-section-title {
+  margin: 10px 0 -2px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3, rgba(255, 255, 255, 0.42));
+}
+
 .form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2153,7 +2162,16 @@ input[type="radio"] {
     padding: 14px;
   }
 
-  .form-row {
+  .form-section-title {
+  margin: 10px 0 -2px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3, rgba(255, 255, 255, 0.42));
+}
+
+.form-row {
     grid-template-columns: 1fr;
   }
 

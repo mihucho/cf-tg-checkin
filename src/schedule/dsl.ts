@@ -4,7 +4,7 @@
  * 语法：`[时间] [动作...] [修饰符...]`
  *   时间：9.30 / 09:30 / 21：05 / 0930；窗口 9.30-10.30；间隔 每30分 每2小时 2h
  *   动作：普通文本（带空格用引号）/ btn:按钮文本 / btn:0,1 / num:1 / wait:5 / rand:a|b|c / say:文本
- *   修饰：#kw:成功|已签到、#jitter:120、#once、#delete:30、#timeout:40、#thread:12、#name:xxx、#clean
+ *   修饰：#kw:成功|已签到、#jitter:120、#once、#delete:30、#timeout:40、#delay:3、#thread:12、#name:xxx、#clean
  *   目标：@username 或 到:-1001234567890（否则取转发来源 / 设置里的 defaultTarget）
  *   命令：列表 / 立即 1 / 开启 1 / 关闭 1 / 删除 1 / 帮助
  */
@@ -211,7 +211,8 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
   let target: Target | null = null;
   let threadId: number | null = null;
   let jitterSeconds = 0;
-  let timeoutSeconds = 25;
+  let timeoutSeconds = 30;
+  let stepDelaySeconds = 3;
   let deleteAfterSeconds = 0;
   let cleanupPrevious = false;
   let onlyOnce = false;
@@ -326,10 +327,16 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
         deleteAfterSeconds = Math.max(0, Math.min(3600, Number(value) || 0));
         break;
       }
+      case "delay":
+      case "间隔": {
+        flushText();
+        stepDelaySeconds = Math.max(0, Math.min(60, Number(value) || 0));
+        break;
+      }
       case "timeout":
       case "超时": {
         flushText();
-        timeoutSeconds = Math.max(5, Math.min(90, Number(value) || 25));
+        timeoutSeconds = Math.max(5, Math.min(120, Number(value) || 30));
         break;
       }
       case "thread":
@@ -398,6 +405,7 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
     steps,
     successKeywords,
     timeoutSeconds,
+    stepDelaySeconds,
     deleteAfterSeconds,
     cleanupPrevious,
     source: "trigger",

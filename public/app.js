@@ -439,7 +439,7 @@ function renderOverview() {
       label: "触发器",
       dot: settings.triggerEnabled ? "ok" : "idle",
       value: settings.triggerEnabled ? "监听中" : "已停止",
-      foot: `来源 ${controlChatLabel(settings)} · 每 ${Number(settings.pollSeconds) || 60} 秒轮询`,
+      foot: `来源 ${controlChatLabel(settings)} · 每 ${Number(settings.pollSeconds) || 60} 秒轮询 · 步骤检测 ${Number(settings.stepPollSeconds) || 3}s/最长 ${Number(settings.stepWaitSeconds) || 30}s`,
     }),
   );
 
@@ -1312,6 +1312,31 @@ function renderSettings() {
         hint: "越小越及时，但会消耗更多请求。",
       }),
     ),
+    el("div", { class: "form-section-title" }, "步骤检测"),
+    el(
+      "div",
+      { class: "form-row" },
+      field({
+        id: "settings-stepPollSeconds",
+        label: "检测间隔（秒）",
+        control: numberControl("stepPollSeconds", settings.stepPollSeconds ?? 3, {
+          step: "1",
+          min: "1",
+          max: "30",
+        }),
+        hint: "等下一步按钮/回复时，每隔多久查一次消息。",
+      }),
+      field({
+        id: "settings-stepWaitSeconds",
+        label: "最多等待（秒）",
+        control: numberControl("stepWaitSeconds", settings.stepWaitSeconds ?? 30, {
+          step: "5",
+          min: "5",
+          max: "300",
+        }),
+        hint: "超过这个时间还没出现下一步，就记为失败。",
+      }),
+    ),
     el(
       "div",
       { class: "field" },
@@ -1433,6 +1458,8 @@ async function saveSettings(event) {
 
   const timezone = Number(read("timezone"));
   const pollSeconds = Number(read("pollSeconds"));
+  const stepPollSeconds = Number(read("stepPollSeconds"));
+  const stepWaitSeconds = Number(read("stepWaitSeconds"));
 
   if (!Number.isFinite(timezone) || timezone < -12 || timezone > 14) {
     toast("时区偏移需要在 -12 到 14 之间", { kind: "error" });
@@ -1440,6 +1467,14 @@ async function saveSettings(event) {
   }
   if (!Number.isFinite(pollSeconds) || pollSeconds < 15 || pollSeconds > 3600) {
     toast("轮询间隔需要在 15–3600 秒之间", { kind: "error" });
+    return;
+  }
+  if (!Number.isFinite(stepPollSeconds) || stepPollSeconds < 1 || stepPollSeconds > 30) {
+    toast("步骤检测间隔需要在 1–30 秒之间", { kind: "error" });
+    return;
+  }
+  if (!Number.isFinite(stepWaitSeconds) || stepWaitSeconds < 5 || stepWaitSeconds > 300) {
+    toast("步骤最多等待需要在 5–300 秒之间", { kind: "error" });
     return;
   }
 
@@ -1450,6 +1485,8 @@ async function saveSettings(event) {
     controlChat: read("controlChat").trim() || "self",
     adminUserId: read("adminUserId").trim(),
     defaultTarget: read("defaultTarget").trim(),
+    stepPollSeconds,
+    stepWaitSeconds,
   };
 
   await withLoading(form.querySelector('[type="submit"]'), async () => {

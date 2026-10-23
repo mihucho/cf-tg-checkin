@@ -53,6 +53,8 @@ export interface Task {
   steps: Step[];
   successKeywords: string[];
   timeoutSeconds: number;
+  /** 每执行完一个动作后，等多久再做下一个动作（秒，默认 3） */
+  stepDelaySeconds: number;
   deleteAfterSeconds: number;
   cleanupPrevious: boolean;
   nextRunAt: number | null;
@@ -91,6 +93,10 @@ export interface Settings {
   controlChat: string;
   adminUserId: string;
   defaultTarget: string;
+  /** 等待下一步按钮/回复时，间隔多少秒检测一次（默认 3） */
+  stepPollSeconds: number;
+  /** 单次最多等待多少秒（默认 30） */
+  stepWaitSeconds: number;
 }
 
 export interface AccountInfo {
@@ -127,4 +133,6 @@ export const DEFAULT_SETTINGS: Settings = {
   controlChat: "self",
   adminUserId: "",
   defaultTarget: "",
+  stepPollSeconds: 3,
+  stepWaitSeconds: 30,
 };

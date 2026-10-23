@@ -39,7 +39,9 @@
     "triggerEnabled": true,      // 是否监听触发消息
     "controlChat": "self",       // 触发消息来源会话：self=收藏夹，或 @username / 数字 id
     "adminUserId": "123",        // 允许用命令管理任务的管理员 tg id（可空）
-    "defaultTarget": ""          // 触发消息解析不到目标时的兜底目标
+    "defaultTarget": "",         // 触发消息解析不到目标时的兜底目标
+    "stepPollSeconds": 3,        // 等下一步按钮/回复时，每隔多少秒查一次（1–30）
+    "stepWaitSeconds": 30        // 单次最多等多久（5–300）
   },
   "tasks": [ Task ],
   "logs": [ LogEntry ],          // 最近 50 条
@@ -72,6 +74,7 @@
   "steps": [ Step ],
   "successKeywords": ["签到成功", "已签到"],
   "timeoutSeconds": 25,
+  "stepDelaySeconds": 3,            // 每个动作之间默认等 3 秒（0 = 不等）
   "deleteAfterSeconds": 0,          // >0 表示发送后 N 秒删除自己发的消息
   "cleanupPrevious": false,         // 每次执行前删掉上一次自己发的消息
   "nextRunAt": 1761234567000,   // epoch 毫秒

@@ -88,6 +88,33 @@ test("最简触发：9.30 签到（目标来自转发）", () => {
   assert.equal(task.source, "trigger");
 });
 
+test("默认步骤间隔 3 秒，可用 #delay 覆盖", () => {
+  const plain = parseTrigger("9.30 签到 btn:签到 @b", {});
+  assert.equal(plain.ok, true);
+  if (plain.ok) assert.equal(plain.result.task!.stepDelaySeconds, 3);
+
+  const custom = parseTrigger("9.30 签到 btn:签到 #delay:8 @b", {});
+  assert.equal(custom.ok, true);
+  if (custom.ok) assert.equal(custom.result.task!.stepDelaySeconds, 8);
+
+  const off = parseTrigger("9.30 签到 btn:签到 #delay:0 @b", {});
+  assert.equal(off.ok, true);
+  if (off.ok) assert.equal(off.result.task!.stepDelaySeconds, 0);
+});
+
+test("按钮流水线：/start → 个人信息 → 签到", () => {
+  const parsed = parseTrigger("9 /start btn:个人信息 btn:签到", { defaultTarget: "@jerry_bot" });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  const task = parsed.result.task!;
+  assert.deepEqual(task.schedule, { kind: "daily", time: "09:00", jitterSeconds: 0 });
+  assert.deepEqual(task.steps, [
+    { type: "text", text: "/start" },
+    { type: "click", text: "个人信息" },
+    { type: "click", text: "签到" },
+  ]);
+});
+
 test("多步骤：发送 + 点按钮 + 等待 + 关键词", () => {
   const parsed = parseTrigger("9.30 签到 btn:立即签到 wait:3 #kw:签到成功|今日已签到 #jitter:120 #delete:30 @x_bot", {});
   assert.equal(parsed.ok, true);
