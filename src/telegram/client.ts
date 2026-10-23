@@ -7,6 +7,7 @@
 import { TelegramClient } from "teleproto";
 import { StringSession } from "teleproto/sessions";
 import { CloudflareTransport } from "./transport";
+import { BUILD } from "../version";
 
 export interface TgCredentials {
   apiId: number;
@@ -41,7 +42,7 @@ function clientOptions() {
     floodSleepThreshold: 0,
     deviceModel: "CF Worker",
     systemVersion: "1.0.0",
-    appVersion: "0.1.0",
+    appVersion: BUILD.version,
     langCode: "zh",
     systemLangCode: "zh-CN",
     useWSS: false,

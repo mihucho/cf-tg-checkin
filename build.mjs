@@ -27,6 +27,8 @@ function gitCommit() {
 }
 const BUILD_ID = new Date().toISOString().replace(/\.\d+Z$/, "Z");
 const GIT_COMMIT = gitCommit();
+/** 版本号的唯一来源是 package.json（发版时只改这一处） */
+const APP_VERSION = JSON.parse(fs.readFileSync("package.json", "utf8")).version;
 
 const smoke = argv.includes("--smoke");
 const test = argv.includes("--test");
@@ -159,6 +161,7 @@ const options = {
   minify: !smoke,
   external: ["cloudflare:sockets", "cloudflare:workers"],
   define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
     __BUILD_ID__: JSON.stringify(BUILD_ID),
     __GIT_COMMIT__: JSON.stringify(GIT_COMMIT),
   },

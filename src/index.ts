@@ -115,7 +115,7 @@ export default {
 
     // 公开：用来确认线上跑的是哪一版（不暴露任何配置）
     if (path === "/api/version") {
-      return json({ ...BUILD, worker: "cf-tg-checkin" });
+      return json({ ...BUILD, worker: "cf-tg-checkin" }, 200, { "cache-control": "no-store" });
     }
 
     if (path === "/api/session") {

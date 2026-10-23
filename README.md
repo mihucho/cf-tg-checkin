@@ -238,6 +238,8 @@ npm test          # 只跑调度 / 语法 / 按钮解析的单测
 - 调度时间算法在 `src/schedule/time.ts`（纯函数，不依赖 Intl 时区库）
 - 动作执行器在 `src/telegram/executor.ts`（发消息 / 轮询按钮 / 点击 / 判定）
 - 管理界面是 `public/` 下的纯静态文件，改完刷新即可，没有构建步骤
+- 版本号只在 `package.json` 里维护：构建时注入产物，页面底部、`GET /api/version`
+  和 Telegram 客户端上报的 appVersion 都用它；发版跑 `npm version patch`（详见 [CHANGELOG.md](CHANGELOG.md)）
 
 Issue / PR 都欢迎。
 
