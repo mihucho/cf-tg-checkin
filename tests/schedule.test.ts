@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { parseTimeOfDay, nextDaily, nextWindow, computeNextRun, formatTimeOfDay } from "../src/schedule/time.ts";
-import { parseTrigger, renameForTarget, tokenize } from "../src/schedule/dsl.ts";
+import { defaultName, parseTrigger, renameForTarget, tokenize } from "../src/schedule/dsl.ts";
 import type { Target } from "../src/types.ts";
 import {
   resolveEntity,
@@ -105,6 +105,19 @@ test("默认步骤间隔 3 秒，可用 #delay 覆盖", () => {
   if (off.ok) assert.equal(off.result.task!.stepDelaySeconds, 0);
 });
 
+test("自动生成的任务名标记 autoName（写了 #name: 就不是自动的）", () => {
+  const auto = parseTrigger("9.30 签到 @b", {});
+  assert.equal(auto.ok, true);
+  if (auto.ok) assert.equal(auto.result.autoName, true);
+
+  const explicit = parseTrigger("9.30 签到 #name:我的任务 @b", {});
+  assert.equal(explicit.ok, true);
+  if (explicit.ok) {
+    assert.equal(explicit.result.autoName, false);
+    assert.equal(explicit.result.task!.name, "我的任务");
+  }
+});
+
 test("目标补全显示名后，自动生成的任务名同步替换", () => {
   const oldTarget: Target = { kind: "user", id: "qfyun_bot", username: "qfyun_bot" };
   const newTarget: Target = { kind: "user", id: "7066845482", username: "qfyun_bot", title: "签到小助手" };
@@ -115,6 +128,15 @@ test("目标补全显示名后，自动生成的任务名同步替换", () => {
   assert.equal(renameForTarget("@qfyun_bot /sign", oldTarget, { ...oldTarget, id: "1" }), "@qfyun_bot /sign");
   // 标签没变也不改
   assert.equal(renameForTarget("@qfyun_bot /sign", oldTarget, { ...oldTarget, title: undefined }), "@qfyun_bot /sign");
+});
+
+test("defaultName 用补全后的目标生成名字", () => {
+  const steps = [{ type: "text" as const, text: "/sign" }];
+  assert.equal(defaultName({ kind: "user", id: "1", username: "qfyun_bot" }, "", steps), "@qfyun_bot /sign");
+  assert.equal(
+    defaultName({ kind: "user", id: "1", username: "qfyun_bot", title: "签到小助手" }, "", steps),
+    "签到小助手 /sign",
+  );
 });
 
 test("时间可以写在链接/目标后面", () => {

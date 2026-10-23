@@ -18,6 +18,8 @@ export interface ParsedTrigger {
   argument?: string;
   task?: TaskInput;
   explanation?: string;
+  /** 任务名是自动生成的（没写 #name:）—— 补全目标后应该用最终目标重新生成 */
+  autoName?: boolean;
 }
 
 export interface TriggerContext {
@@ -438,7 +440,7 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
   const keywords = successKeywords.length ? `，成功关键词：${successKeywords.join(" / ")}` : "";
   const explanation = `${scheduleLabel || "每天"} → ${targetLabel}：${describeSteps(steps)}${keywords}`;
 
-  return { ok: true, result: { kind: "create", task, explanation } };
+  return { ok: true, result: { kind: "create", task, explanation, autoName: !nameOverride } };
 }
 
 /**
