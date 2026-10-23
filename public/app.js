@@ -35,6 +35,7 @@ const VIEWS = ["overview", "tasks", "logs", "account", "settings"];
 
 const state = {
   session: null,
+  build: null, // 构建信息（/api/version），用于排查线上版本
   data: null,
   view: "overview",
   logs: null, // 日志 tab 拉取的 100 条；概览用 state.data.logs（最新 50）
@@ -58,6 +59,7 @@ function cacheDom() {
   dom.loginPassword = document.getElementById("login-password");
   dom.loginSubmit = document.getElementById("login-submit");
   dom.loginError = document.getElementById("login-error");
+  dom.loginBuild = document.getElementById("login-build");
   dom.loginSetup = document.getElementById("login-setup");
   dom.app = document.getElementById("app-view");
   dom.tabs = document.getElementById("tabs");
@@ -70,6 +72,7 @@ function cacheDom() {
 
 async function init() {
   cacheDom();
+  loadBuildInfo();
 
   setUnauthorizedHandler(() => {
     const needsSetup = Boolean(state.session && state.session.needsSetup);
@@ -111,6 +114,35 @@ async function init() {
   }
 
   await enterApp();
+}
+
+/**
+ * 拉一次构建信息。部署排查时最有用的一句话就是「线上是哪一版」，
+ * 所以登录页和设置页都会显示它。
+ */
+async function loadBuildInfo() {
+  try {
+    const info = await fetch("/api/version", { headers: { accept: "application/json" } }).then((res) =>
+      res.ok ? res.json() : null,
+    );
+    if (!info) return;
+    state.build = info;
+    const when = String(info.buildId || "").replace("T", " ").replace("Z", " UTC");
+    if (dom.loginBuild) {
+      dom.loginBuild.textContent = `版本 ${info.commit || "dev"} · ${when}`;
+      dom.loginBuild.hidden = false;
+    }
+    paintBuildInfo();
+  } catch {
+    /* 版本信息拿不到不影响使用 */
+  }
+}
+
+function paintBuildInfo() {
+  const target = document.getElementById("about-build");
+  if (!target || !state.build) return;
+  const when = String(state.build.buildId || "").replace("T", " ").replace("Z", " UTC");
+  target.textContent = `${state.build.commit || "dev"} · ${when}`;
 }
 
 function showBoot() {
@@ -1325,6 +1357,22 @@ function renderSettings() {
     card({ title: "调度与触发器", description: "保存后立即生效。", body: form }),
     testerCard(),
     triggerHelp(),
+    card({
+      title: "关于",
+      description: "部署排查时，把这一行发给维护者最快。",
+      body: el(
+        "div",
+        { class: "stack-sm" },
+        el("div", { class: "about-build", id: "about-build" }, state.build ? "" : "读取中…"),
+        el(
+          "p",
+          { class: "hint" },
+          "管理界面是纯静态资源；版本号来自构建时注入的 git commit，可用 ",
+          el("code", {}, "/api/version"),
+          " 直接查看。",
+        ),
+      ),
+    }),
   );
 }
 

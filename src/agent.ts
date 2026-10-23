@@ -404,6 +404,13 @@ export class TgAgent implements DurableObject {
             `该账号归属 DC${targetDc}，验证码需要在该数据中心申请：请重新点击「获取验证码」再登录（已自动记住 DC${targetDc}）`,
           );
         }
+        if (targetDc !== null) {
+          // 已经在目标 DC 上重试过，仍被要求迁移 —— 把上下文说清楚，方便排查
+          throw new Error(
+            `账号归属 DC${targetDc}，已在该 DC 重试仍被要求迁移（${errorMessage(error)}）。` +
+              `请确认 apiId/apiHash 属于你自己的应用，并稍后重试`,
+          );
+        }
         throw error;
       } finally {
         await client.disconnect().catch(() => undefined);

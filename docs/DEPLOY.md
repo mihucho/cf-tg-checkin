@@ -234,6 +234,19 @@ npx wrangler secret put ADMIN_PASSWORD   # 之后再设口令，不会动脚本
 
 ---
 
+## 确认线上跑的是哪一版
+
+```bash
+curl -s https://cf-tg-checkin.<你的子域>.workers.dev/api/version
+# {"buildId":"2026-10-24T01:48:12Z","commit":"e124e2e","worker":"cf-tg-checkin"}
+```
+
+登录页底部和「设置 → 关于」也会显示同样的 `commit · buildId`。
+排查「改了没生效」时先看这里：如果 commit 不是你刚推的那一个，说明部署没成功
+（一键部署 / Workers Builds 看构建日志，CLI 看 `npm run deploy` 的输出）。
+
+---
+
 ## 排查表
 
 | 现象 | 原因 / 处理 |

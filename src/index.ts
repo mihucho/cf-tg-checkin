@@ -6,6 +6,7 @@
  *  - Cron Trigger 只是兜底：正常调度靠 DO alarm
  */
 import { TgAgent } from "./agent";
+import { BUILD } from "./version";
 import type { Env } from "./env";
 
 export { TgAgent };
@@ -111,6 +112,11 @@ export default {
     }
 
     const path = url.pathname;
+
+    // 公开：用来确认线上跑的是哪一版（不暴露任何配置）
+    if (path === "/api/version") {
+      return json({ ...BUILD, worker: "cf-tg-checkin" });
+    }
 
     if (path === "/api/session") {
       return json({
