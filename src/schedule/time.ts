@@ -18,25 +18,51 @@ export interface LocalParts {
   weekday: number;
 }
 
-/** `9.30` / `09:30` / `0930` / `21：05` → {hour, minute} */
+/**
+ * 时间写法：
+ *   9 / 21            → 09:00 / 21:00（裸小时）
+ *   9.30 / 09:30 / 21：05
+ *   0930 / 2359
+ *   9点 / 9点30 / 9点30分 / 9点半 / 9时15分
+ */
 export function parseTimeOfDay(input: string): { hour: number; minute: number } | null {
   const value = input.trim();
-  let match = /^(\d{1,2})[:.：](\d{1,2})$/.exec(value);
-  if (!match) match = /^(\d{3,4})$/.exec(value);
-  if (!match) return null;
+  if (!value) return null;
 
-  let hour: number;
-  let minute: number;
-  if (match.length === 3) {
-    hour = Number(match[1]);
-    minute = Number(match[2]);
-  } else {
-    const digits = match[1];
-    hour = Number(digits.slice(0, digits.length - 2));
-    minute = Number(digits.slice(-2));
+  // 9.30 / 09:30 / 21：05
+  let match = /^(\d{1,2})[:.：](\d{1,2})$/.exec(value);
+  if (match) {
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    return hour > 23 || minute > 59 ? null : { hour, minute };
   }
-  if (hour > 23 || minute > 59) return null;
-  return { hour, minute };
+
+  // 0930 / 2359
+  match = /^(\d{3,4})$/.exec(value);
+  if (match) {
+    const digits = match[1];
+    const hour = Number(digits.slice(0, digits.length - 2));
+    const minute = Number(digits.slice(-2));
+    return hour > 23 || minute > 59 ? null : { hour, minute };
+  }
+
+  // 9点 / 9点半 / 9点30分 / 9时15
+  match = /^(\d{1,2})\s*[点时](半|\d{1,2}分?)?$/.exec(value);
+  if (match) {
+    const hour = Number(match[1]);
+    const rest = match[2];
+    const minute = !rest ? 0 : rest === "半" ? 30 : Number(rest.replace("分", ""));
+    return hour > 23 || minute > 59 ? null : { hour, minute };
+  }
+
+  // 裸小时：9 / 09 / 21 → 整点
+  match = /^(\d{1,2})$/.exec(value);
+  if (match) {
+    const hour = Number(match[1]);
+    return hour > 23 ? null : { hour, minute: 0 };
+  }
+
+  return null;
 }
 
 export function formatTimeOfDay(hour: number, minute: number): string {

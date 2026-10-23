@@ -17,6 +17,7 @@ const SCHEMA = [
       steps TEXT NOT NULL,
       success_keywords TEXT NOT NULL DEFAULT '[]',
       timeout_seconds INTEGER NOT NULL DEFAULT 25,
+      step_delay_seconds INTEGER NOT NULL DEFAULT 3,
       delete_after_seconds INTEGER NOT NULL DEFAULT 0,
       cleanup_previous INTEGER NOT NULL DEFAULT 0,
       next_run_at INTEGER,
@@ -59,6 +60,7 @@ interface TaskRow extends Row {
   steps: string;
   success_keywords: string;
   timeout_seconds: number;
+  step_delay_seconds: number | null;
   delete_after_seconds: number;
   cleanup_previous: number;
   next_run_at: number | null;
@@ -107,7 +109,8 @@ export function rowToTask(row: TaskRow): Task {
     schedule: parseJson<Schedule>(row.schedule, { kind: "daily", time: "09:00" }),
     steps: parseJson<Step[]>(row.steps, []),
     successKeywords: parseJson<string[]>(row.success_keywords, []),
-    timeoutSeconds: row.timeout_seconds,
+    timeoutSeconds: row.timeout_seconds ?? 30,
+    stepDelaySeconds: row.step_delay_seconds ?? 3,
     deleteAfterSeconds: row.delete_after_seconds,
     cleanupPrevious: !!row.cleanup_previous,
     nextRunAt: row.next_run_at,
@@ -136,6 +139,12 @@ export function rowToLog(row: LogRow): LogEntry {
 export class Store {
   constructor(private readonly sql: SqlStorage) {
     for (const statement of SCHEMA) this.sql.exec(statement);
+    // 老库补列（新库会因为列已存在而报错，忽略即可）
+    try {
+      this.sql.exec("ALTER TABLE tasks ADD COLUMN step_delay_seconds INTEGER NOT NULL DEFAULT 3");
+    } catch {
+      /* 列已存在 */
+    }
   }
 
   /** 统一的行查询：DO 的 SqlStorage 泛型约束较严，这里集中做一次断言 */
@@ -208,9 +217,9 @@ export class Store {
   createTask(input: TaskInput, now: number, nextRunAt: number | null): Task {
     this.sql.exec(
       `INSERT INTO tasks (name, enabled, target, thread_id, schedule, steps, success_keywords,
-         timeout_seconds, delete_after_seconds, cleanup_previous, next_run_at, last_run_at,
-         last_result, last_message, source, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         timeout_seconds, step_delay_seconds, delete_after_seconds, cleanup_previous, next_run_at,
+         last_run_at, last_result, last_message, source, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       input.name,
       input.enabled ? 1 : 0,
       JSON.stringify(input.target),
@@ -219,6 +228,7 @@ export class Store {
       JSON.stringify(input.steps),
       JSON.stringify(input.successKeywords ?? []),
       input.timeoutSeconds ?? 25,
+      input.stepDelaySeconds ?? 3,
       input.deleteAfterSeconds ?? 0,
       input.cleanupPrevious ? 1 : 0,
       nextRunAt,
@@ -246,8 +256,9 @@ export class Store {
 
     this.sql.exec(
       `UPDATE tasks SET name = ?, enabled = ?, target = ?, thread_id = ?, schedule = ?, steps = ?,
-         success_keywords = ?, timeout_seconds = ?, delete_after_seconds = ?, cleanup_previous = ?,
-         next_run_at = ?, last_run_at = ?, last_result = ?, last_message = ?, updated_at = ?
+         success_keywords = ?, timeout_seconds = ?, step_delay_seconds = ?, delete_after_seconds = ?,
+         cleanup_previous = ?, next_run_at = ?, last_run_at = ?, last_result = ?, last_message = ?,
+         updated_at = ?
        WHERE id = ?`,
       merged.name,
       merged.enabled ? 1 : 0,
@@ -257,6 +268,7 @@ export class Store {
       JSON.stringify(merged.steps),
       JSON.stringify(merged.successKeywords ?? []),
       merged.timeoutSeconds ?? 25,
+      merged.stepDelaySeconds ?? 3,
       merged.deleteAfterSeconds ?? 0,
       merged.cleanupPrevious ? 1 : 0,
       merged.nextRunAt ?? null,

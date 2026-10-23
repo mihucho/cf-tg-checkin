@@ -116,7 +116,8 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
     },
     steps: (task?.steps && task.steps.length ? task.steps : [defaultStep("text")]).map(fromStep),
     successKeywords: (task?.successKeywords || []).join(", "),
-    timeoutSeconds: task?.timeoutSeconds ?? 25,
+    timeoutSeconds: task?.timeoutSeconds ?? 30,
+    stepDelaySeconds: task?.stepDelaySeconds ?? 3,
     deleteAfterSeconds: task?.deleteAfterSeconds ?? 0,
     cleanupPrevious: Boolean(task?.cleanupPrevious),
   };
@@ -558,7 +559,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
             min: "5",
             max: "120",
             step: "1",
-            value: String(model.timeoutSeconds ?? 25),
+            value: String(model.timeoutSeconds ?? 30),
             oninput: (event) => {
               model.timeoutSeconds = Number(event.target.value);
             },
@@ -582,6 +583,23 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
           hint: "0 表示不删除自己发的消息。",
         }),
       ),
+      field({
+        id: id("step-delay"),
+        label: "步骤间隔（秒）",
+        control: el("input", {
+          class: "input",
+          id: id("step-delay"),
+          type: "number",
+          min: "0",
+          max: "60",
+          step: "1",
+          value: String(model.stepDelaySeconds ?? 3),
+          oninput: (event) => {
+            model.stepDelaySeconds = Number(event.target.value);
+          },
+        }),
+        hint: "每执行完一个动作等多久再做下一个，默认 3 秒（两步按钮菜单留点时间更稳）。",
+      }),
       el(
         "label",
         { class: "check-row" },
@@ -843,7 +861,8 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
           schedule,
           steps,
           successKeywords: keywords,
-          timeoutSeconds: clampInt(model.timeoutSeconds, 5, 120, 25),
+          timeoutSeconds: clampInt(model.timeoutSeconds, 5, 120, 30),
+          stepDelaySeconds: clampInt(model.stepDelaySeconds, 0, 60, 3),
           deleteAfterSeconds: clampInt(model.deleteAfterSeconds, 0, 86400, 0),
           cleanupPrevious: Boolean(model.cleanupPrevious),
         };

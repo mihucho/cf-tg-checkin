@@ -872,7 +872,13 @@ export class TgAgent implements DurableObject {
 
     let log: LogEntry;
     try {
-      const outcome = await executeTask(client, task, { previousSent, hooks });
+      const settings = this.store.getSettings();
+      const outcome = await executeTask(client, task, {
+        previousSent,
+        hooks,
+        pollIntervalMs: (settings.stepPollSeconds ?? 3) * 1000,
+        stepWaitMs: (settings.stepWaitSeconds ?? 30) * 1000,
+      });
       this.store.setJson(sentKey, outcome.sent);
       if (task.deleteAfterSeconds > 0 && outcome.sent.length) {
         this.store.addDeletion(outcome.chatId ?? task.target.id, outcome.sent, Date.now() + task.deleteAfterSeconds * 1000);
@@ -981,6 +987,14 @@ function sanitizeSettings(patch: Partial<Settings>): Partial<Settings> {
   if (patch.controlChat !== undefined) clean.controlChat = String(patch.controlChat).trim() || "self";
   if (patch.adminUserId !== undefined) clean.adminUserId = String(patch.adminUserId).trim();
   if (patch.defaultTarget !== undefined) clean.defaultTarget = String(patch.defaultTarget).trim();
+  if (patch.stepPollSeconds !== undefined) {
+    const value = Number(patch.stepPollSeconds);
+    if (Number.isFinite(value)) clean.stepPollSeconds = Math.max(1, Math.min(30, value));
+  }
+  if (patch.stepWaitSeconds !== undefined) {
+    const value = Number(patch.stepWaitSeconds);
+    if (Number.isFinite(value)) clean.stepWaitSeconds = Math.max(5, Math.min(300, value));
+  }
   return clean;
 }
 
@@ -1016,7 +1030,8 @@ function normalizeTaskInput(input: TaskInput | Task): TaskInput {
     schedule,
     steps,
     successKeywords: (input.successKeywords ?? []).map((keyword) => String(keyword).trim()).filter(Boolean),
-    timeoutSeconds: Math.max(5, Math.min(90, Number(input.timeoutSeconds ?? 25))),
+    timeoutSeconds: Math.max(5, Math.min(120, Number(input.timeoutSeconds ?? 30))),
+    stepDelaySeconds: Math.max(0, Math.min(60, Number(input.stepDelaySeconds ?? 3))),
     deleteAfterSeconds: Math.max(0, Math.min(3600, Number(input.deleteAfterSeconds ?? 0))),
     cleanupPrevious: !!input.cleanupPrevious,
     source: input.source ?? "ui",
@@ -1045,7 +1060,8 @@ const HELP_TEXT = `💡 触发语法：[时间] [动作...]
  · num:1 → 直接发数字（数字选择类机器人）
  · wait:5 → 等待 5 秒
  · rand:早安|晚上好|午安 → 随机挑一条发送
-修饰：#kw:签到成功|已签到  #jitter:120  #once  #delete:30  #timeout:40  #thread:12  #name:名称
+修饰：#kw:签到成功|已签到  #jitter:120  #once  #delete:30  #timeout:40  #delay:3  #thread:12  #name:名称
+（每个动作之间默认间隔 3 秒，用 #delay:0 可关掉）
 目标：消息里写 @机器人，或把机器人消息转发/分享到收藏夹，或在设置里填默认目标
 
 示例：
