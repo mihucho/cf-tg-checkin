@@ -14,7 +14,8 @@ import type { AccountInfo, AgentState, LogEntry, Settings, Target, Task, TaskInp
 import { createTgClient, createTgClientOnDc, errorMessage, migrateDcFromError } from "./telegram/client";
 import { executeTask, resolveEntity, type ExecHooks } from "./telegram/executor";
 import { computeNextRun, formatInTimezone } from "./schedule/time";
-import { parseTrigger, usernameFromLink, type TriggerContext } from "./schedule/dsl";
+import { parseTrigger, type TriggerContext } from "./schedule/dsl";
+import { messageTargetHint, usernameFromLink, type MessageLike, type MessageTargetHint } from "./telegram/targets";
 import type { Env } from "./env";
 
 interface Credentials {
@@ -50,26 +51,6 @@ function json(data: unknown, status = 200): Response {
 
 function jsonError(error: unknown, status = 400): Response {
   return json({ error: errorMessage(error) }, status);
-}
-
-/** 收集消息里可能用于定位目标的链接 */
-function collectLinks(message: {
-  media?: { webpage?: { url?: string } };
-  message?: string;
-  entities?: Array<{ className?: string; offset?: number; length?: number; url?: string }>;
-}): string[] {
-  const links: string[] = [];
-  if (message.media?.webpage?.url) links.push(message.media.webpage.url);
-  const text = message.message ?? "";
-  for (const entity of message.entities ?? []) {
-    const className = entity.className ?? "";
-    if (!/Url/i.test(className)) continue;
-    if (className === "MessageEntityTextUrl" && entity.url) links.push(entity.url);
-    else if (typeof entity.offset === "number" && typeof entity.length === "number") {
-      links.push(text.slice(entity.offset, entity.offset + entity.length));
-    }
-  }
-  return links;
 }
 
 function isOwnReply(text: string): boolean {
@@ -636,7 +617,7 @@ export class TgAgent implements DurableObject {
 
     const ctx: TriggerContext = {
       defaultTarget: settings.defaultTarget || undefined,
-      forwarded: await this.forwardedTarget(client, message),
+      forwarded: await this.inferTarget(client, entity, message),
     };
 
     const parsed = parseTrigger(text, ctx);
@@ -700,51 +681,88 @@ export class TgAgent implements DurableObject {
   }
 
   /**
-   * 从转发 / 分享消息里推断目标，覆盖三种「分享到收藏夹」的形态：
-   *  1. 转发机器人消息 → fwdFrom.fromId
-   *  2. 分享联系人/机器人卡片 → media.userId（MessageMediaContact）
-   *  3. 分享链接 → media.webpage.url 或消息实体里的 t.me 链接
+   * 推断签到目标。用户表达"发给谁"的方式，按可信度从高到低：
+   *
+   *  1. 转发 / 分享机器人消息 → fwd_from.from_id
+   *  2. **回复了机器人的某条消息** → 取被回复消息的发送者 / 转发来源
+   *  3. 分享联系人卡片 → media.user_id
+   *  4. 内联机器人 → via_bot_id
+   *  5. 文本或网页预览里的 t.me 链接
+   *
+   * 注：触发消息本身的发送者永远是账号自己，所以只在"被回复的消息"里才看发送者。
    */
-  private async forwardedTarget(client: TelegramClient, message: Api.Message): Promise<Target | null> {
-    const anyMessage = message as unknown as {
-      fwdFrom?: { fromId?: unknown; fromName?: string };
-      media?: {
-        className?: string;
-        userId?: unknown;
-        webpage?: { url?: string };
-      };
-      message?: string;
-      entities?: Array<{ className?: string; offset?: number; length?: number; url?: string }>;
-    };
-    const fwdFrom = anyMessage.fwdFrom;
+  private async inferTarget(
+    client: TelegramClient,
+    chat: Parameters<TelegramClient["sendMessage"]>[0],
+    message: Api.Message,
+  ): Promise<Target | null> {
+    const direct = await this.resolveHint(client, messageTargetHint(message as unknown as MessageLike, { allowSender: false }));
+    if (direct) return direct;
 
-    const source =
-      fwdFrom?.fromId ??
-      (anyMessage.media?.userId ? { className: "PeerUser", userId: anyMessage.media.userId } : null);
+    const replyTo = (message as unknown as {
+      replyTo?: { replyToMsgId?: number; replyToPeerId?: unknown };
+    }).replyTo;
 
-    if (!source) {
-      const links = collectLinks(anyMessage);
-      for (const link of links) {
-        const username = usernameFromLink(link);
-        if (!username) continue;
-        try {
-          const entity = await client.getEntity(username);
-          return await this.toTarget(client, entity, username);
-        } catch {
-          return { kind: "user", id: username, username };
-        }
+    // 跨会话回复（新版 layer 才有 reply_to_peer_id）
+    if (replyTo?.replyToPeerId) {
+      try {
+        const entity = await client.getEntity(replyTo.replyToPeerId as never);
+        return await this.toTarget(client, entity, "");
+      } catch {
+        /* 忽略，继续走同会话回复 */
       }
-      return null;
     }
 
-    try {
-      const entity = await client.getEntity(source as never);
-      const target = await this.toTarget(client, entity, String(fwdFrom?.fromName ?? ""));
-      if (!target.title && fwdFrom?.fromName) target.title = fwdFrom.fromName;
-      return target;
-    } catch {
-      return null;
+    // 同会话回复：把被回复的那条消息捞出来再推断一次
+    const repliedId = replyTo?.replyToMsgId;
+    if (repliedId) {
+      try {
+        const [replied] = (await client.getMessages(chat as never, { ids: [repliedId] })) as Api.Message[];
+        if (replied) {
+          const fromReplied = await this.resolveHint(
+            client,
+            messageTargetHint(replied as unknown as MessageLike, { allowSender: true }),
+          );
+          if (fromReplied) return fromReplied;
+        }
+      } catch {
+        /* 忽略 */
+      }
     }
+
+    return null;
+  }
+
+  /** 把纯函数里提取出的线索换成真实实体 */
+  private async resolveHint(client: TelegramClient, hint: MessageTargetHint | null): Promise<Target | null> {
+    if (!hint) return null;
+
+    if (hint.kind === "peer") {
+      const peer = hint.peer;
+      const instance =
+        peer.className === "PeerChannel"
+          ? new Api.PeerChannel({ channelId: peer.channelId as never })
+          : peer.className === "PeerChat"
+            ? new Api.PeerChat({ chatId: peer.chatId as never })
+            : new Api.PeerUser({ userId: peer.userId as never });
+      try {
+        const entity = await client.getEntity(instance as never);
+        return await this.toTarget(client, entity, "");
+      } catch {
+        return null;
+      }
+    }
+
+    if (hint.kind === "username") {
+      try {
+        const entity = await client.getEntity(hint.value);
+        return await this.toTarget(client, entity, hint.value);
+      } catch {
+        return { kind: "user", id: hint.value, username: hint.value };
+      }
+    }
+
+    return null;
   }
 
   private async toTarget(client: TelegramClient, entity: unknown, fallback: string): Promise<Target> {

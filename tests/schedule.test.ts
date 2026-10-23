@@ -8,6 +8,7 @@ import { parseTrigger, tokenize } from "../src/schedule/dsl.ts";
 import type { Target } from "../src/types.ts";
 import { flattenButtons, selectButton, describeButtons } from "../src/telegram/executor.ts";
 import { createTgClientOnDc, migrateDcFromError, DC_SEEDS } from "../src/telegram/client.ts";
+import { messageTargetHint, usernameFromLink } from "../src/telegram/targets.ts";
 
 let passed = 0;
 const failures: string[] = [];
@@ -285,6 +286,59 @@ test("createTgClientOnDc 会把 session 固定到目标 DC（auth key 在该 DC 
   assert.equal(client.session.serverAddress, DC_SEEDS[5]);
   assert.equal(client.session.port, 443);
   assert.equal(client.session.authKey, undefined);
+});
+
+// ---------------------------------------------------------------- 目标推断
+test("目标推断：转发来源优先", () => {
+  const hint = messageTargetHint({
+    out: true,
+    message: "9.30 签到",
+    fwdFrom: { fromId: { className: "PeerUser", userId: 7363239 } },
+  });
+  assert.deepEqual(hint, { kind: "peer", peer: { className: "PeerUser", userId: 7363239 } });
+});
+
+test("目标推断：联系人卡片 / 内联机器人", () => {
+  assert.deepEqual(messageTargetHint({ media: { className: "MessageMediaContact", userId: 42 } }), {
+    kind: "peer",
+    peer: { className: "PeerUser", userId: 42 },
+  });
+  assert.deepEqual(messageTargetHint({ viaBotId: 777 }), {
+    kind: "peer",
+    peer: { className: "PeerUser", userId: 777 },
+  });
+});
+
+test("目标推断：只有被回复的消息才看发送者", () => {
+  const botMessage = { out: false, senderId: { className: "PeerUser", userId: 555 }, message: "签到成功" };
+  // 触发消息本身是我发的 → 不看发送者
+  assert.equal(messageTargetHint(botMessage, { allowSender: false }), null);
+  // 被回复的消息 → 发送者就是机器人
+  assert.deepEqual(messageTargetHint(botMessage, { allowSender: true }), {
+    kind: "peer",
+    peer: { className: "PeerUser", userId: 555 },
+  });
+  // 我自己发的转发副本不进"发送者"分支
+  assert.equal(messageTargetHint({ ...botMessage, out: true }, { allowSender: true }), null);
+});
+
+test("目标推断：t.me 链接与 @username", () => {
+  assert.equal(usernameFromLink("https://t.me/jerry_bot"), "jerry_bot");
+  assert.equal(usernameFromLink("t.me/jerry_bot?start=1"), "jerry_bot");
+  assert.equal(usernameFromLink("@jerry_bot"), "jerry_bot");
+  assert.equal(usernameFromLink("https://example.com"), null);
+  const text = "https://t.me/jerry_bot";
+  assert.deepEqual(
+    messageTargetHint({
+      message: text,
+      entities: [{ className: "MessageEntityUrl", offset: 0, length: text.length }],
+    }),
+    { kind: "username", value: "jerry_bot" },
+  );
+});
+
+test("目标推断：没有线索时返回 null", () => {
+  assert.equal(messageTargetHint({ out: true, message: "9.30 签到" }), null);
 });
 
 // ---------------------------------------------------------------- 结果
