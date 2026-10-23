@@ -144,6 +144,8 @@ export interface AgentState {
     nextPollAt?: number | null;
     /** 上一次轮询时间，null 表示还没轮询过 */
     lastPollAt?: number | null;
+    /** 最近一次触发器事件（不管日志有没有被筛掉，这里一定能看到） */
+    lastTriggerEvent?: { at: number; ok: boolean; message: string } | null;
     pollSeconds?: number;
   };
 }

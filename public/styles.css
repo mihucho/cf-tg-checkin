@@ -2452,6 +2452,17 @@ input[type="radio"] {
   opacity: 0.75;
 }
 
+.stat-foot.stat-muted {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  opacity: 0.6;
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 登录页的人机验证（Turnstile）槽位 */
 .turnstile-slot {
   display: flex;

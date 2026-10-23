@@ -543,6 +543,12 @@ function renderOverview() {
               ? " ⚠️ 已超时"
               : "")
           : "还没有轮询过（登录 Telegram 后开始）",
+      sub2:
+        runtime && runtime.lastTriggerEvent
+          ? `最近事件：${runtime.lastTriggerEvent.ok ? "" : "⚠️ "}${runtime.lastTriggerEvent.message}（${formatRelative(
+              runtime.lastTriggerEvent.at,
+            )}）`
+          : "最近事件：还没有处理过触发消息",
       sub: `步骤检测 ${Number(settings.stepPollSeconds) || 3}s / 最长 ${Number(settings.stepWaitSeconds) || 30}s`,
     }),
   );
@@ -599,7 +605,7 @@ function renderOverview() {
   );
 }
 
-function statCard({ label, dot, value, foot, sub }) {
+function statCard({ label, dot, value, foot, sub, sub2 }) {
   return el(
     "section",
     { class: "card stat" },
@@ -607,6 +613,7 @@ function statCard({ label, dot, value, foot, sub }) {
     el("div", { class: "stat-value" }, dot ? el("span", { class: `dot ${dot}` }) : null, value),
     foot ? el("div", { class: "stat-foot" }, foot) : null,
     sub ? el("div", { class: "stat-foot stat-sub" }, sub) : null,
+    sub2 ? el("div", { class: "stat-foot stat-sub stat-muted" }, sub2) : null,
   );
 }
 
