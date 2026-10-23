@@ -247,6 +247,50 @@ test("命令解析", () => {
   }
 });
 
+test("@here 表示发到当前会话（群组/频道）", () => {
+  const here: Target = { kind: "channel", id: "-1001234567890", title: "摸鱼群" };
+  const parsed = parseTrigger("9.30 打卡 @here", { sourceChat: here });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.result.task!.target.id, "-1001234567890");
+  assert.equal(parsed.result.task!.target.kind, "channel");
+
+  // 显式目标优先于 @here
+  const explicit = parseTrigger("9.30 打卡 @here @jerry_bot", { sourceChat: here });
+  assert.equal(explicit.ok, true);
+  if (explicit.ok) assert.equal(explicit.result.task!.target.username, "jerry_bot");
+
+  // 没有 sourceChat 时给出明确提示
+  const missing = parseTrigger("9.30 打卡 @here", {});
+  assert.equal(missing.ok, false);
+  if (!missing.ok) assert.match(missing.error, /@here/);
+});
+
+test("群组/频道目标：数字 id 与 @username 都认", () => {
+  const byId = parseTrigger("9.30 打卡 @here", {
+    sourceChat: { kind: "chat", id: "-42", title: "普通群" },
+  });
+  assert.equal(byId.ok, true);
+  if (byId.ok) {
+    assert.equal(byId.result.task!.target.id, "-42");
+    assert.equal(byId.result.task!.target.kind, "chat");
+  }
+
+  const byChannel = parseTrigger("9.30 打卡 到:-1001234567890", {});
+  assert.equal(byChannel.ok, true);
+  if (byChannel.ok) {
+    assert.equal(byChannel.result.task!.target.id, "-1001234567890");
+    assert.equal(byChannel.result.task!.target.kind, "channel");
+  }
+
+  const byUsername = parseTrigger("9.30 打卡 @mychannel", {});
+  assert.equal(byUsername.ok, true);
+  if (byUsername.ok) {
+    assert.equal(byUsername.result.task!.target.username, "mychannel");
+    assert.equal(byUsername.result.task!.target.kind, "user");
+  }
+});
+
 test("默认目标兜底", () => {
   const parsed = parseTrigger("9.30 签到", { defaultTarget: "-1001234567890" });
   assert.equal(parsed.ok, true);

@@ -662,6 +662,7 @@ export class TgAgent implements DurableObject {
     const ctx: TriggerContext = {
       defaultTarget: settings.defaultTarget || undefined,
       forwarded: hint ?? this.rememberedTarget(),
+      sourceChat: await this.toTarget(client, entity, ""),
     };
 
     const parsed = parseTrigger(text, ctx);
@@ -1170,7 +1171,8 @@ const HELP_TEXT = `💡 触发语法：[时间] [动作...]
  · rand:早安|晚上好|午安 → 随机挑一条发送
 修饰：#kw:签到成功|已签到  #jitter:120  #once  #delete:30  #timeout:40  #delay:3  #thread:12  #name:名称
 （每个动作之间默认间隔 3 秒，用 #delay:0 可关掉）
-目标：消息里写 @机器人 / t.me 链接，或把机器人消息转发/分享到收藏夹（先转发再发配置也认，30 分钟内有效）
+目标：@机器人 / @群组 / t.me 链接 / 到:-100xxx，或把消息转发/分享到收藏夹（先转发再发配置也认，30 分钟内有效）
+群组：@here = 发到当前这个群（在群里发配置时最省事）
 
 示例：
 9.30 签到

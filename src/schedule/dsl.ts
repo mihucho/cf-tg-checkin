@@ -224,6 +224,7 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
   let deleteAfterSeconds = 0;
   let cleanupPrevious = false;
   let onlyOnce = false;
+  let useHere = false;
   let nameOverride = "";
   let pendingText = "";
 
@@ -259,6 +260,12 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
       if (flag === "clean") cleanupPrevious = true;
       if (flag === "keep") cleanupPrevious = false;
       if (ONCE_WORDS.has(flag)) onlyOnce = true;
+      continue;
+    }
+
+    // @here / #here：发到当前这个会话（在群里发配置时最方便）
+    if (/^(?:@|#)?(?:here|这里|当前|本群|当前群)$/i.test(token)) {
+      useHere = true;
       continue;
     }
 
@@ -388,8 +395,13 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
     return { ok: false, error: "缺少动作：时间后面要写要发送的内容，例如 `9.30 签到`" };
   }
 
+  if (useHere && !ctx.sourceChat && !ctx.allowMissingTarget) {
+    return { ok: false, error: "@here 只能在控制会话里用：它表示「发到当前这个会话」" };
+  }
+
   const resolvedTarget: Target | null =
     target ??
+    (useHere ? (ctx.sourceChat ?? null) : null) ??
     ctx.forwarded ??
     (ctx.defaultTarget ? targetFromId(ctx.defaultTarget) : null) ??
     (ctx.allowMissingTarget ? { kind: "user", id: "", title: "（待指定目标）" } : null);
