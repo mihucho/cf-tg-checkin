@@ -158,6 +158,39 @@ npm run typecheck
 
 ---
 
+## 用 Cloudflare Access 兜一层（可选，强烈建议）
+
+Cloudflare Access 是 Zero Trust 里的"身份感知代理"：请求先经过 Cloudflare 的身份验证
+（邮箱一次性验证码 / Google / GitHub / 企业 SSO），通过后才转发到你的 Worker。
+也就是说 —— 就算 `ADMIN_PASSWORD` 泄露，攻击者连登录页都打不开。
+
+免费版 50 个用户，个人用足够。步骤：
+
+1. **必须用自定义域名**：Access 只能保护你自己 zone 里的主机名，`*.workers.dev` 不支持
+   （先按下一节把自定义域名加上，例如 `checkin.example.com`）
+2. Cloudflare 控制台 → **Zero Trust → Access → Applications → Add an application**
+   → **Self-hosted**
+3. Application domain 填 `checkin.example.com`，路径 `/*`
+4. Policy：**Allow**，条件填你自己的邮箱；登录方式选 One-time PIN（最省事）或接 Google/GitHub
+5. 保存后用无痕窗口访问，应该先要求验证身份，然后才看到「TG 签到台」的登录页
+
+⚠️ **务必堵住 workers.dev 旁路**：Access 只保护了 `checkin.example.com`，
+但同一个 Worker 通常还能通过 `cf-tg-checkin.<你的子域>.workers.dev` 直接访问，等于绕过了 Access。
+二选一：
+
+```bash
+# 方案 A：关掉 workers.dev 路由（推荐，配合自定义域名）
+npx wrangler deploy --var ALLOWED_HOSTS:checkin.example.com
+
+# 方案 B：在 wrangler.jsonc 里彻底禁用
+#   "workers_dev": false
+```
+
+`ALLOWED_HOSTS` 是逗号分隔的白名单，配置后其它 Host 一律 403。
+它同时也是**唯一的 Host 校验**手段，所以别把它设成通配。
+
+Access 只影响 HTTP 管理面；定时签到走 DO alarm，不经过 Access，不受影响。
+
 ## 自定义域名
 
 Worker → **Settings → Domains & Routes → Add → Custom Domain**，

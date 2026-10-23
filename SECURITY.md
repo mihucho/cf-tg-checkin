@@ -68,7 +68,9 @@ Permissions-Policy: geolocation=(), microphone=(), camera=()
 
 ## 残余风险（已知、可接受）
 
-1. **单口令、无二次认证**：口令泄露即等于管理员。建议叠加 Cloudflare Access（邮箱/SSO）或放在内网/私有域名后。
+1. **单口令、无二次认证**：口令泄露即等于管理员。建议叠加 Cloudflare Access（邮箱/SSO 身份代理）或放在内网/私有域名后：
+   配置步骤见 [docs/DEPLOY.md](docs/DEPLOY.md#用-cloudflare-access-兜一层可选强烈建议)，
+   并用 `ALLOWED_HOSTS` 关掉 `workers.dev` 旁路（否则 Access 可以被绕开）。
 2. **无状态 Cookie 不能单点吊销**：只能靠缩短 TTL 或换密钥全局失效（已把 TTL 降到 7 天）。
 3. **`api_id` 与 session 存在 DO 里**：Cloudflare 侧可见；这是托管模型的固有信任。
 4. **Telegram 侧风险**：数据中心出口 IP 登录用户账号，极端情况下会要求重新验证（不是封号）；详见 README「关于 Telegram 侧的 IP / 封号风险」。
