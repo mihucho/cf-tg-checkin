@@ -31,6 +31,7 @@
 | 9 | SQL 注入：`?limit=abc` / `?limit=1 OR 1=1` / `?limit[]=1` | 不报错、不泄露 SQL | 参数非法时回落默认值 | ✅（已修） |
 | 10 | 登录爆破：错误密码 ×20 | 触发限速 | 第 10 次起 429 + `Retry-After` | ✅（已修） |
 | 10b | 配了 Turnstile 时：无 token / 错误 token | 400 拒绝 | `请先完成人机验证` / `人机验证未通过（invalid-input-response）` | ✅ |
+| 10c | Turnstile Secret 是否会回传给前端 | 不回传 | `/api/settings` 与 `/api/state` 里 `turnstileSecretKey` 恒为空，只有 `turnstileSecretConfigured: true` | ✅ |
 | 11 | 锁定期内用**正确**密码 | 仍然 429 | 429 | ✅（限速不可绕过） |
 | 12 | 超大请求体（1 MB） | 413 | 413 | ✅（已修） |
 | 13 | 超长触发文本（200 KB） | 拒绝或截断 | 413（body 上限）/ 解析时截到 2000 字符 | ✅（已修） |

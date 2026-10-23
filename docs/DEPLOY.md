@@ -160,33 +160,39 @@ npm run typecheck
 
 ## 登录人机验证（Cloudflare Turnstile，可选）
 
-给登录页加一层「我不是机器人」，防住口令爆破之外的撞库/脚本尝试。免费，且不像 reCAPTCHA 那样要额外开关。
+给登录页加一层「我不是机器人」。免费，且不像 reCAPTCHA 那样要额外开关。
 
-1. Cloudflare 控制台 → **Turnstile** → **Add site**
-   - 域名填你的 Worker 域名（`cf-tg-checkin.xxx.workers.dev` 或自定义域名都行）
-   - Widget Mode 用默认的 **Managed**
-2. 拿到两个 key，配到 Worker：
+**1. 先建一个 Widget**：Cloudflare 控制台 → **Turnstile** → **Add site**
+- 域名填你的 Worker 域名（`*.workers.dev` 或自定义域名都行）
+- Widget Mode 用默认的 **Managed**
 
-```bash
-npx wrangler secret put TURNSTILE_SITE_KEY     # 站点 key（公开，会下发到前端）
-npx wrangler secret put TURNSTILE_SECRET_KEY   # 密钥（只在服务端用）
-```
+**2. 有两种配置方式（任选）**
 
-3. 刷新登录页 —— 密码框下面会出现验证框；**没配这两个变量时完全不出现**，登录流程和以前一样。
+| 方式 | 怎么做 | 适用 |
+| --- | --- | --- |
+| **设置页**（推荐给个人部署） | 登录后 → 设置 → 「登录人机验证」→ 填 Site Key + Secret Key → 保存。立刻生效，无需重新部署 | 自己一个人维护 |
+| 环境变量 | `npx wrangler secret put TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | 想用 IaC/CI 管配置 |
+
+> 环境变量**优先于**设置页：两者都配时用环境变量，设置页里仍会显示 Site Key 供你核对。
+
+![设置页里的 Turnstile 配置](images/settings-turnstile.png)
 
 行为细节：
 
-- 只有**两个 key 都配了**才启用（只配一个视为没配，避免把人锁在门外）
-- 校验失败直接拒绝登录（400），并计入登录失败次数（10 次/10 分钟锁定照旧）
-- 校验服务不可用时 **fail closed**（拒绝登录）。真遇到 Turnstile 故障要应急登录，删掉 `TURNSTILE_SECRET_KEY` 即可
-- 校验通过后 cookie 正常下发，7 天有效；定时签到不受影响（不经过 HTTP）
+- 只有 **Site Key 与 Secret Key 都齐** 才启用（只配一半视为没配，避免半残配置把人锁在门外）
+- Secret Key 只存服务端（DO 内嵌 SQLite），接口永远回传空字符串，只给一个 `turnstileSecretConfigured: true` 标记
+- 设置页里 Secret 留空保存 = 保持不变；勾选「清除已保存的密钥」= 关闭人机验证
+- 校验失败直接 400，并计入登录限速（10 次/10 分钟锁定照旧）
+- 校验服务不可用时 **fail closed**（拒绝登录）；应急办法是清掉 Secret
+- 定时签到不受影响（不经过 HTTP）
 
-本地联调可以用 Cloudflare 官方测试 key（`.dev.vars`）：
+本地联调可以用 Cloudflare 官方测试 key：
 
 ```ini
+# .dev.vars 或 设置页里填
 TURNSTILE_SITE_KEY=1x00000000000000000000AA
 TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA   # 始终通过
-# TURNSTILE_SECRET_KEY=2x0000000000000000000000000000000AA # 始终失败，用来测拒绝路径
+# 2x0000000000000000000000000000000AA                      # 始终失败，用来测拒绝路径
 ```
 
 > CSP 已经允许 `https://challenges.cloudflare.com`（脚本 / iframe / 连接），不需要额外改。

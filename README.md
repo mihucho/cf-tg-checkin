@@ -73,7 +73,7 @@ npm run deploy                             # 打包 + 部署
 | --- | --- |
 | `ADMIN_PASSWORD` | **必填**，管理界面登录口令（`openssl rand -base64 24`） |
 | `SESSION_SECRET` | 登录 Cookie 的 HMAC 密钥，不填则复用 `ADMIN_PASSWORD` |
-| `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | 可选：开启登录页人机验证（Cloudflare Turnstile），见 [docs/DEPLOY.md](docs/DEPLOY.md#登录人机验证cloudflare-turnstile可选) |
+| `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | 可选：开启登录页人机验证（Cloudflare Turnstile）。也可以直接在**设置页**填，无需重新部署 |
 | `TG_API_ID` / `TG_API_HASH` | 把 Telegram 应用凭据放环境变量，省得在界面填 |
 
 > 口令用 `npx wrangler secret put ADMIN_PASSWORD` 设置。
@@ -276,7 +276,7 @@ npx wrangler deploy --var DO_LOCATION_HINT:apac   # apac / enam / weur / eeur / 
 完整的威胁模型、实测结果和已知残余风险见 **[SECURITY.md](SECURITY.md)**。
 
 - 管理界面用一个口令 + HMAC 签名的 HttpOnly Cookie（7 天有效，登录失败 10 次/10 分钟会锁定）
-- 可选接入 **Cloudflare Turnstile** 人机验证（配了才出现在登录页）
+- 可选接入 **Cloudflare Turnstile** 人机验证（设置页填 Key 即可，Secret 只存服务端、不回传）
 - 生产建议叠一层 **Cloudflare Access**（邮箱/SSO 身份代理）挡住整个管理面，并用 `ALLOWED_HOSTS` 关掉 `workers.dev` 旁路 —— 见 [docs/DEPLOY.md](docs/DEPLOY.md#用-cloudflare-access-兜一层可选强烈建议)
 - Telegram session（等价于登录态）加密前后都只存在你自己的 Durable Object 里
 - 触发消息会真的往目标聊天发消息，请确认控制会话里的人可信

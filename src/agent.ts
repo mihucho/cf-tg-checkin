@@ -129,12 +129,16 @@ export class TgAgent implements DurableObject {
       if (colo && this.store.getKv("runtime:colo") !== colo) this.store.setKv("runtime:colo", colo);
       if (path === "/state" && method === "GET") return json(await this.buildState());
       if (path === "/settings" && method === "POST") {
-        const patch = (await request.json()) as Partial<Settings>;
+        const body = (await request.json()) as Partial<Settings> & { clearTurnstileSecret?: boolean };
+        const { clearTurnstileSecret, ...rest } = body;
+        const patch: Partial<Settings> = { ...rest };
+        if (clearTurnstileSecret) patch.turnstileSecretKey = "";
         const before = this.store.getSettings();
-        const settings = this.store.saveSettings(sanitizeSettings(patch));
-        if (before.controlChat !== settings.controlChat) this.resetTriggerCursor();
-        if (before.triggerEnabled !== settings.triggerEnabled) await this.scheduleNextAlarm();
-        return json({ settings });
+        const saved = this.store.saveSettings(sanitizeSettings(patch));
+        if (clearTurnstileSecret) this.store.saveSettings({ turnstileSecretKey: "" });
+        if (before.controlChat !== saved.controlChat) this.resetTriggerCursor();
+        if (before.triggerEnabled !== saved.triggerEnabled) await this.scheduleNextAlarm();
+        return json({ settings: redactSettings(this.store.getSettings()) });
       }
 
       if (path === "/tasks" && method === "POST") {
@@ -196,6 +200,17 @@ export class TgAgent implements DurableObject {
       if (path === "/logs/clear" && method === "POST") {
         this.store.clearLogs();
         return json({ ok: true });
+      }
+
+      if (path === "/auth/turnstile" && method === "GET") {
+        const settings = this.store.getSettings();
+        const siteKey = (this.env.TURNSTILE_SITE_KEY ?? "").trim() || settings.turnstileSiteKey;
+        const secretKey = (this.env.TURNSTILE_SECRET_KEY ?? "").trim() || settings.turnstileSecretKey;
+        return json({
+          siteKey: siteKey || null,
+          secretKey: secretKey || null,
+          source: (this.env.TURNSTILE_SECRET_KEY ?? "").trim() ? "env" : secretKey ? "settings" : null,
+        });
       }
 
       if (path === "/auth/attempt" && method === "POST") {
@@ -1285,7 +1300,7 @@ export class TgAgent implements DurableObject {
         dc: Number(this.store.getKv("account:dc") ?? 0) || null,
         lastError: this.store.getKv(KV_LAST_ERROR),
       },
-      settings,
+      settings: redactSettings(settings),
       tasks,
       logs: this.store.listLogs({ limit: 50 }),
       stats: {
@@ -1321,6 +1336,14 @@ function sanitizeSettings(patch: Partial<Settings>): Partial<Settings> {
     const value = Number(patch.stepPollSeconds);
     if (Number.isFinite(value)) clean.stepPollSeconds = Math.max(1, Math.min(30, value));
   }
+  if (patch.turnstileSiteKey !== undefined) {
+    clean.turnstileSiteKey = String(patch.turnstileSiteKey).trim().slice(0, 200);
+  }
+  if (patch.turnstileSecretKey !== undefined) {
+    const secret = String(patch.turnstileSecretKey).trim().slice(0, 200);
+    // 空字符串表示"保持不变"，要清除请用 clearTurnstileSecret
+    if (secret) clean.turnstileSecretKey = secret;
+  }
   if (patch.stepWaitSeconds !== undefined) {
     const value = Number(patch.stepWaitSeconds);
     if (Number.isFinite(value)) clean.stepWaitSeconds = Math.max(5, Math.min(300, value));
@@ -1332,6 +1355,15 @@ const MAX_NAME = 80;
 const MAX_HANDLE = 80;
 const MAX_STEP_TEXT = 500;
 const MAX_KEYWORDS = 20;
+
+/** 对外输出设置时，把敏感字段换成布尔标记 */
+export function redactSettings(settings: Settings): Settings {
+  return {
+    ...settings,
+    turnstileSecretKey: "",
+    turnstileSecretConfigured: Boolean(settings.turnstileSecretKey),
+  };
+}
 
 function clampText(value: unknown, max: number): string {
   return String(value ?? "").slice(0, max);

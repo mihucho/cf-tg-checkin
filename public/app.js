@@ -179,8 +179,22 @@ function showBoot() {
  */
 async function setupTurnstile() {
   const slot = dom.turnstileSlot;
-  const siteKey = state.turnstileSiteKey || (state.session && state.session.turnstileSiteKey) || null;
-  if (!slot || !siteKey) return;
+  if (!slot) return;
+
+  // 设置页刚配好 / 刚登出时，本地可能还没有 site key —— 现拉一次 /api/session
+  let siteKey = state.turnstileSiteKey || (state.session && state.session.turnstileSiteKey) || null;
+  if (!siteKey) {
+    try {
+      const latest = await api("/api/session", { auth: false });
+      if (latest) {
+        state.session = { ...(state.session || {}), ...latest };
+        siteKey = latest.turnstileSiteKey || null;
+      }
+    } catch {
+      /* 拿不到就当没启用 */
+    }
+  }
+  if (!siteKey) return;
   state.turnstileSiteKey = siteKey;
   if (state.turnstileWidget !== null) return; // 已经渲染过
 
@@ -1543,6 +1557,33 @@ function renderSettings() {
       control: textControl("defaultTarget", settings.defaultTarget ?? "", "@username 或数字 id"),
       hint: "触发消息里识别不到目标时使用，例如 @jerry_bot。",
     }),
+    el("div", { class: "form-section-title" }, "登录人机验证（Cloudflare Turnstile）"),
+    field({
+      id: "settings-turnstileSiteKey",
+      label: "站点 key（Site Key）",
+      control: textControl("turnstileSiteKey", settings.turnstileSiteKey ?? "", "例如 0x4AAAAAAA…"),
+      hint: "Cloudflare 控制台 → Turnstile → Add site 里获取。填了才会在登录页出现验证框。",
+    }),
+    field({
+      id: "settings-turnstileSecret",
+      label: "密钥（Secret Key）",
+      control: el("input", {
+        class: "input",
+        id: "settings-turnstileSecret",
+        name: "turnstileSecretKey",
+        type: "password",
+        autocomplete: "new-password",
+        spellcheck: "false",
+        placeholder: settings.turnstileSecretConfigured ? "已配置（留空表示不修改）" : "例如 0x4AAAAAAA…",
+      }),
+      hint: "只存在服务端，接口不会回传。留空保存 = 保持不变；要关闭验证请点下面的「清除」。",
+    }),
+    el(
+      "div",
+      { class: "check-row" },
+      el("input", { type: "checkbox", id: "settings-clearTurnstile", name: "clearTurnstileSecret" }),
+      el("label", { for: "settings-clearTurnstile" }, "清除已保存的密钥（关闭人机验证）"),
+    ),
     el(
       "div",
       { class: "form-actions" },
@@ -1666,12 +1707,21 @@ async function saveSettings(event) {
     defaultTarget: read("defaultTarget").trim(),
     stepPollSeconds,
     stepWaitSeconds,
+    turnstileSiteKey: read("turnstileSiteKey").trim(),
   };
+  // 密钥留空表示"不修改"，填了才提交；勾选「清除」则显式清空
+  const turnstileSecret = read("turnstileSecretKey").trim();
+  if (turnstileSecret) body.turnstileSecretKey = turnstileSecret;
+  if (checked("clearTurnstileSecret")) body.clearTurnstileSecret = true;
 
   await withLoading(form.querySelector('[type="submit"]'), async () => {
     try {
       await api("/api/settings", { method: "POST", body });
       form.dataset.dirty = "";
+      // 让下一次进登录页时重新读 site key
+      state.turnstileSiteKey = null;
+      state.turnstileWidget = null;
+      if (state.session) delete state.session.turnstileSiteKey;
       toast("设置已保存", { kind: "ok" });
       await refreshState({ silent: true });
       paint({ force: true });
