@@ -1036,7 +1036,7 @@ export class TgAgent implements DurableObject {
       if (task.deleteAfterSeconds > 0 && outcome.sent.length) {
         this.store.addDeletion(outcome.chatId ?? task.target.id, outcome.sent, Date.now() + task.deleteAfterSeconds * 1000);
       }
-      this.store.recordRun(task.id, outcome.ok ? "ok" : "fail", outcome.message, Date.now());
+      this.store.recordRun(task.id, outcome.ok ? "ok" : "fail", outcome.message, outcome.detail || null, Date.now());
       log = this.store.addLog({
         taskId: task.id,
         taskName: task.name,
@@ -1048,7 +1048,7 @@ export class TgAgent implements DurableObject {
       });
     } catch (error) {
       const message = errorMessage(error);
-      this.store.recordRun(task.id, "fail", message, Date.now());
+      this.store.recordRun(task.id, "fail", message, null, Date.now());
       log = this.store.addLog({
         taskId: task.id,
         taskName: task.name,
@@ -1216,7 +1216,8 @@ const HELP_TEXT = `💡 触发语法：[时间] [动作...]
  · wait:5 → 等待 5 秒
  · rand:早安|晚上好|午安 → 随机挑一条发送
 修饰：#kw:签到成功|已签到  #jitter:120  #once  #delete:30  #timeout:40  #delay:3  #thread:12  #name:名称
-（每个动作之间默认间隔 3 秒，用 #delay:0 可关掉）
+（每个动作之间默认间隔 3 秒，用 #delay:0 可关掉
+运行细节（每步、按钮列表、机器人回应）在「任务 → 最近结果 → 步骤日志」里）
 目标：@机器人 / @群组 / t.me 链接 / 到:-100xxx，或把消息转发/分享到收藏夹（先转发再发配置也认，30 分钟内有效）
 群组：@here = 发到当前这个群（在群里发配置时最省事）
 

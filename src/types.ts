@@ -63,6 +63,8 @@ export interface Task {
   lastRunAt: number | null;
   lastResult: "ok" | "fail" | null;
   lastMessage: string | null;
+  /** 最后一次运行的逐步日志（换行分隔，界面里可展开查看） */
+  lastDetail?: string | null;
   source: TaskSource;
   createdAt: number;
   updatedAt: number;

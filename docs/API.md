@@ -81,6 +81,7 @@
   "lastRunAt": 1761234000000,   // epoch 毫秒
   "lastResult": "ok",               // ok | fail | null
   "lastMessage": "签到成功",
+  "lastDetail": "· 步骤1 发送「/start」\n· 步骤2 点击「个人资料」…",   // 最近一次运行的逐步日志
   "source": "ui",                   // ui | trigger
   "createdAt": 1761200000000,   // epoch 毫秒
   "updatedAt": 1761200000000    // epoch 毫秒

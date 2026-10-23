@@ -12,6 +12,7 @@ import {
   iconButton,
   toast,
   closeModal,
+  openModal,
   confirmDialog,
   withLoading,
   setServerNow,
@@ -651,11 +652,52 @@ function resultCell(task) {
   if (!task.lastResult) return el("span", { class: "muted" }, "—");
   const ok = task.lastResult === "ok";
   return el(
-    "span",
-    { class: `status ${ok ? "is-ok" : "is-fail"}`, title: task.lastMessage || "" },
-    el("span", { class: `dot ${ok ? "ok" : "fail"}` }),
-    el("span", {}, ok ? "成功" : "失败"),
+    "div",
+    { class: "result-cell" },
+    el(
+      "span",
+      { class: `status ${ok ? "is-ok" : "is-fail"}`, title: task.lastMessage || "" },
+      el("span", { class: `dot ${ok ? "ok" : "fail"}` }),
+      el("span", {}, ok ? "成功" : "失败"),
+    ),
+    task.lastDetail
+      ? el(
+          "button",
+          {
+            class: "link link-sm result-detail-btn",
+            type: "button",
+            onclick: () => openRunDetail(task),
+          },
+          "步骤日志",
+        )
+      : null,
   );
+}
+
+/** 最后一次运行的逐步日志：弹窗里看，避免挤在表格单元格里 */
+function openRunDetail(task) {
+  const when = task.lastRunAt ? formatDateTime(task.lastRunAt) : "未知时间";
+  const ok = task.lastResult === "ok";
+  openModal({
+    title: `最近一次运行 · ${task.name || `任务 #${task.id}`}`,
+    body: el(
+      "div",
+      { class: "run-detail" },
+      el(
+        "div",
+        { class: "run-detail-meta" },
+        el("span", { class: `status ${ok ? "is-ok" : "is-fail"}` }, el("span", { class: `dot ${ok ? "ok" : "fail"}` }), el("span", {}, ok ? "成功" : "失败")),
+        el("span", { class: "muted" }, `· ${when}`),
+        el("span", { class: "muted" }, `· ${task.lastMessage || "无摘要"}`),
+      ),
+      el("pre", { class: "run-detail-body" }, task.lastDetail || "（这次运行没有步骤日志）"),
+      el(
+        "p",
+        { class: "hint" },
+        "完整历史在「日志」页；这里只保留最近一次运行的步骤。",
+      ),
+    ),
+  });
 }
 
 function openEditor(task) {

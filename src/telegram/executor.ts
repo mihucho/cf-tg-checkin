@@ -131,10 +131,41 @@ export interface ButtonInfo {
   row: number;
   column: number;
   text: string;
-  kind: "callback" | "url" | "webview" | "text" | "other";
+  kind: "callback" | "url" | "webview" | "switch" | "text" | "other";
   data?: Buffer;
+  url?: string;
+  /** switch_inline 按钮要带的 query */
+  query?: string;
+  /** TL 里的类名，排查时有用 */
+  className?: string;
 }
 
+/** 去掉空格、emoji、标点后的文本，用于按钮匹配（机器人常在按钮前加图标） */
+export function normalizeButtonText(value: string): string {
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+type ButtonLike = {
+  className?: string;
+  text?: string;
+  data?: Buffer | Uint8Array;
+  url?: string;
+  type?: {
+    className?: string;
+    data?: Buffer | Uint8Array;
+    url?: string;
+    query?: string;
+  };
+};
+
+/**
+ * 解析一条消息上的按钮。
+ *
+ * 注意 layer 232 的 inline 按钮结构换成了
+ *   KeyboardInlineButton { text, type: InlineButtonTypeCallback { data } | InlineButtonTypeUrl { url } | … }
+ * 老版本则是 KeyboardButtonCallback { text, data } / KeyboardButtonUrl { text, url }。
+ * 两种都要认，否则会出现「按钮匹配上了但点不动」。
+ */
 export function flattenButtons(message: Api.Message): ButtonInfo[] {
   const markup = (message as { replyMarkup?: unknown }).replyMarkup;
   if (!markup || typeof markup !== "object") return [];
@@ -145,25 +176,37 @@ export function flattenButtons(message: Api.Message): ButtonInfo[] {
   rows.forEach((row, rowIndex) => {
     const buttons = Array.isArray(row.buttons) ? row.buttons : [];
     buttons.forEach((raw, columnIndex) => {
-      const button = raw as {
-        className?: string;
-        text?: string;
-        data?: Buffer | Uint8Array;
-        url?: string;
-      };
+      const button = raw as ButtonLike;
       const className = button.className ?? "";
+      const type = button.type;
       const text = String(button.text ?? "");
+
+      // 回调数据：老结构直接在按钮上，新结构在 type 里
+      const data =
+        button.data ?? (type?.className === "InlineButtonTypeCallback" ? type.data : undefined);
+      // 链接
+      const url =
+        button.url ??
+        (type?.className === "InlineButtonTypeUrl" || type?.className === "InlineButtonTypeWebView"
+          ? type.url
+          : undefined);
+
       let kind: ButtonInfo["kind"] = "other";
-      if (button.data) kind = "callback";
-      else if (button.url) kind = "url";
-      else if (/WebView/i.test(className)) kind = "webview";
-      else if (className === "KeyboardButton" || className === "" || !/Inline|Callback|Url/.test(className)) kind = "text";
+      if (data !== undefined && data !== null) kind = "callback";
+      else if (url) kind = /WebView/i.test(type?.className ?? className) ? "webview" : "url";
+      else if (type?.className === "InlineButtonTypeSwitchInline") kind = "switch";
+      else if (/WebView/i.test(className) || /WebView/i.test(type?.className ?? "")) kind = "webview";
+      else if (type === undefined) kind = "text"; // 普通键盘按钮（reply keyboard）
+
       result.push({
         row: rowIndex,
         column: columnIndex,
         text,
         kind,
-        data: button.data ? Buffer.from(button.data as Uint8Array) : undefined,
+        data: data ? Buffer.from(data as Uint8Array) : undefined,
+        url,
+        query: type?.className === "InlineButtonTypeSwitchInline" ? type.query : undefined,
+        className,
       });
     });
   });
@@ -177,10 +220,16 @@ export function hasButtons(message: Api.Message): boolean {
 export function selectButton(buttons: ButtonInfo[], step: Step): ButtonInfo | null {
   const wanted = (step.text ?? "").trim();
   if (wanted) {
+    // 1) 原样精确
     const exact = buttons.find((button) => button.text.trim() === wanted);
     if (exact) return exact;
-    const contains = buttons.find((button) => button.text.includes(wanted));
-    if (contains) return contains;
+    // 2) 去掉空格/图标/标点后比较（机器人按钮常带 👤✅ 这类前缀）
+    const normalized = normalizeButtonText(wanted);
+    if (normalized) {
+      const normalizedMatch = buttons.find((button) => normalizeButtonText(button.text).includes(normalized));
+      if (normalizedMatch) return normalizedMatch;
+    }
+    // 3) 大小写不敏感包含
     const lower = wanted.toLowerCase();
     const insensitive = buttons.find((button) => button.text.toLowerCase().includes(lower));
     if (insensitive) return insensitive;
@@ -263,25 +312,26 @@ async function clickButton(
   entity: EntityLike,
   message: Api.Message,
   button: ButtonInfo,
-): Promise<void> {
+): Promise<string> {
   if (button.kind === "callback") {
     const peer = await client.getInputEntity(entity as never);
-    await client.invoke(
+    const answer = (await client.invoke(
       new Api.messages.GetBotCallbackAnswer({
         peer: peer as Api.TypeEntityLike,
         msgId: message.id,
         data: button.data,
       }),
-    );
-    return;
+    )) as { message?: string };
+    return answer?.message ? `机器人回应：${String(answer.message).slice(0, 200)}` : "";
   }
   if (button.kind === "text") {
     await client.sendMessage(entity as never, { message: button.text, parseMode: false });
-    return;
+    return "";
   }
-  if (button.kind === "url") throw new Error(`按钮「${button.text}」是链接按钮，无法点击`);
-  if (button.kind === "webview") throw new Error(`按钮「${button.text}」是 webview 按钮，无法点击`);
-  throw new Error(`按钮「${button.text}」类型不支持点击`);
+  if (button.kind === "url") return `「${button.text}」是链接按钮，跳过：${button.url ?? ""}`;
+  if (button.kind === "webview") return `「${button.text}」是 webview 按钮，跳过`;
+  if (button.kind === "switch") return `「${button.text}」是 switch_inline 按钮，跳过`;
+  return `「${button.text}」类型不支持点击`;
 }
 
 function pickRandom(options: string[]): string {
@@ -380,13 +430,18 @@ export async function executeTask(
             break;
           }
           interactive = candidate;
+          note(
+            "info",
+            `步骤${stepNo} 消息 #${candidate.message.id} 上有 ${candidate.buttons.length} 个按钮：${describeButtons(candidate.buttons)}`,
+          );
           const button = selectButton(candidate.buttons, step);
           if (!button) {
-            note("warn", `步骤${stepNo} 没找到按钮「${step.text ?? `${step.row},${step.column}`}」，可选：${describeButtons(candidate.buttons)}`);
+            note("warn", `步骤${stepNo} 没找到按钮「${step.text ?? `${step.row},${step.column}`}」`);
             break;
           }
-          await clickButton(client, entity, candidate.message, button);
-          note("info", `步骤${stepNo} 点击「${button.text}」`);
+          const clickNote = await clickButton(client, entity, candidate.message, button);
+          note("info", `步骤${stepNo} 点击「${button.text}」（${button.kind}）`);
+          if (clickNote) note("info", `步骤${stepNo} ${clickNote}`);
           cursorId = Math.max(cursorId, candidate.message.id);
 
           // 点完之后机器人通常是「新发一条消息」或「原地编辑同一条消息」，

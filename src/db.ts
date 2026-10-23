@@ -24,6 +24,7 @@ const SCHEMA = [
       last_run_at INTEGER,
       last_result TEXT,
       last_message TEXT,
+      last_detail TEXT,
       source TEXT NOT NULL DEFAULT 'ui',
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
@@ -67,6 +68,7 @@ interface TaskRow extends Row {
   last_run_at: number | null;
   last_result: string | null;
   last_message: string | null;
+  last_detail: string | null;
   source: string;
   created_at: number;
   updated_at: number;
@@ -117,6 +119,7 @@ export function rowToTask(row: TaskRow): Task {
     lastRunAt: row.last_run_at,
     lastResult: (row.last_result as Task["lastResult"]) ?? null,
     lastMessage: row.last_message,
+    lastDetail: row.last_detail,
     source: (row.source as Task["source"]) ?? "ui",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -142,6 +145,11 @@ export class Store {
     // 老库补列（新库会因为列已存在而报错，忽略即可）
     try {
       this.sql.exec("ALTER TABLE tasks ADD COLUMN step_delay_seconds INTEGER NOT NULL DEFAULT 3");
+    } catch {
+      /* 列已存在 */
+    }
+    try {
+      this.sql.exec("ALTER TABLE tasks ADD COLUMN last_detail TEXT");
     } catch {
       /* 列已存在 */
     }
@@ -285,12 +293,13 @@ export class Store {
     this.sql.exec("UPDATE tasks SET next_run_at = ? WHERE id = ?", nextRunAt, id);
   }
 
-  recordRun(id: number, result: "ok" | "fail", message: string, now: number): void {
+  recordRun(id: number, result: "ok" | "fail", message: string, detail: string | null, now: number): void {
     this.sql.exec(
-      "UPDATE tasks SET last_run_at = ?, last_result = ?, last_message = ?, updated_at = ? WHERE id = ?",
+      "UPDATE tasks SET last_run_at = ?, last_result = ?, last_message = ?, last_detail = ?, updated_at = ? WHERE id = ?",
       now,
       result,
       message,
+      detail,
       now,
       id,
     );
