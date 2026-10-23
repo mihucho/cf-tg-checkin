@@ -87,6 +87,16 @@ npm run check                     # typecheck + test + build
 
 > 本地 workerd 也能真的连 Telegram（`cloudflare:sockets` 本地可用），登录流程可以在本地跑通。
 
+## 界面
+
+| 概览 | 任务 |
+| --- | --- |
+| ![概览](docs/images/overview.png) | ![任务](docs/images/tasks.png) |
+
+任务编辑器（动作流水线，按顺序执行）：
+
+![编辑器](docs/images/editor.png)
+
 ## 触发语法
 
 ```
@@ -174,10 +184,12 @@ src/
 ├── schedule/
 │   ├── time.ts           时区、下次执行时间计算
 │   └── dsl.ts            触发消息解析器
-public/                   管理界面（纯静态，无构建）
+public/                   管理界面（纯静态，无构建、无 CDN 依赖）
 build/patches/            teleproto 的 no-eval 补丁
-tests/schedule.test.ts    调度 & 语法单测
+tests/schedule.test.ts    调度 / 触发语法 / 按钮解析单测
 docs/API.md               前后端接口契约
+docs/DEPLOY.md            四种部署方式的完整步骤与排查表
+.github/workflows/        CI（typecheck + test + build）与部署
 ```
 
 ---
@@ -209,6 +221,20 @@ docs/API.md               前后端接口契约
 - 管理界面用一个口令 + HMAC 签名的 HttpOnly Cookie；生产建议再叠一层 Cloudflare Access
 - Telegram session（等价于登录态）加密前后都只存在你自己的 Durable Object 里
 - 触发消息会真的往目标聊天发消息，请确认控制会话里的人可信
+
+## 开发与贡献
+
+```bash
+npm run check     # typecheck + 单测 + 打包，一条命令确认没坏
+npm test          # 只跑调度 / 语法 / 按钮解析的单测
+```
+
+- 触发语法在 `src/schedule/dsl.ts`，改语法请顺手补 `tests/schedule.test.ts`
+- 调度时间算法在 `src/schedule/time.ts`（纯函数，不依赖 Intl 时区库）
+- 动作执行器在 `src/telegram/executor.ts`（发消息 / 轮询按钮 / 点击 / 判定）
+- 管理界面是 `public/` 下的纯静态文件，改完刷新即可，没有构建步骤
+
+Issue / PR 都欢迎。
 
 ## License
 
