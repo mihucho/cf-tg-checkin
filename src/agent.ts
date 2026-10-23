@@ -11,7 +11,7 @@ import { password as PasswordModule } from "teleproto";
 import type { TelegramClient } from "teleproto";
 import { Store } from "./db";
 import type { AccountInfo, AgentState, LogEntry, Settings, Target, Task, TaskInput } from "./types";
-import { createTgClient, errorMessage } from "./telegram/client";
+import { createTgClient, createTgClientOnDc, errorMessage, migrateDcFromError } from "./telegram/client";
 import { executeTask, resolveEntity, type ExecHooks } from "./telegram/executor";
 import { computeNextRun, formatInTimezone } from "./schedule/time";
 import { parseTrigger, usernameFromLink, type TriggerContext } from "./schedule/dsl";
@@ -365,6 +365,54 @@ export class TgAgent implements DurableObject {
     }
   }
 
+  /**
+   * 登录阶段的连接封装。
+   *
+   * 账号归属的 DC 不是默认 DC2 时，Telegram 会返回 `PHONE_MIGRATE_5` 之类的错误，
+   * 要求去目标 DC 上重新发起登录（验证码要在那个 DC 上申请）。
+   * teleproto 内部的重试本来会处理，但登录流程要拿到迁移后的 session，
+   * 这里再自己兜一层：命中迁移错误就换到目标 DC 重连重试一次。
+   */
+  private async withLoginClient<T>(
+    creds: { apiId: number; apiHash: string; session?: string },
+    fn: (client: TelegramClient) => Promise<T>,
+    options: { retryOnMigrate: boolean; startDc?: number | null } = { retryOnMigrate: true },
+  ): Promise<T> {
+    let pinnedDc: number | null = options.startDc ?? null;
+    let retried = false;
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const usePinned = pinnedDc !== null && !creds.session;
+      const client = usePinned
+        ? createTgClientOnDc(creds, pinnedDc as number)
+        : createTgClient({ apiId: creds.apiId, apiHash: creds.apiHash, session: creds.session ?? "" });
+      try {
+        await client.connect();
+        return await fn(client);
+      } catch (error) {
+        lastError = error;
+        const targetDc = migrateDcFromError(error);
+        if (targetDc !== null) this.store.setKv("account:dc", String(targetDc));
+        if (targetDc !== null && options.retryOnMigrate && !retried) {
+          retried = true;
+          pinnedDc = targetDc;
+          continue;
+        }
+        if (targetDc !== null && !options.retryOnMigrate) {
+          throw new Error(
+            `该账号归属 DC${targetDc}，验证码需要在该数据中心申请：请重新点击「获取验证码」再登录（已自动记住 DC${targetDc}）`,
+          );
+        }
+        throw error;
+      } finally {
+        await client.disconnect().catch(() => undefined);
+      }
+    }
+
+    throw lastError ?? new Error("登录失败");
+  }
+
   private persistSession(client: TelegramClient): void {
     try {
       const saved = client.session.save();
@@ -385,31 +433,34 @@ export class TgAgent implements DurableObject {
 
     this.store.setJson(KV_CREDS, { apiId, apiHash });
 
-    const client = createTgClient({ apiId, apiHash, session: "" });
-    try {
-      await client.connect();
-      const result = (await client.sendCode({ apiId, apiHash }, phone)) as {
-        phoneCodeHash: string;
-        isCodeViaApp: boolean;
-      };
-      const session = String(client.session.save() ?? "");
-      const pending: PendingLogin = {
-        apiId,
-        apiHash,
-        phone,
-        phoneCodeHash: result.phoneCodeHash,
-        session,
-        stage: "code",
-        at: Date.now(),
-      };
-      this.store.setJson(KV_PENDING, pending);
-      return {
-        stage: "code" as const,
-        hint: result.isCodeViaApp ? "验证码已发送到 Telegram App" : "验证码已通过短信发送",
-      };
-    } finally {
-      await client.disconnect().catch(() => undefined);
-    }
+    const knownDc = Number(this.store.getKv("account:dc") ?? 0) || null;
+    const { result, session } = await this.withLoginClient(
+      { apiId, apiHash },
+      async (client) => {
+        const sent = (await client.sendCode({ apiId, apiHash }, phone)) as {
+          phoneCodeHash: string;
+          isCodeViaApp: boolean;
+        };
+        return { result: sent, session: String(client.session.save() ?? "") };
+      },
+      { retryOnMigrate: true, startDc: knownDc },
+    );
+
+    const pending: PendingLogin = {
+      apiId,
+      apiHash,
+      phone,
+      phoneCodeHash: result.phoneCodeHash,
+      session,
+      stage: "code",
+      at: Date.now(),
+    };
+    this.store.setJson(KV_PENDING, pending);
+    return {
+      stage: "code" as const,
+      hint: result.isCodeViaApp ? "验证码已发送到 Telegram App" : "验证码已通过短信发送",
+      dc: session ? Number(this.store.getKv("account:dc") ?? 0) || undefined : undefined,
+    };
   }
 
   private async signIn(body: { code?: string; password?: string }) {
@@ -420,62 +471,64 @@ export class TgAgent implements DurableObject {
       throw new Error("验证码已过期，请重新获取");
     }
 
-    const client = createTgClient({
-      apiId: pending.apiId,
-      apiHash: pending.apiHash,
-      session: pending.session,
-    });
-
-    try {
-      await client.connect();
-
-      if (body.code) {
-        try {
-          const auth = await client.invoke(
-            new Api.auth.SignIn({
-              phoneNumber: pending.phone,
-              phoneCodeHash: pending.phoneCodeHash,
-              phoneCode: String(body.code).trim(),
-            }),
-          );
-          if (auth.className === "auth.AuthorizationSignUpRequired") {
-            throw new Error("该号码还没有 Telegram 账号，请先在官方客户端注册");
+    const outcome = await this.withLoginClient(
+      { apiId: pending.apiId, apiHash: pending.apiHash, session: pending.session },
+      async (client): Promise<{ kind: "password" } | { kind: "ok"; me: { id: string; username: string | null; firstName: string } }> => {
+        if (body.code) {
+          try {
+            const auth = await client.invoke(
+              new Api.auth.SignIn({
+                phoneNumber: pending.phone,
+                phoneCodeHash: pending.phoneCodeHash,
+                phoneCode: String(body.code).trim(),
+              }),
+            );
+            if (auth.className === "auth.AuthorizationSignUpRequired") {
+              throw new Error("该号码还没有 Telegram 账号，请先在官方客户端注册");
+            }
+          } catch (error) {
+            const message = errorMessage(error);
+            if (message === "SESSION_PASSWORD_NEEDED") {
+              this.store.setJson(KV_PENDING, {
+                ...pending,
+                stage: "password",
+                session: String(client.session.save() ?? pending.session),
+              } satisfies PendingLogin);
+              return { kind: "password" };
+            }
+            if (message === "PHONE_CODE_INVALID") throw new Error("验证码不正确");
+            if (message === "PHONE_CODE_EXPIRED") throw new Error("验证码已过期，请重新获取");
+            throw error;
           }
-        } catch (error) {
-          if (errorMessage(error) === "SESSION_PASSWORD_NEEDED") {
-            const updated: PendingLogin = { ...pending, stage: "password", session: String(client.session.save() ?? pending.session) };
-            this.store.setJson(KV_PENDING, updated);
-            return { stage: "password" as const };
-          }
-          if (errorMessage(error) === "PHONE_CODE_INVALID") throw new Error("验证码不正确");
-          if (errorMessage(error) === "PHONE_CODE_EXPIRED") throw new Error("验证码已过期，请重新获取");
-          throw error;
+        } else if (body.password) {
+          const passwordInfo = await client.invoke(new Api.account.GetPassword());
+          const check = await PasswordModule.computeCheck(passwordInfo, String(body.password));
+          await client.invoke(new Api.auth.CheckPassword({ password: check }));
+        } else {
+          throw new Error("请填写验证码或两步验证密码");
         }
-      } else if (body.password) {
-        const passwordInfo = await client.invoke(new Api.account.GetPassword());
-        const check = await PasswordModule.computeCheck(passwordInfo, String(body.password));
-        await client.invoke(new Api.auth.CheckPassword({ password: check }));
-      } else {
-        throw new Error("请填写验证码或两步验证密码");
-      }
 
-      const me = (await client.getMe()) as Api.User;
-      const info = {
-        id: String(me.id),
-        username: me.username ?? null,
-        firstName: me.firstName || me.username || "Telegram 用户",
-      };
-      this.store.setKv(KV_SESSION, String(client.session.save() ?? ""));
-      this.store.setJson(KV_ME, info);
-      this.store.setKv(KV_PHONE, pending.phone);
-      this.store.deleteKv(KV_PENDING);
-      this.store.deleteKv(KV_LAST_ERROR);
-      this.resetTriggerCursor();
-      await this.scheduleNextAlarm();
-      return { ok: true as const, me: info };
-    } finally {
-      await client.disconnect().catch(() => undefined);
-    }
+        const me = (await client.getMe()) as Api.User;
+        const info = {
+          id: String(me.id),
+          username: me.username ?? null,
+          firstName: me.firstName || me.username || "Telegram 用户",
+        };
+        this.store.setKv(KV_SESSION, String(client.session.save() ?? ""));
+        this.store.setJson(KV_ME, info);
+        return { kind: "ok", me: info };
+      },
+      { retryOnMigrate: false },
+    );
+
+    if (outcome.kind === "password") return { stage: "password" as const };
+
+    this.store.setKv(KV_PHONE, pending.phone);
+    this.store.deleteKv(KV_PENDING);
+    this.store.deleteKv(KV_LAST_ERROR);
+    this.resetTriggerCursor();
+    await this.scheduleNextAlarm();
+    return { ok: true as const, me: outcome.me };
   }
 
   private async logout() {
@@ -872,6 +925,7 @@ export class TgAgent implements DurableObject {
         me,
         connected: false,
         pendingLogin: pending ? { phone: pending.phone, stage: pending.stage } : null,
+        dc: Number(this.store.getKv("account:dc") ?? 0) || null,
         lastError: this.store.getKv(KV_LAST_ERROR),
       },
       settings,

@@ -7,6 +7,7 @@ import { parseTimeOfDay, nextDaily, nextWindow, computeNextRun, formatTimeOfDay 
 import { parseTrigger, tokenize } from "../src/schedule/dsl.ts";
 import type { Target } from "../src/types.ts";
 import { flattenButtons, selectButton, describeButtons } from "../src/telegram/executor.ts";
+import { createTgClientOnDc, migrateDcFromError, DC_SEEDS } from "../src/telegram/client.ts";
 
 let passed = 0;
 const failures: string[] = [];
@@ -267,6 +268,23 @@ test("selectButton：精确 > 包含 > 不区分大小写 > 行列", () => {
   assert.equal(selectButton(buttons, { type: "click", text: "check in" })?.text, "Check In");
   assert.equal(selectButton(buttons, { type: "click", row: 1, column: 1 })?.text, "签到记录");
   assert.equal(selectButton(buttons, { type: "click", text: "不存在" }), null);
+});
+
+// ---------------------------------------------------------------- DC 迁移
+test("migrateDcFromError 只认 PHONE/NETWORK_MIGRATE_n", () => {
+  assert.equal(migrateDcFromError({ errorMessage: "PHONE_MIGRATE_5" }), 5);
+  assert.equal(migrateDcFromError({ errorMessage: "NETWORK_MIGRATE_2" }), 2);
+  assert.equal(migrateDcFromError({ errorMessage: "PHONE_CODE_INVALID" }), null);
+  assert.equal(migrateDcFromError(new Error("PHONE_MIGRATE_4")), 4);
+  assert.equal(migrateDcFromError(null), null);
+});
+
+test("createTgClientOnDc 会把 session 固定到目标 DC（auth key 在该 DC 重新协商）", () => {
+  const client = createTgClientOnDc({ apiId: 1, apiHash: "x" }, 5);
+  assert.equal(client.session.dcId, 5);
+  assert.equal(client.session.serverAddress, DC_SEEDS[5]);
+  assert.equal(client.session.port, 443);
+  assert.equal(client.session.authKey, undefined);
 });
 
 // ---------------------------------------------------------------- 结果

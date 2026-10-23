@@ -29,6 +29,7 @@
     "me": { "id": "123", "username": "neo", "firstName": "Neo" } | null,
     "connected": false,          // 当前是否有活跃 MTProto 连接
     "pendingLogin": null | { "phone": "+861...", "stage": "code" | "password" },
+    "dc": 5 | null,             // 账号归属的 DC（登录时探测到才填）
     "lastError": "字符串或 null"
   },
   "settings": {
@@ -136,12 +137,13 @@
 
 | 方法 | 路径 | 请求体 | 响应 |
 | --- | --- | --- | --- |
-| POST | `/api/account/send-code` | `{ apiId: number, apiHash: string, phone: string }` | `{ stage: "code" \| "password", hint?: string }` |
+| POST | `/api/account/send-code` | `{ apiId: number, apiHash: string, phone: string }` | `{ stage: "code" \| "password", hint?: string, dc?: number }` |
 | POST | `/api/account/sign-in` | `{ code: string }` 或 `{ password: string }` | `{ ok: true, me }` / `{ stage: "password" }` |
 | POST | `/api/account/logout` | – | `{ ok: true }` |
 | POST | `/api/resolve` | `{ query: "@bot" \| "7661096533" \| "bot 昵称" }` | `{ peer: {kind,id,title,username} }` |
 
 说明：`send-code` 需要先在 UI 里填 apiId/apiHash（从 https://my.telegram.org 获取）。
+账号归属非 DC2 时 Telegram 返回 `PHONE_MIGRATE_n`，服务端会自动切到目标 DC 重试并记住它（`account.dc`）。
 第二步返回 `{ stage: "password" }` 时表示账号开了两步验证，需要再提交 `{ password }`。
 
 ## 触发消息解析（用于 UI 里的“试算”）
