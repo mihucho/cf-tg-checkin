@@ -5,6 +5,7 @@
  * 每一步都通过 messages.getHistory 轮询机器人回复，因此每次执行都是自包含的。
  */
 import { Api } from "teleproto";
+import bigInt from "big-integer";
 import { Buffer } from "node:buffer";
 import type { TelegramClient } from "teleproto";
 import type { Step, Target, Task } from "../types";
@@ -31,9 +32,16 @@ export function sleep(ms: number): Promise<void> {
 
 export type EntityLike = Parameters<TelegramClient["getInputEntity"]>[0];
 
-/** 支持 @username / 数字 id / 邀请链接 / me */
+/**
+ * 支持 @username / 数字 id / 邀请链接 / me。
+ *
+ * 注意：Target 里同时有 username 和数字 id 时**优先用 username** ——
+ * 数字 id 解析需要 access_hash，换了新连接 / 新 session 时可能拿不到，
+ * 会报 "Could not find the input entity for ..."。
+ */
 export function targetRef(target: Target | string): string {
-  const raw = typeof target === "string" ? target : target.id || target.username || "";
+  const raw =
+    typeof target === "string" ? target : target.username || target.id || "";
   const trimmed = raw.trim();
   if (!trimmed) return "";
   if (trimmed === "self" || trimmed === "me") return "me";
@@ -43,10 +51,49 @@ export function targetRef(target: Target | string): string {
   return `@${trimmed}`;
 }
 
+/**
+ * 用 access_hash 直接构造 InputPeer。
+ * 私有机器人 / 用户没有 username 时，只能靠它来解析（前提是建任务时抓到了 hash）。
+ */
+export function inputPeerFromTarget(target: Target | string): Api.TypeInputPeer | null {
+  if (typeof target === "string" || !target.accessHash) return null;
+  try {
+    const hash = bigInt(target.accessHash);
+    const rawId = String(target.id || "");
+    if (target.kind === "channel") {
+      const channelId = rawId.startsWith("-100") ? rawId.slice(4) : rawId.replace(/^-/, "");
+      return new Api.InputPeerChannel({ channelId: bigInt(channelId), accessHash: hash });
+    }
+    if (target.kind === "chat") {
+      return new Api.InputPeerChat({ chatId: bigInt(rawId.replace(/^-/, "")) });
+    }
+    return new Api.InputPeerUser({ userId: bigInt(rawId.replace(/^@/, "")), accessHash: hash });
+  } catch {
+    return null;
+  }
+}
+
 export async function resolveEntity(client: TelegramClient, target: Target | string): Promise<EntityLike> {
   const ref = targetRef(target);
-  if (!ref) throw new Error("目标为空");
-  return (await client.getEntity(ref)) as EntityLike;
+  const peer = inputPeerFromTarget(target);
+  if (!ref && !peer) throw new Error("目标为空");
+
+  const attempts: unknown[] = [];
+  if (ref) attempts.push(ref);
+  if (peer) attempts.push(peer);
+
+  let lastError: unknown = null;
+  for (const attempt of attempts) {
+    try {
+      return (await client.getEntity(attempt as never)) as EntityLike;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw new Error(
+    `无法解析目标「${ref || (peer ? "access_hash" : "")}」：${errorMessage(lastError)}；` +
+      `私有机器人请先在 Telegram 里和它对话，或把任务目标改成 @username`,
+  );
 }
 
 export interface ButtonInfo {

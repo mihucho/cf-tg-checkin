@@ -817,6 +817,7 @@ export class TgAgent implements DurableObject {
       title?: string;
       firstName?: string;
       username?: string;
+      accessHash?: unknown;
     };
     const kind = anyEntity.className === "Channel" ? "channel" : anyEntity.className === "Chat" ? "chat" : "user";
     let id = String(anyEntity.id ?? fallback);
@@ -827,11 +828,14 @@ export class TgAgent implements DurableObject {
     }
     // 有 username 时不必再塞一个同名的 title，界面上会重复显示成 "@bot @bot"
     const title = anyEntity.title || anyEntity.firstName || undefined;
+    const accessHash = anyEntity.accessHash;
     return {
       kind,
       id,
       title,
       username: anyEntity.username,
+      // 记下 access_hash：私有机器人/用户没有 username 时，只能靠它解析
+      ...(accessHash !== undefined && accessHash !== null ? { accessHash: String(accessHash) } : {}),
     };
   }
 
@@ -918,6 +922,49 @@ export class TgAgent implements DurableObject {
     return this.runTasks(tasks, undefined, { manual: true });
   }
 
+  /**
+   * 解析任务目标前先"体检"。
+   *
+   * 早期版本建的任务可能只存了数字 id（没有 username / access_hash），
+   * 而数字 id 在新连接上无法直接解析（"Could not find the input entity"）。
+   * 这里用对话列表反查一次，把 username / access_hash 补进任务里，之后就正常了。
+   */
+  private async healTarget(client: TelegramClient, task: Task): Promise<Task> {
+    try {
+      await resolveEntity(client, task.target);
+      if (task.target.username || task.target.accessHash) return task;
+    } catch {
+      /* 解析失败，继续尝试补全 */
+    }
+
+    try {
+      const dialogs = (await client.getDialogs({ limit: 200 })) as Array<{ entity?: unknown }>;
+      for (const dialog of dialogs) {
+        const entity = dialog?.entity;
+        if (!entity) continue;
+        const peerId = await client.getPeerId(entity as never).catch(() => null);
+        if (!peerId || String(peerId) !== String(task.target.id)) continue;
+        const target = await this.toTarget(client, entity, "");
+        if (!target.username && !target.accessHash) continue;
+        const updated = this.store.updateTask(task.id, { target }, Date.now());
+        this.store.addLog({
+          taskId: task.id,
+          taskName: task.name,
+          at: Date.now(),
+          ok: true,
+          level: "info",
+          message: `目标已自动补全：${target.username ? `@${target.username}` : target.id}`,
+          detail: null,
+        });
+        return updated ?? { ...task, target };
+      }
+    } catch {
+      /* 补全失败就按原样继续，让上层报错 */
+    }
+
+    return task;
+  }
+
   private async runSingleTask(
     client: TelegramClient,
     task: Task,
@@ -931,6 +978,7 @@ export class TgAgent implements DurableObject {
     let log: LogEntry;
     try {
       const settings = this.store.getSettings();
+      task = await this.healTarget(client, task);
       const outcome = await executeTask(client, task, {
         previousSent,
         hooks,

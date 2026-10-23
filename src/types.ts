@@ -25,6 +25,8 @@ export interface Target {
   id: string;
   title?: string;
   username?: string;
+  /** 目标实体的 access_hash（有它就不必"见过"对方也能解析） */
+  accessHash?: string;
 }
 
 export type ScheduleKind = "daily" | "window" | "interval" | "once";
