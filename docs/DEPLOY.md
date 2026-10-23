@@ -238,10 +238,11 @@ npx wrangler secret put ADMIN_PASSWORD   # 之后再设口令，不会动脚本
 
 ```bash
 curl -s https://cf-tg-checkin.<你的子域>.workers.dev/api/version
-# {"buildId":"2026-10-24T01:48:12Z","commit":"e124e2e","worker":"cf-tg-checkin"}
+# {"version":"0.1.0","commit":"bbc176b","buildId":"2026-10-24T01:51:59Z","worker":"cf-tg-checkin"}
 ```
 
-登录页底部和「设置 → 关于」也会显示同样的 `commit · buildId`。
+登录页底部、主界面页脚和「设置 → 关于」也会显示同样的 `v版本 · commit · 构建时间`。
+版本号只在 `package.json` 里维护（`npm version patch` 改它），构建时注入。
 排查「改了没生效」时先看这里：如果 commit 不是你刚推的那一个，说明部署没成功
 （一键部署 / Workers Builds 看构建日志，CLI 看 `npm run deploy` 的输出）。
 
