@@ -518,16 +518,36 @@ export async function executeTask(
             "info",
             `步骤${stepNo} 消息 #${candidate.message.id} 上有 ${candidate.buttons.length} 个按钮：${describeButtons(candidate.buttons)}`,
           );
-          const button = selectButton(candidate.buttons, step);
+          let button = selectButton(candidate.buttons, step);
+          let buttonMessage = candidate.message;
+
+          // reply keyboard 的菜单常常"沿用旧消息"（机器人只发一条新文本，键盘不变），
+          // 所以锚定消息里找不到时，再往更早的历史里捞一次。
+          if (!button && step.text) {
+            const history = await fetchRecent(client, entity, 15).catch(() => [] as Api.Message[]);
+            for (const older of history.slice().reverse()) {
+              if (older.id === candidate.message.id) continue;
+              const buttons = flattenButtons(older);
+              const found = selectButton(buttons, step);
+              if (found) {
+                button = found;
+                buttonMessage = older;
+                interactive = { message: older, buttons };
+                note("info", `步骤${stepNo} 按钮「${found.text}」来自更早的消息 #${older.id}`);
+                break;
+              }
+            }
+          }
+
           if (!button) {
             note("warn", `步骤${stepNo} 没找到按钮「${step.text ?? `${step.row},${step.column}`}」`);
             note("warn", `原始 markup：${describeRawMarkup(candidate.message)}`);
             break;
           }
-          const clickNote = await clickButton(client, entity, candidate.message, button);
+          const clickNote = await clickButton(client, entity, buttonMessage, button);
           note("info", `步骤${stepNo} 点击「${button.text}」（${button.kind}）`);
           if (clickNote) note("info", `步骤${stepNo} ${clickNote}`);
-          cursorId = Math.max(cursorId, candidate.message.id);
+          cursorId = Math.max(cursorId, buttonMessage.id, candidate.message.id);
 
           // 点完之后机器人通常是「新发一条消息」或「原地编辑同一条消息」，
           // 两种都等，但要排除"还是原来那套按钮"（否则下一步会重复点同一个按钮）
