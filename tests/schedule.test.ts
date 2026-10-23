@@ -262,6 +262,23 @@ test("命令解析", () => {
   }
 });
 
+test("任务名优先用群名/机器人显示名，而不是 username", () => {
+  const parsed = parseTrigger("9.30 签到", {
+    forwarded: { kind: "user", id: "8045138039", username: "sheeridvn_bot", title: "SheerID VN Bot" },
+  });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.result.task!.name, "SheerID VN Bot 签到");
+  assert.match(parsed.result.explanation || "", /SheerID VN Bot/);
+
+  // 没有显示名时退回 @username
+  const noTitle = parseTrigger("9.30 签到", {
+    forwarded: { kind: "user", id: "1", username: "jerry_bot" },
+  });
+  assert.equal(noTitle.ok, true);
+  if (noTitle.ok) assert.equal(noTitle.result.task!.name, "@jerry_bot 签到");
+});
+
 test("@here 表示发到当前会话（群组/频道）", () => {
   const here: Target = { kind: "channel", id: "-1001234567890", title: "摸鱼群" };
   const parsed = parseTrigger("9.30 打卡 @here", { sourceChat: here });

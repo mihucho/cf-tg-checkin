@@ -62,7 +62,8 @@
   "id": 1,
   "name": "xx bot 签到",
   "enabled": true,
-  "target": { "kind": "user", "id": "7661096533", "title": "jerry bot", "username": "jerry_bot" },
+  "target": { "kind": "user", "id": "7661096533", "title": "Jerry Bot", "username": "jerry_bot" },
+                                    // title 是 Telegram 里显示的群名/机器人名，任务名优先用它
   "threadId": null,                 // 群组话题 id
   "schedule": {
     "kind": "daily",                // daily | window | interval | once

@@ -956,6 +956,7 @@ export class TgAgent implements DurableObject {
       id?: unknown;
       title?: string;
       firstName?: string;
+      lastName?: string;
       username?: string;
       accessHash?: unknown;
     };
@@ -966,8 +967,12 @@ export class TgAgent implements DurableObject {
     } catch {
       /* ignore */
     }
-    // 有 username 时不必再塞一个同名的 title，界面上会重复显示成 "@bot @bot"
-    const title = anyEntity.title || anyEntity.firstName || undefined;
+    // 显示名：群/频道用 title，用户用「名 + 姓」，都没有才退回 username / id
+    const displayName =
+      anyEntity.title ||
+      [anyEntity.firstName, anyEntity.lastName].filter(Boolean).join(" ").trim() ||
+      undefined;
+    const title = displayName && displayName !== `@${anyEntity.username ?? ""}` ? displayName : displayName;
     const accessHash = anyEntity.accessHash;
     return {
       kind,
