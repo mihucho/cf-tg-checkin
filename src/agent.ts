@@ -14,7 +14,7 @@ import type { AccountInfo, AgentState, LogEntry, Settings, Target, Task, TaskInp
 import { createTgClient, createTgClientOnDc, errorMessage, migrateDcFromError } from "./telegram/client";
 import { executeTask, resolveEntity, type ExecHooks } from "./telegram/executor";
 import { computeNextRun, formatInTimezone } from "./schedule/time";
-import { parseTrigger, type TriggerContext } from "./schedule/dsl";
+import { findTimeToken, parseTrigger, tokenize, type TriggerContext } from "./schedule/dsl";
 import { messageTargetHint, usernameFromLink, type MessageLike, type MessageTargetHint } from "./telegram/targets";
 import type { Env } from "./env";
 
@@ -39,6 +39,8 @@ const KV_CREDS = "account:creds";
 const KV_PENDING = "account:pending";
 const KV_PHONE = "account:phone";
 const KV_LAST_ERROR = "account:lastError";
+/** 控制会话里最近一次"转发/回复过来的目标"（先转发机器人、再单独发配置时用） */
+const KV_TRIGGER_TARGET = "trigger:target";
 
 const REPLY_MARKERS = ["✅", "❌", "⚠️", "📋", "💡", "⚙️", "🔧", "📝", "🚀", "⏰", "🗑️"];
 
@@ -553,6 +555,14 @@ export class TgAgent implements DurableObject {
 
   // ---------------------------------------------------------------- 触发消息
 
+  /** 最近一次登记的目标（30 分钟内有效） */
+  private rememberedTarget(): Target | null {
+    const stored = this.store.getJson<{ target?: Target; at?: number } | null>(KV_TRIGGER_TARGET, null);
+    if (!stored?.target || !stored.at) return null;
+    if (Date.now() - stored.at > 30 * 60_000) return null;
+    return stored.target;
+  }
+
   private resetTriggerCursor(): void {
     const settings = this.store.getSettings();
     this.store.deleteKv(`trigger:cursor:${settings.controlChat || "self"}`);
@@ -615,16 +625,46 @@ export class TgAgent implements DurableObject {
       return;
     }
 
-    const ctx: TriggerContext = {
-      defaultTarget: settings.defaultTarget || undefined,
-      forwarded: await this.inferTarget(client, entity, message),
-    };
-
-    const parsed = parseTrigger(text, ctx);
     const reply = async (body: string) => {
       await client.sendMessage(entity as never, { message: body, parseMode: false });
     };
 
+    // 机器人自己发来的消息不当作配置（控制会话设成机器人的聊天时，别把欢迎语当指令）
+    if (!message.out) {
+      const sender = message.senderId as { className?: string; userId?: unknown } | undefined;
+      if (sender?.className === "PeerUser") {
+        try {
+          const entityOfSender = await client.getEntity(sender as never);
+          if ((entityOfSender as unknown as { bot?: boolean }).bot) return;
+        } catch {
+          /* 拿不到就按普通消息处理 */
+        }
+      }
+    }
+
+    // 这条消息自己指向谁（转发来源 / 联系人卡片 / 链接 / 回复的那条 / 最近的上一条）
+    const hint = await this.inferTarget(client, entity, message);
+    const hasTime = Boolean(findTimeToken(tokenize(text)));
+
+    // 没有时间表达式 → 当成「目标登记」。
+    // 常见操作是「先转发机器人到收藏夹，再单独发一条 9.30 签到」；
+    // 纯转发不回复（否则机器人每转发一次都要被数落一顿），只在完全看不懂时才提示。
+    if (!hasTime) {
+      if (hint) {
+        this.store.setJson(KV_TRIGGER_TARGET, { target: hint, at: Date.now() });
+        logs.push(`登记目标：${hint.username ?? hint.title ?? hint.id}`);
+        return;
+      }
+      await reply(HELP_TEXT);
+      return;
+    }
+
+    const ctx: TriggerContext = {
+      defaultTarget: settings.defaultTarget || undefined,
+      forwarded: hint ?? this.rememberedTarget(),
+    };
+
+    const parsed = parseTrigger(text, ctx);
     if (!parsed.ok) {
       await reply(`⚠️ ${parsed.error}`);
       return;
@@ -747,6 +787,11 @@ export class TgAgent implements DurableObject {
             : new Api.PeerUser({ userId: peer.userId as never });
       try {
         const entity = await client.getEntity(instance as never);
+        // 线索来自"发送者"时，只认机器人/频道/群，避免群里随便谁的发言都被当成目标
+        if (hint.fromSender && peer.className === "PeerUser") {
+          const isBot = Boolean((entity as unknown as { bot?: boolean }).bot);
+          if (!isBot) return null;
+        }
         return await this.toTarget(client, entity, "");
       } catch {
         return null;
@@ -1062,7 +1107,7 @@ const HELP_TEXT = `💡 触发语法：[时间] [动作...]
  · rand:早安|晚上好|午安 → 随机挑一条发送
 修饰：#kw:签到成功|已签到  #jitter:120  #once  #delete:30  #timeout:40  #delay:3  #thread:12  #name:名称
 （每个动作之间默认间隔 3 秒，用 #delay:0 可关掉）
-目标：消息里写 @机器人，或把机器人消息转发/分享到收藏夹，或在设置里填默认目标
+目标：消息里写 @机器人 / t.me 链接，或把机器人消息转发/分享到收藏夹（先转发再发配置也认，30 分钟内有效）
 
 示例：
 9.30 签到

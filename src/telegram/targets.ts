@@ -19,7 +19,8 @@ export interface PeerRef {
 }
 
 export type MessageTargetHint =
-  | { kind: "peer"; peer: PeerRef }
+  /** fromSender=true 表示线索来自"消息发送者"，Agent 会额外要求对方是机器人 */
+  | { kind: "peer"; peer: PeerRef; fromSender?: boolean }
   | { kind: "link"; value: string }
   | { kind: "username"; value: string };
 
@@ -94,7 +95,7 @@ export function messageTargetHint(
 
   // 4. 发送者（我自己发的不算）
   if (options.allowSender && !message.out && message.senderId?.className) {
-    return { kind: "peer", peer: message.senderId };
+    return { kind: "peer", peer: message.senderId, fromSender: true };
   }
 
   // 5. 链接
