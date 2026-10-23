@@ -518,7 +518,7 @@ function renderTasks() {
   const header = pageHead({
     title: "任务",
     description: tasks.length
-      ? `${tasks.length} 个任务 · ${enabled} 个启用 · ${tasks.length - enabled} 个停用`
+      ? `${tasks.length} 个任务 · ${enabled} 个启用 · ${tasks.length - enabled} 个停用 · 立即执行只是手动跑一次，不改动下次定时`
       : "还没有任务，先建一个签到任务。",
     actions: tasks.length
       ? [btn("运行全部", { iconName: "bolt", onClick: (event) => runAll(event.currentTarget) }), newBtn]
