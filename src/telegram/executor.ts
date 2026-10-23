@@ -73,6 +73,22 @@ export function inputPeerFromTarget(target: Target | string): Api.TypeInputPeer 
   }
 }
 
+/** 在自己的对话列表里按 username 找实体（resolveUsername 失败时的兜底） */
+export async function findEntityByUsername(client: TelegramClient, username: string): Promise<EntityLike | null> {
+  const wanted = username.toLowerCase().replace(/^@/, "");
+  try {
+    const dialogs = (await client.getDialogs({ limit: 200 })) as Array<{ entity?: { username?: string } }>;
+    for (const dialog of dialogs) {
+      const entity = dialog?.entity;
+      const handle = typeof entity?.username === "string" ? entity.username.toLowerCase() : "";
+      if (handle && handle === wanted) return entity as EntityLike;
+    }
+  } catch {
+    /* 忽略 */
+  }
+  return null;
+}
+
 /**
  * 解析目标实体。做法和 bncr 的 HumanTG 适配器一致（三层兜底）：
  *
@@ -119,6 +135,13 @@ export async function resolveEntity(client: TelegramClient, target: Target | str
     }
     const second = await tryAll();
     if (second.entity) return second.entity;
+  }
+
+  // 最后兜底：contacts.resolveUsername 失败时，直接在对话列表里按 username 找
+  const username = typeof target === "string" ? target.replace(/^@/, "") : target.username;
+  if (username && /^[A-Za-z0-9_]{3,}$/.test(username)) {
+    const found = await findEntityByUsername(client, username);
+    if (found) return found;
   }
 
   throw new Error(
