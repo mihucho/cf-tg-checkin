@@ -30,6 +30,7 @@
 | 8 | `XSS`：任务名/目标名/步骤文本塞 `<img onerror>` `<script>` | 纯文本渲染 | DOM 里 0 个 img/script，无 alert | ✅ |
 | 9 | SQL 注入：`?limit=abc` / `?limit=1 OR 1=1` / `?limit[]=1` | 不报错、不泄露 SQL | 参数非法时回落默认值 | ✅（已修） |
 | 10 | 登录爆破：错误密码 ×20 | 触发限速 | 第 10 次起 429 + `Retry-After` | ✅（已修） |
+| 10b | 配了 Turnstile 时：无 token / 错误 token | 400 拒绝 | `请先完成人机验证` / `人机验证未通过（invalid-input-response）` | ✅ |
 | 11 | 锁定期内用**正确**密码 | 仍然 429 | 429 | ✅（限速不可绕过） |
 | 12 | 超大请求体（1 MB） | 413 | 413 | ✅（已修） |
 | 13 | 超长触发文本（200 KB） | 拒绝或截断 | 413（body 上限）/ 解析时截到 2000 字符 | ✅（已修） |
@@ -68,7 +69,7 @@ Permissions-Policy: geolocation=(), microphone=(), camera=()
 
 ## 残余风险（已知、可接受）
 
-1. **单口令、无二次认证**：口令泄露即等于管理员。建议叠加 Cloudflare Access（邮箱/SSO 身份代理）或放在内网/私有域名后：
+1. **单口令、无二次认证**：口令泄露即等于管理员。已提供两层可选加固：Cloudflare Turnstile 人机验证（防脚本爆破）与 Cloudflare Access 身份代理（防口令泄露）。建议叠加 Cloudflare Access（邮箱/SSO 身份代理）或放在内网/私有域名后：
    配置步骤见 [docs/DEPLOY.md](docs/DEPLOY.md#用-cloudflare-access-兜一层可选强烈建议)，
    并用 `ALLOWED_HOSTS` 关掉 `workers.dev` 旁路（否则 Access 可以被绕开）。
 2. **无状态 Cookie 不能单点吊销**：只能靠缩短 TTL 或换密钥全局失效（已把 TTL 降到 7 天）。

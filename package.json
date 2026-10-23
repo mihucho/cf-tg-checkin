@@ -1,6 +1,6 @@
 {
   "name": "cf-tg-checkin",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "private": true,
   "description": "Telegram 定时签到系统，跑在 Cloudflare Workers + Durable Objects 上（teleproto / MTProto）",
   "type": "module",
@@ -58,6 +58,12 @@
       },
       "TG_API_HASH": {
         "description": "可选：Telegram api_hash，不填则稍后在管理界面填。"
+      },
+      "TURNSTILE_SITE_KEY": {
+        "description": "可选：Cloudflare Turnstile 站点 key（公开）。与 TURNSTILE_SECRET_KEY 一起配置后，登录页会出现人机验证。"
+      },
+      "TURNSTILE_SECRET_KEY": {
+        "description": "可选：Cloudflare Turnstile 密钥（Secret），用于服务端校验。"
       }
     }
   }

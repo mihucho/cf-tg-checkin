@@ -41,6 +41,9 @@ const state = {
   view: "overview",
   logs: null, // 日志 tab 拉取的列表；概览用 state.data.logs（最新 50）
   logsNextBefore: null, // 「加载更多」游标（比页码稳：新日志插入不会跳行）
+  turnstileToken: "", // Turnstile 通过后拿到的 token（登录时提交）
+  turnstileWidget: null, // widget id，用于 reset
+  turnstileSiteKey: null,
   logLevel: "", // "" | "ok" | "fail"
   expandedLogs: new Set(),
   refreshing: false,
@@ -63,6 +66,7 @@ function cacheDom() {
   dom.loginSubmit = document.getElementById("login-submit");
   dom.loginError = document.getElementById("login-error");
   dom.loginBuild = document.getElementById("login-build");
+  dom.turnstileSlot = document.getElementById("turnstile-slot");
   dom.footerVersion = document.getElementById("footer-version");
   dom.loginSetup = document.getElementById("login-setup");
   dom.app = document.getElementById("app-view");
@@ -168,12 +172,75 @@ function showBoot() {
   if (dom.app) dom.app.hidden = true;
 }
 
+/**
+ * 按需加载 Cloudflare Turnstile。
+ * 只有服务端配了 TURNSTILE_SITE_KEY 才会渲染（/api/session 会带下来），
+ * 没配的话登录页和以前一样，不需要人机验证。
+ */
+async function setupTurnstile() {
+  const slot = dom.turnstileSlot;
+  const siteKey = state.turnstileSiteKey || (state.session && state.session.turnstileSiteKey) || null;
+  if (!slot || !siteKey) return;
+  state.turnstileSiteKey = siteKey;
+  if (state.turnstileWidget !== null) return; // 已经渲染过
+
+  slot.hidden = false;
+  slot.textContent = "正在加载人机验证…";
+
+  try {
+    if (!window.turnstile) {
+      await new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+        script.async = true;
+        script.defer = true;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error("Turnstile 脚本加载失败"));
+        document.head.appendChild(script);
+      });
+    }
+    if (!window.turnstile) throw new Error("Turnstile 不可用");
+    slot.textContent = "";
+    state.turnstileWidget = window.turnstile.render(slot, {
+      sitekey: siteKey,
+      theme: "dark",
+      callback: (token) => {
+        state.turnstileToken = token;
+      },
+      "expired-callback": () => {
+        state.turnstileToken = "";
+      },
+      "error-callback": () => {
+        state.turnstileToken = "";
+        setLoginError("人机验证加载失败，请刷新重试");
+        return true;
+      },
+    });
+  } catch (error) {
+    slot.textContent = "";
+    setLoginError(error.message || "人机验证加载失败");
+  }
+}
+
+/** 登录失败后重置挂件，避免复用过期 token */
+function resetTurnstile() {
+  state.turnstileToken = "";
+  if (state.turnstileWidget !== null && window.turnstile) {
+    try {
+      window.turnstile.reset(state.turnstileWidget);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 function showLogin({ message = "", needsSetup = false } = {}) {
   if (dom.boot) dom.boot.hidden = true;
   if (dom.app) dom.app.hidden = true;
   dom.login.hidden = false;
   dom.loginSetup.hidden = !needsSetup;
   setLoginError(message);
+  void setupTurnstile();
   setTimeout(() => dom.loginPassword && dom.loginPassword.focus(), 30);
 }
 
@@ -210,7 +277,15 @@ async function onLoginSubmit(event) {
   }
   await withLoading(dom.loginSubmit, async () => {
     try {
-      await api("/api/login", { method: "POST", body: { password }, auth: false });
+      const payload = { password };
+      if (state.turnstileSiteKey) {
+        // widget 回调可能还没触发，直接从隐藏 input 兜底取
+        payload.turnstileToken =
+          state.turnstileToken ||
+          (document.querySelector('input[name="cf-turnstile-response"]') || {}).value ||
+          "";
+      }
+      await api("/api/login", { method: "POST", body: payload, auth: false });
       dom.loginPassword.value = "";
       state.session = { authenticated: true, needsSetup: false };
       state.logs = null;
@@ -218,6 +293,7 @@ async function onLoginSubmit(event) {
       await enterApp();
   if (state.build && dom.footerVersion) dom.footerVersion.textContent = `版本 ${formatBuild(state.build)}`;
     } catch (error) {
+      resetTurnstile();
       setLoginError(error.message || "登录失败");
       dom.loginPassword.focus();
       dom.loginPassword.select();
