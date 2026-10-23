@@ -60,6 +60,7 @@ function cacheDom() {
   dom.loginSubmit = document.getElementById("login-submit");
   dom.loginError = document.getElementById("login-error");
   dom.loginBuild = document.getElementById("login-build");
+  dom.footerVersion = document.getElementById("footer-version");
   dom.loginSetup = document.getElementById("login-setup");
   dom.app = document.getElementById("app-view");
   dom.tabs = document.getElementById("tabs");
@@ -114,6 +115,7 @@ async function init() {
   }
 
   await enterApp();
+  if (state.build && dom.footerVersion) dom.footerVersion.textContent = `版本 ${formatBuild(state.build)}`;
 }
 
 /**
@@ -127,22 +129,34 @@ async function loadBuildInfo() {
     );
     if (!info) return;
     state.build = info;
-    const when = String(info.buildId || "").replace("T", " ").replace("Z", " UTC");
+    const text = formatBuild(info);
     if (dom.loginBuild) {
-      dom.loginBuild.textContent = `版本 ${info.commit || "dev"} · ${when}`;
+      dom.loginBuild.textContent = `版本 ${text}`;
       dom.loginBuild.hidden = false;
     }
+    if (dom.footerVersion) dom.footerVersion.textContent = `版本 ${text}`;
     paintBuildInfo();
   } catch {
     /* 版本信息拿不到不影响使用 */
   }
 }
 
+/** 版本号（package.json）· commit（构建时的 HEAD）· 构建时间（UTC） */
+function formatBuild(info) {
+  if (!info) return "未知";
+  const parts = [];
+  if (info.version) parts.push(`v${info.version}`);
+  if (info.commit) parts.push(info.commit);
+  if (info.buildId && info.buildId !== "dev") {
+    parts.push(String(info.buildId).replace("T", " ").replace("Z", " UTC"));
+  }
+  return parts.length ? parts.join(" · ") : "dev";
+}
+
 function paintBuildInfo() {
   const target = document.getElementById("about-build");
   if (!target || !state.build) return;
-  const when = String(state.build.buildId || "").replace("T", " ").replace("Z", " UTC");
-  target.textContent = `${state.build.commit || "dev"} · ${when}`;
+  target.textContent = formatBuild(state.build);
 }
 
 function showBoot() {
@@ -199,6 +213,7 @@ async function onLoginSubmit(event) {
       state.logs = null;
       toast("登录成功", { kind: "ok" });
       await enterApp();
+  if (state.build && dom.footerVersion) dom.footerVersion.textContent = `版本 ${formatBuild(state.build)}`;
     } catch (error) {
       setLoginError(error.message || "登录失败");
       dom.loginPassword.focus();
