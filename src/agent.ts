@@ -876,6 +876,12 @@ export class TgAgent implements DurableObject {
       `out=${String(message.out)} senderId=${String(message.senderId ?? "—")} 控制会话=${settings.controlChat || "self"}`,
     ];
     const record = (ok: boolean, summary: string, extra?: { taskId?: number; taskName?: string }) => {
+      this.store.setJson("trigger:lastEvent", {
+        at: Date.now(),
+        ok,
+        message: summary,
+        detail: trace.join("\n"),
+      });
       this.store.addLog({
         taskId: extra?.taskId ?? null,
         taskName: extra?.taskName ?? null,
@@ -1465,6 +1471,10 @@ export class TgAgent implements DurableObject {
         locationHint: this.env.DO_LOCATION_HINT ?? null,
         nextPollAt: this.nextPollAt(),
         lastPollAt: Number(this.store.getKv("trigger:lastPoll") ?? 0) || null,
+        lastTriggerEvent: this.store.getJson<{ at: number; ok: boolean; message: string } | null>(
+          "trigger:lastEvent",
+          null,
+        ),
         pollSeconds: settings.pollSeconds,
       },
     };
