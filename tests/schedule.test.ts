@@ -206,6 +206,24 @@ test("带空格文本需要引号", () => {
   assert.deepEqual(parsed.result.task!.steps, [{ type: "text", text: "签到 打卡" }]);
 });
 
+test("带 emoji/空格的文本：引号、全角引号、不引号都行", () => {
+  const variants = ['9.00 "📅 每日签到"', "9.00 “📅 每日签到”", "9.00 '📅 每日签到'", "9.00 📅 每日签到"];
+  for (const text of variants) {
+    const parsed = parseTrigger(text, { defaultTarget: "@b" });
+    assert.equal(parsed.ok, true, text);
+    if (!parsed.ok) continue;
+    assert.equal(parsed.result.task!.schedule.time, "09:00");
+    assert.deepEqual(parsed.result.task!.steps, [{ type: "text", text: "📅 每日签到" }], text);
+  }
+});
+
+test("按钮文本里带空格：btn:\"…\" 取值正确", () => {
+  const parsed = parseTrigger('9.00 btn:"📅 每日签到"', { defaultTarget: "@b" });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.deepEqual(parsed.result.task!.steps, [{ type: "click", text: "📅 每日签到" }]);
+});
+
 test("未加引号的连续词会拼成一句话", () => {
   const parsed = parseTrigger("9.30 今日 签到 @b", {});
   assert.equal(parsed.ok, true);
