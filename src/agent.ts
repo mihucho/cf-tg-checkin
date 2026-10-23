@@ -14,7 +14,7 @@ import type { AccountInfo, AgentState, LogEntry, Settings, Target, Task, TaskInp
 import { createTgClient, createTgClientOnDc, errorMessage, migrateDcFromError } from "./telegram/client";
 import { executeTask, resolveEntity, type ExecHooks } from "./telegram/executor";
 import { computeNextRun, formatInTimezone } from "./schedule/time";
-import { findTimeToken, parseTrigger, tokenize, type TriggerContext } from "./schedule/dsl";
+import { findTimeToken, parseTrigger, renameForTarget, tokenize, type TriggerContext } from "./schedule/dsl";
 import { messageTargetHint, usernameFromLink, type MessageLike, type MessageTargetHint } from "./telegram/targets";
 import type { Env } from "./env";
 
@@ -1201,7 +1201,10 @@ export class TgAgent implements DurableObject {
         `解析成功：kind=${target.kind} id=${target.id} title=${target.title ?? "（无）"} ` +
           `username=${target.username ? `@${target.username}` : "（无）"} access_hash=${target.accessHash ? "有" : "无"}`,
       );
-      return { ...input, target: { ...target, id: target.id || input.target.id } };
+      const merged: Target = { ...target, id: target.id || input.target.id };
+      const name = renameForTarget(input.name, input.target, merged);
+      if (name !== input.name) trace?.push(`任务名同步：${input.name} → ${name}`);
+      return { ...input, name, target: merged };
     } catch (error) {
       // 不再静默丢弃：把原因写进日志
       trace?.push(`解析失败：${errorMessage(error)}`);
@@ -1315,12 +1318,8 @@ export class TgAgent implements DurableObject {
       };
       if (JSON.stringify(patch) !== JSON.stringify(task.target)) {
         // 任务名如果是当初按「@username + 动作」自动生成的，跟着换成显示名
-        const oldLabel = task.target.username ? `@${task.target.username}` : task.target.id;
-        const newLabel = patch.title || (patch.username ? `@${patch.username}` : patch.id);
-        const renameTo =
-          patch.title && newLabel && newLabel !== oldLabel && task.name.startsWith(oldLabel)
-            ? `${newLabel}${task.name.slice(oldLabel.length)}`
-            : null;
+        const renamed = renameForTarget(task.name, task.target, patch);
+        const renameTo = renamed !== task.name ? renamed : null;
 
         const updated = this.store.updateTask(
           task.id,

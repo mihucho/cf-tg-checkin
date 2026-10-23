@@ -441,6 +441,19 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
   return { ok: true, result: { kind: "create", task, explanation } };
 }
 
+/**
+ * 目标从"只有 @username"补全成"有显示名"之后，把当初按旧标签自动生成的任务名同步一下。
+ * 只处理「名字以旧标签开头」的情况 —— 用户自己起的名字不动。
+ */
+export function renameForTarget(name: string, oldTarget: Target, newTarget: Target): string {
+  const oldLabel = oldTarget.username ? `@${oldTarget.username}` : oldTarget.id;
+  const newLabel = newTarget.title || (newTarget.username ? `@${newTarget.username}` : newTarget.id);
+  if (!oldLabel || !newLabel || oldLabel === newLabel) return name;
+  if (!newTarget.title) return name; // 只为了拿显示名才改名
+  if (!name.startsWith(oldLabel)) return name;
+  return `${newLabel}${name.slice(oldLabel.length)}`;
+}
+
 export function defaultName(target: Target, scheduleLabel: string, steps: Step[]): string {
   // 优先用群名 / 机器人显示名，其次 @username，最后才是数字 id
   const targetLabel = target.title || (target.username ? `@${target.username}` : target.id);

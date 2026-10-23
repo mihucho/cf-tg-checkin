@@ -11,6 +11,13 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-10-24
+
+- 修「识别到显示名了，任务名还是 @username」：建任务时 `enrichTarget` 只补了目标、没改名字。
+  新增 `renameForTarget()`（纯函数，有单测）：目标从「只有 @username」补全出显示名时，
+  把当初自动生成的任务名同步替换；用户自己起的名字不动
+- 执行时的自动补全也复用同一逻辑，不再有两套前缀替换代码
+
 ## [0.3.6] - 2026-10-24
 
 - 触发器事件不再只存在于日志列表：每次处理触发消息都会写一份 `trigger:lastEvent`，

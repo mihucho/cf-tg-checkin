@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { parseTimeOfDay, nextDaily, nextWindow, computeNextRun, formatTimeOfDay } from "../src/schedule/time.ts";
-import { parseTrigger, tokenize } from "../src/schedule/dsl.ts";
+import { parseTrigger, renameForTarget, tokenize } from "../src/schedule/dsl.ts";
 import type { Target } from "../src/types.ts";
 import {
   resolveEntity,
@@ -103,6 +103,18 @@ test("默认步骤间隔 3 秒，可用 #delay 覆盖", () => {
   const off = parseTrigger("9.30 签到 btn:签到 #delay:0 @b", {});
   assert.equal(off.ok, true);
   if (off.ok) assert.equal(off.result.task!.stepDelaySeconds, 0);
+});
+
+test("目标补全显示名后，自动生成的任务名同步替换", () => {
+  const oldTarget: Target = { kind: "user", id: "example_bot", username: "example_bot" };
+  const newTarget: Target = { kind: "user", id: "123456789", username: "example_bot", title: "签到小助手" };
+  assert.equal(renameForTarget("@example_bot /sign", oldTarget, newTarget), "签到小助手 /sign");
+  // 用户自己起的名字不动
+  assert.equal(renameForTarget("每天签到", oldTarget, newTarget), "每天签到");
+  // 没有拿到显示名就不改
+  assert.equal(renameForTarget("@example_bot /sign", oldTarget, { ...oldTarget, id: "1" }), "@example_bot /sign");
+  // 标签没变也不改
+  assert.equal(renameForTarget("@example_bot /sign", oldTarget, { ...oldTarget, title: undefined }), "@example_bot /sign");
 });
 
 test("时间可以写在链接/目标后面", () => {
