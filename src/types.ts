@@ -142,6 +142,8 @@ export interface AgentState {
     locationHint: string | null;
     /** 下一次触发器轮询时间（毫秒），没登录/关了就为 null */
     nextPollAt?: number | null;
+    /** 上一次轮询时间，null 表示还没轮询过 */
+    lastPollAt?: number | null;
     pollSeconds?: number;
   };
 }

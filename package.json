@@ -1,6 +1,6 @@
 {
   "name": "cf-tg-checkin",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "description": "Telegram 定时签到系统，跑在 Cloudflare Workers + Durable Objects 上（teleproto / MTProto）",
   "type": "module",

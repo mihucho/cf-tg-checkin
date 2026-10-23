@@ -536,6 +536,13 @@ function renderOverview() {
       foot: `来源 ${controlChatLabel(settings)} · 每 ${Number(settings.pollSeconds) || 60} 秒轮询${
         runtime && runtime.nextPollAt ? `（下次 ${formatClock(runtime.nextPollAt)}）` : ""
       }`,
+      sub:
+        runtime && runtime.lastPollAt
+          ? `上次轮询 ${formatRelative(runtime.lastPollAt)}` +
+            (Date.now() - runtime.lastPollAt > Math.max(180_000, (Number(settings.pollSeconds) || 60) * 3000)
+              ? " ⚠️ 已超时"
+              : "")
+          : "还没有轮询过（登录 Telegram 后开始）",
       sub: `步骤检测 ${Number(settings.stepPollSeconds) || 3}s / 最长 ${Number(settings.stepWaitSeconds) || 30}s`,
     }),
   );
