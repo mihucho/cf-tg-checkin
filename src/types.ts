@@ -128,6 +128,8 @@ export interface AgentState {
     lastRunAt: number | null;
   };
   now: number;
+  /** 运行时信息：最近一次请求来自哪个 colo、DO 创建区域提示 */
+  runtime?: { colo: string | null; locationHint: string | null };
 }
 
 export const DEFAULT_SETTINGS: Settings = {
