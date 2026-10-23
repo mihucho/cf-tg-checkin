@@ -82,8 +82,16 @@ function cookieHeader(value: string, maxAgeSeconds: number): string {
   return `${COOKIE_NAME}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}; Secure`;
 }
 
+/**
+ * 拿到唯一的 DO stub。
+ *
+ * `DO_LOCATION_HINT`（可选）决定 DO 创建在哪个区域，从而决定连 Telegram 的出口区域。
+ * 注意：locationHint 只在 **创建时** 生效，已有实例不会被迁移。
+ */
 function agentStub(env: Env) {
-  return env.TG_AGENT.get(env.TG_AGENT.idFromName("main"));
+  const id = env.TG_AGENT.idFromName("main");
+  const hint = env.DO_LOCATION_HINT?.trim();
+  return hint ? env.TG_AGENT.get(id, { locationHint: hint as DurableObjectLocationHint }) : env.TG_AGENT.get(id);
 }
 
 async function proxyToAgent(request: Request, env: Env, url: URL): Promise<Response> {
@@ -91,7 +99,11 @@ async function proxyToAgent(request: Request, env: Env, url: URL): Promise<Respo
   const target = `https://agent${doPath}${url.search}`;
   const init: RequestInit = {
     method: request.method,
-    headers: { "content-type": request.headers.get("content-type") ?? "application/json" },
+    headers: {
+      "content-type": request.headers.get("content-type") ?? "application/json",
+      // 把 Worker 侧的 colo 带给 DO，便于观察「这次运行从哪个机房出去」
+      ...(request.cf?.colo ? { "x-cf-colo": String(request.cf.colo) } : {}),
+    },
   };
   if (request.method !== "GET" && request.method !== "HEAD") {
     init.body = await request.text();

@@ -245,6 +245,27 @@ docs/DEPLOY.md            四种部署方式的完整步骤与排查表
 - **DC 迁移**：账号不在 DC2 时登录会收到 `PHONE_MIGRATE_n`，程序自动切到目标 DC 重试并记住；若提示重新取码，点一次「获取验证码」即可
 - **费用**：DO 请求 + 每次 alarm 的连接，免费额度基本够个人用；轮询越密消耗越大
 
+## 关于 Telegram 侧的 IP / 封号风险
+
+真实情况，别被吓到也别太随意：
+
+| 事实 | 结论 |
+| --- | --- |
+| Durable Object 是**单实例、固定区域**的，不会每次请求换机房 | 「热切换」只发生在实例被驱逐/迁移时，不是常态 |
+| 迁移/驱逐后出口 IP 可能换到另一个 CF 机房 | Telegram 对换 IP 本身很宽容（手机网络一天换几十次），单人日常签到级别不会因此封号 |
+| 我们的出口是 Cloudflare 数据中心 IP | 比换 IP 更值得在意的是"机房 IP 登录用户账号"，Telegram 偶尔会要求重新验证（官方 App 里点一下即可） |
+| 真正的封号诱因 | 群发/刷量/大量账号共用 api_id、突增请求。签到一天几次远不在此列 |
+| `AUTH_KEY_DUPLICATED` 风险 | 同一 auth key 多 IP 并用时可能触发。DO 单实例 + 30 秒复用窗口已经把并发连接降到最低 |
+
+想进一步稳住出口区域，可以在部署前设置区域提示（**只在 DO 创建时生效**，已有实例不会被迁移）：
+
+```bash
+npx wrangler deploy --var DO_LOCATION_HINT:apac   # apac / enam / weur / eeur / me / afr / oc / sam
+```
+
+「设置 → 关于」里会显示 `出口机房 xxx`（最近一次请求的 CF colo）和 `DO 区域`，
+换新实例后可以用它确认出口是否稳定。
+
 ## 安全
 
 - 管理界面用一个口令 + HMAC 签名的 HttpOnly Cookie；生产建议再叠一层 Cloudflare Access

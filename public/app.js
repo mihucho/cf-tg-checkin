@@ -1447,6 +1447,14 @@ function renderSettings() {
         { class: "stack-sm" },
         el("div", { class: "about-build", id: "about-build" }, state.build ? "" : "读取中…"),
         el(
+          "div",
+          { class: "about-build" },
+          `出口机房 ${(state.data && state.data.runtime && state.data.runtime.colo) || "未记录"}` +
+            (state.data && state.data.runtime && state.data.runtime.locationHint
+              ? ` · DO 区域 ${state.data.runtime.locationHint}`
+              : ""),
+        ),
+        el(
           "p",
           { class: "hint" },
           "管理界面是纯静态资源；版本号来自构建时注入的 git commit，可用 ",

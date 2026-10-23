@@ -108,6 +108,8 @@ export class TgAgent implements DurableObject {
     const path = url.pathname;
     const method = request.method;
     try {
+      const colo = request.headers.get("x-cf-colo");
+      if (colo && this.store.getKv("runtime:colo") !== colo) this.store.setKv("runtime:colo", colo);
       if (path === "/state" && method === "GET") return json(await this.buildState());
       if (path === "/settings" && method === "POST") {
         const patch = (await request.json()) as Partial<Settings>;
@@ -1216,6 +1218,10 @@ export class TgAgent implements DurableObject {
         lastRunAt,
       },
       now: Date.now(),
+      runtime: {
+        colo: this.store.getKv("runtime:colo"),
+        locationHint: this.env.DO_LOCATION_HINT ?? null,
+      },
     };
   }
 }
