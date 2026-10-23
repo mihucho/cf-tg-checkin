@@ -11,6 +11,13 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-10-24
+
+- 登录按钮跟随人机验证状态：验证没通过时**按钮直接不可点**（加载中、已过期、验证失败都禁用），
+  通过后才恢复可点；服务端校验照旧（前端只是即时反馈，不是唯一防线）
+- 登录失败后先重置验证再恢复按钮，避免"密码错一次就得刷新页面"
+- 修复 withLoading 恢复 `disabled` 与 `aria-disabled` 不一致的问题（状态更新放到 loading 之后）
+
 ## [0.3.8] - 2026-10-24
 
 - 任务名改为「用补全后的目标重新生成」而不是事后改名：`ParsedTrigger.autoName` 标记名字是否自动生成，

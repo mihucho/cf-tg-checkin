@@ -172,6 +172,18 @@ function showBoot() {
   if (dom.app) dom.app.hidden = true;
 }
 
+/** 人机验证没通过时不允许点登录（服务端也会拒，这里是体验上的即时反馈） */
+function setLoginEnabled(enabled) {
+  if (!dom.loginSubmit) return;
+  dom.loginSubmit.disabled = !enabled;
+  dom.loginSubmit.setAttribute("aria-disabled", String(!enabled));
+}
+
+/** 当前是否需要人机验证（配置了 site key 就需要） */
+function needsTurnstile() {
+  return Boolean(state.turnstileSiteKey || (state.session && state.session.turnstileSiteKey));
+}
+
 /**
  * 按需加载 Cloudflare Turnstile。
  * 只有服务端配了 TURNSTILE_SITE_KEY 才会渲染（/api/session 会带下来），
@@ -194,12 +206,23 @@ async function setupTurnstile() {
       /* 拿不到就当没启用 */
     }
   }
-  if (!siteKey) return;
+  if (!siteKey) {
+    // 没启用人机验证 → 按钮保持可用
+    state.turnstileSiteKey = null;
+    setLoginEnabled(true);
+    return;
+  }
   state.turnstileSiteKey = siteKey;
-  if (state.turnstileWidget !== null) return; // 已经渲染过
+
+  // 已经渲染过：按当前 token 恢复按钮状态
+  if (state.turnstileWidget !== null) {
+    setLoginEnabled(Boolean(state.turnstileToken));
+    return;
+  }
 
   slot.hidden = false;
   slot.textContent = "正在加载人机验证…";
+  setLoginEnabled(false);
 
   try {
     if (!window.turnstile) {
@@ -220,18 +243,22 @@ async function setupTurnstile() {
       theme: "dark",
       callback: (token) => {
         state.turnstileToken = token;
+        setLoginEnabled(true);
       },
       "expired-callback": () => {
         state.turnstileToken = "";
+        setLoginEnabled(false);
       },
       "error-callback": () => {
         state.turnstileToken = "";
+        setLoginEnabled(false);
         setLoginError("人机验证加载失败，请刷新重试");
         return true;
       },
     });
   } catch (error) {
     slot.textContent = "";
+    setLoginEnabled(false);
     setLoginError(error.message || "人机验证加载失败");
   }
 }
@@ -239,6 +266,7 @@ async function setupTurnstile() {
 /** 登录失败后重置挂件，避免复用过期 token */
 function resetTurnstile() {
   state.turnstileToken = "";
+  if (state.turnstileSiteKey) setLoginEnabled(false);
   if (state.turnstileWidget !== null && window.turnstile) {
     try {
       window.turnstile.reset(state.turnstileWidget);
@@ -254,6 +282,7 @@ function showLogin({ message = "", needsSetup = false } = {}) {
   dom.login.hidden = false;
   dom.loginSetup.hidden = !needsSetup;
   setLoginError(message);
+  setLoginEnabled(!needsTurnstile());
   void setupTurnstile();
   setTimeout(() => dom.loginPassword && dom.loginPassword.focus(), 30);
 }
@@ -289,6 +318,11 @@ async function onLoginSubmit(event) {
     dom.loginPassword.focus();
     return;
   }
+  if (needsTurnstile() && !state.turnstileToken) {
+    setLoginError("请先完成人机验证");
+    return;
+  }
+  let failed = false;
   await withLoading(dom.loginSubmit, async () => {
     try {
       const payload = { password };
@@ -307,12 +341,19 @@ async function onLoginSubmit(event) {
       await enterApp();
   if (state.build && dom.footerVersion) dom.footerVersion.textContent = `版本 ${formatBuild(state.build)}`;
     } catch (error) {
-      resetTurnstile();
+      failed = true;
       setLoginError(error.message || "登录失败");
       dom.loginPassword.focus();
       dom.loginPassword.select();
     }
   });
+
+  // 放在 withLoading 之后：它会把 disabled 恢复成"进入时的值"，
+  // 在里面改按钮状态会被覆盖（aria 和 disabled 不一致）
+  if (failed) {
+    resetTurnstile();
+    setLoginEnabled(false);
+  }
 }
 
 async function onLogout() {
