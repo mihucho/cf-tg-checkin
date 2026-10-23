@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cf-tg-checkin",
+  "main": "dist/worker.mjs",
+  "compatibility_date": "2026-10-23",
+  "compatibility_flags": ["nodejs_compat"],
+  "upload_source_maps": true,
+  // 自定义构建：任何 deploy / dev 都会先跑一遍 esbuild（见 build.mjs）
+  "build": {
+    "command": "node build.mjs",
+    "watch_dir": "src",
+    "cwd": "."
+  },
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "TG_AGENT", "class_name": "TgAgent" }]
+  },
+  // 首次部署时创建 SQLite 版 Durable Object（session / 任务 / 日志都在里面）
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["TgAgent"]
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  // 兜底：正常调度靠 DO alarm，这里只是保险（例如 alarm 丢失时补一次）
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  }
+}

@@ -1,0 +1,421 @@
+/**
+ * 触发消息解析器 —— 在收藏夹（或配置的控制会话）里发一条消息就能建任务。
+ *
+ * 语法：`[时间] [动作...] [修饰符...]`
+ *   时间：9.30 / 09:30 / 21：05 / 0930；窗口 9.30-10.30；间隔 每30分 每2小时 2h
+ *   动作：普通文本（带空格用引号）/ btn:按钮文本 / btn:0,1 / num:1 / wait:5 / rand:a|b|c / say:文本
+ *   修饰：#kw:成功|已签到、#jitter:120、#once、#delete:30、#timeout:40、#thread:12、#name:xxx、#clean
+ *   目标：@username 或 到:-1001234567890（否则取转发来源 / 设置里的 defaultTarget）
+ *   命令：列表 / 立即 1 / 开启 1 / 关闭 1 / 删除 1 / 帮助
+ */
+import type { Schedule, Step, Target, TaskInput } from "../types";
+import { formatTimeOfDay, parseTimeOfDay } from "./time";
+
+export type CommandKind = "create" | "list" | "run" | "enable" | "disable" | "delete" | "help";
+
+export interface ParsedTrigger {
+  kind: CommandKind;
+  argument?: string;
+  task?: TaskInput;
+  explanation?: string;
+}
+
+export interface TriggerContext {
+  defaultTarget?: string;
+  /** 触发消息的转发 / 分享来源（分享机器人到收藏夹时会带上） */
+  forwarded?: Target | null;
+  /** 触发消息所在会话（self = 收藏夹） */
+  sourceChat?: Target | null;
+  /** 管理界面的「试算」用：允许解析不到目标 */
+  allowMissingTarget?: boolean;
+}
+
+export type ParseResult = { ok: true; result: ParsedTrigger } | { ok: false; error: string };
+
+const TIME_PREFIX = /^(\d{1,2})[:.：](\d{1,2})-(\d{1,2})[:.：](\d{1,2})$/;
+const INTERVAL_PREFIX = /^(?:每|every|interval)(\d+)(秒|s|sec|分钟|分|min|m|小时|h|钟头)$/i;
+const SHORT_INTERVAL = /^(\d+)(m|h)$/i;
+const ONCE_WORDS = new Set(["once", "一次", "仅一次", "只一次"]);
+const DELETE_WORDS = new Set(["删除", "delete", "del", "移除"]);
+
+export function tokenize(input: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: string | null = null;
+
+  const flush = () => {
+    if (current) {
+      tokens.push(current);
+      current = "";
+    }
+  };
+
+  for (const char of input) {
+    if (quote) {
+      if (char === quote) quote = null;
+      else current += char;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "“" || char === "「") {
+      quote = char === "“" ? "”" : char === "「" ? "」" : char;
+      continue;
+    }
+    if (char === "”" || char === "」") continue;
+    if (/\s/.test(char)) {
+      flush();
+      continue;
+    }
+    current += char;
+  }
+  flush();
+  return tokens;
+}
+
+interface TimeToken {
+  schedule: Schedule;
+  label: string;
+}
+
+export function parseTimeToken(token: string): TimeToken | null {
+  const window = TIME_PREFIX.exec(token);
+  if (window) {
+    const start = { hour: Number(window[1]), minute: Number(window[2]) };
+    const end = { hour: Number(window[3]), minute: Number(window[4]) };
+    if (start.hour < 24 && start.minute < 60 && end.hour < 24 && end.minute < 60) {
+      const time = formatTimeOfDay(start.hour, start.minute);
+      const windowEnd = formatTimeOfDay(end.hour, end.minute);
+      return { schedule: { kind: "window", time, windowEnd }, label: `${time}–${windowEnd} 随机` };
+    }
+    return null;
+  }
+
+  const interval = INTERVAL_PREFIX.exec(token) ?? SHORT_INTERVAL.exec(token);
+  if (interval) {
+    const amount = Number(interval[1]);
+    const unit = (interval[2] ?? "m").toLowerCase();
+    const minutes = /h|小时|钟头/.test(unit) ? amount * 60 : /秒|sec|^s$/.test(unit) ? Math.max(1, Math.round(amount / 60)) : amount;
+    if (minutes < 1) return null;
+    return { schedule: { kind: "interval", intervalMinutes: minutes }, label: `每 ${minutes} 分钟` };
+  }
+
+  const time = parseTimeOfDay(token);
+  if (time) {
+    const label = formatTimeOfDay(time.hour, time.minute);
+    return { schedule: { kind: "daily", time: label }, label: `每天 ${label}` };
+  }
+  return null;
+}
+
+function splitList(value: string): string[] {
+  return value
+    .split(/[|,，、]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+/** 从 `https://t.me/xxx` / `t.me/xxx` / `telegram.me/xxx` 里取 username */
+export function usernameFromLink(value: string): string | null {
+  const match = /^(?:https?:\/\/)?(?:t|telegram)\.me\/([A-Za-z0-9_]{3,})(?:\?.*)?$/i.exec(value.trim());
+  return match ? match[1] : null;
+}
+
+function targetFromId(value: string, source?: Target | null): Target {
+  const cleaned = value.trim().replace(/^到[:：]/, "").replace(/^(to|at)[:：]/, "");
+  const linkUsername = usernameFromLink(cleaned);
+  if (linkUsername) {
+    return { kind: "user", id: linkUsername, username: linkUsername };
+  }
+  if (cleaned.startsWith("@")) {
+    return { kind: "user", id: cleaned.slice(1), username: cleaned.slice(1) };
+  }
+  const kind: Target["kind"] = cleaned.startsWith("-100") ? "channel" : cleaned.startsWith("-") ? "chat" : "user";
+  return { kind, id: cleaned };
+}
+
+function describeSteps(steps: Step[]): string {
+  const parts: string[] = [];
+  for (const step of steps) {
+    switch (step.type) {
+      case "text":
+        parts.push(`发送「${step.text}」`);
+        break;
+      case "random":
+        parts.push(`随机发送「${(step.options ?? []).join(" / ")}」`);
+        break;
+      case "click":
+        parts.push(
+          step.text !== undefined && step.text !== ""
+            ? `点击「${step.text}」`
+            : `点击按钮[${step.row ?? 0},${step.column ?? 0}]`,
+        );
+        break;
+      case "number":
+        parts.push(`发送数字 ${step.value}`);
+        break;
+      case "wait":
+        parts.push(`等待 ${step.seconds ?? 3}s`);
+        break;
+    }
+  }
+  return parts.join(" → ");
+}
+
+const COMMANDS: Array<{ kind: CommandKind; words: string[] }> = [
+  { kind: "list", words: ["列表", "list", "任务列表", "签到列表"] },
+  { kind: "help", words: ["帮助", "help", "?", "？", "说明"] },
+  { kind: "run", words: ["立即", "执行", "run"] },
+  { kind: "enable", words: ["开启", "启用", "enable", "on"] },
+  { kind: "disable", words: ["关闭", "禁用", "disable", "off"] },
+  { kind: "delete", words: ["删除", "delete", "del"] },
+];
+
+function matchCommand(tokens: string[]): ParsedTrigger | null {
+  if (!tokens.length) return null;
+  const head = tokens[0].toLowerCase();
+  const found = COMMANDS.find((command) => command.words.includes(head));
+  if (!found) return null;
+  const argument = tokens.slice(1).join(" ").trim();
+  if (found.kind !== "list" && found.kind !== "help" && !argument) {
+    return { kind: found.kind, argument: "" };
+  }
+  return { kind: found.kind, argument };
+}
+
+/**
+ * 解析一条触发消息。
+ * 返回的 TaskInput 还不含 id / nextRunAt，由 Agent 落库时补齐。
+ */
+export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult {
+  const text = raw.replace(/\r\n/g, "\n").trim();
+  if (!text) return { ok: false, error: "空消息" };
+
+  const tokens = tokenize(text);
+  if (!tokens.length) return { ok: false, error: "空消息" };
+
+  const command = matchCommand(tokens);
+  if (command) return { ok: true, result: command };
+
+  let schedule: Schedule | null = null;
+  let scheduleLabel = "";
+  let index = 0;
+
+  const time = parseTimeToken(tokens[0]);
+  if (time) {
+    schedule = time.schedule;
+    scheduleLabel = time.label;
+    index = 1;
+  }
+
+  const steps: Step[] = [];
+  const successKeywords: string[] = [];
+  let target: Target | null = null;
+  let threadId: number | null = null;
+  let jitterSeconds = 0;
+  let timeoutSeconds = 25;
+  let deleteAfterSeconds = 0;
+  let cleanupPrevious = false;
+  let onlyOnce = false;
+  let nameOverride = "";
+  let pendingText = "";
+
+  const pushText = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    pendingText = pendingText ? `${pendingText} ${trimmed}` : trimmed;
+  };
+  const flushText = () => {
+    if (pendingText) {
+      steps.push({ type: "text", text: pendingText });
+      pendingText = "";
+    }
+  };
+
+  for (; index < tokens.length; index++) {
+    const token = tokens[index];
+    const lower = token.toLowerCase();
+    const [rawKey, ...rest] = token.split(/[:：]/);
+    // `#kw:` 和 `kw:` 等价
+    const key = rawKey.replace(/^#/, "").toLowerCase();
+    const value = rest.join(":").trim();
+    const hasKey = rest.length > 0;
+
+    if (ONCE_WORDS.has(lower.replace(/^#/, ""))) {
+      onlyOnce = true;
+      continue;
+    }
+
+    if (token.startsWith("#") && !hasKey) {
+      const flag = lower.slice(1);
+      if (flag === "clean") cleanupPrevious = true;
+      if (flag === "keep") cleanupPrevious = false;
+      if (ONCE_WORDS.has(flag)) onlyOnce = true;
+      continue;
+    }
+
+    if (token.startsWith("@") && !hasKey) {
+      target = targetFromId(token);
+      continue;
+    }
+
+    if (!hasKey) {
+      // 裸的 t.me/xxx 链接直接当目标，而不是当成要发送的文本
+      const linkUsername = usernameFromLink(token);
+      if (linkUsername) {
+        target = { kind: "user", id: linkUsername, username: linkUsername };
+        continue;
+      }
+      pushText(token);
+      continue;
+    }
+
+    switch (key) {
+      case "btn":
+      case "按钮": {
+        flushText();
+        const position = /^(\d+)\s*,\s*(\d+)$/.exec(value);
+        if (position) {
+          steps.push({ type: "click", row: Number(position[1]), column: Number(position[2]) });
+        } else {
+          steps.push({ type: "click", text: value });
+        }
+        break;
+      }
+      case "num":
+      case "数字": {
+        flushText();
+        steps.push({ type: "number", value });
+        break;
+      }
+      case "wait":
+      case "等":
+      case "sleep": {
+        flushText();
+        steps.push({ type: "wait", seconds: Math.max(0, Math.min(600, Number(value) || 3)) });
+        break;
+      }
+      case "rand":
+      case "随机": {
+        flushText();
+        const options = splitList(value);
+        if (options.length) steps.push({ type: "random", options });
+        break;
+      }
+      case "say":
+      case "说":
+      case "text":
+      case "文本": {
+        flushText();
+        steps.push({ type: "text", text: value });
+        break;
+      }
+      case "kw":
+      case "关键词": {
+        flushText();
+        successKeywords.push(...splitList(value));
+        break;
+      }
+      case "jitter":
+      case "随机延迟": {
+        flushText();
+        jitterSeconds = Math.max(0, Math.min(3600, Number(value) || 0));
+        break;
+      }
+      case "delete":
+      case "删除": {
+        flushText();
+        deleteAfterSeconds = Math.max(0, Math.min(3600, Number(value) || 0));
+        break;
+      }
+      case "timeout":
+      case "超时": {
+        flushText();
+        timeoutSeconds = Math.max(5, Math.min(90, Number(value) || 25));
+        break;
+      }
+      case "thread":
+      case "话题": {
+        flushText();
+        threadId = Number(value) || null;
+        break;
+      }
+      case "name":
+      case "名称": {
+        flushText();
+        nameOverride = value;
+        break;
+      }
+      case "to":
+      case "at":
+      case "到": {
+        flushText();
+        target = targetFromId(value);
+        break;
+      }
+      case "clean": {
+        flushText();
+        cleanupPrevious = true;
+        break;
+      }
+      default:
+        pushText(token);
+        break;
+    }
+  }
+  flushText();
+
+  if (!schedule) {
+    return { ok: false, error: "缺少时间：参考 `9.30 签到` 或 `每2小时 签到`" };
+  }
+  if (!steps.length) {
+    return { ok: false, error: "缺少动作：时间后面要写要发送的内容，例如 `9.30 签到`" };
+  }
+
+  const resolvedTarget: Target | null =
+    target ??
+    ctx.forwarded ??
+    (ctx.defaultTarget ? targetFromId(ctx.defaultTarget) : null) ??
+    (ctx.allowMissingTarget ? { kind: "user", id: "", title: "（待指定目标）" } : null);
+
+  if (!resolvedTarget) {
+    return {
+      ok: false,
+      error: "找不到签到目标：把机器人消息转发到收藏夹，或在消息里写 @机器人，或在设置里填默认目标",
+    };
+  }
+
+  if (onlyOnce) schedule.kind = "once";
+  schedule.jitterSeconds = jitterSeconds;
+
+  const label = nameOverride || defaultName(resolvedTarget, scheduleLabel, steps);
+
+  const task: TaskInput = {
+    name: label,
+    enabled: true,
+    target: resolvedTarget,
+    threadId,
+    schedule,
+    steps,
+    successKeywords,
+    timeoutSeconds,
+    deleteAfterSeconds,
+    cleanupPrevious,
+    source: "trigger",
+  };
+
+  const targetLabel = resolvedTarget.username ? `@${resolvedTarget.username}` : resolvedTarget.title || resolvedTarget.id;
+  const keywords = successKeywords.length ? `，成功关键词：${successKeywords.join(" / ")}` : "";
+  const explanation = `${scheduleLabel || "每天"} → ${targetLabel}：${describeSteps(steps)}${keywords}`;
+
+  return { ok: true, result: { kind: "create", task, explanation } };
+}
+
+export function defaultName(target: Target, scheduleLabel: string, steps: Step[]): string {
+  const targetLabel = target.username ? `@${target.username}` : target.title || target.id;
+  const firstText = steps.find((step) => step.type === "text")?.text;
+  const firstRandom = steps.find((step) => step.type === "random")?.options?.[0];
+  const action = firstText || (firstRandom ? `随机消息` : "按键");
+  const name = [targetLabel, action].filter(Boolean).join(" ");
+  return name.length > 40 ? name.slice(0, 40) : name;
+}
+
+export { describeSteps };
