@@ -3,6 +3,13 @@
 # 建议生成一个强口令：openssl rand -base64 24
 ADMIN_PASSWORD=change-me-please
 
+# ===== 可选：登录人机验证（Cloudflare Turnstile）=====
+# 两个都要配才会生效；本地联调可以用 Cloudflare 官方测试 key（始终通过）：
+#   TURNSTILE_SITE_KEY=1x00000000000000000000AA
+#   TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+# TURNSTILE_SITE_KEY=
+# TURNSTILE_SECRET_KEY=
+
 # ===== 可选 =====
 # 登录 Cookie 的 HMAC 密钥；留空则复用 ADMIN_PASSWORD
 # SESSION_SECRET=

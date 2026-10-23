@@ -158,6 +158,39 @@ npm run typecheck
 
 ---
 
+## 登录人机验证（Cloudflare Turnstile，可选）
+
+给登录页加一层「我不是机器人」，防住口令爆破之外的撞库/脚本尝试。免费，且不像 reCAPTCHA 那样要额外开关。
+
+1. Cloudflare 控制台 → **Turnstile** → **Add site**
+   - 域名填你的 Worker 域名（`cf-tg-checkin.xxx.workers.dev` 或自定义域名都行）
+   - Widget Mode 用默认的 **Managed**
+2. 拿到两个 key，配到 Worker：
+
+```bash
+npx wrangler secret put TURNSTILE_SITE_KEY     # 站点 key（公开，会下发到前端）
+npx wrangler secret put TURNSTILE_SECRET_KEY   # 密钥（只在服务端用）
+```
+
+3. 刷新登录页 —— 密码框下面会出现验证框；**没配这两个变量时完全不出现**，登录流程和以前一样。
+
+行为细节：
+
+- 只有**两个 key 都配了**才启用（只配一个视为没配，避免把人锁在门外）
+- 校验失败直接拒绝登录（400），并计入登录失败次数（10 次/10 分钟锁定照旧）
+- 校验服务不可用时 **fail closed**（拒绝登录）。真遇到 Turnstile 故障要应急登录，删掉 `TURNSTILE_SECRET_KEY` 即可
+- 校验通过后 cookie 正常下发，7 天有效；定时签到不受影响（不经过 HTTP）
+
+本地联调可以用 Cloudflare 官方测试 key（`.dev.vars`）：
+
+```ini
+TURNSTILE_SITE_KEY=1x00000000000000000000AA
+TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA   # 始终通过
+# TURNSTILE_SECRET_KEY=2x0000000000000000000000000000000AA # 始终失败，用来测拒绝路径
+```
+
+> CSP 已经允许 `https://challenges.cloudflare.com`（脚本 / iframe / 连接），不需要额外改。
+
 ## 用 Cloudflare Access 兜一层（可选，强烈建议）
 
 Cloudflare Access 是 Zero Trust 里的"身份感知代理"：请求先经过 Cloudflare 的身份验证

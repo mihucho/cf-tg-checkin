@@ -2447,6 +2447,21 @@ input[type="radio"] {
   }
 }
 
+/* 登录页的人机验证（Turnstile）槽位 */
+.turnstile-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 65px;
+  margin: -2px 0 12px;
+  font-size: 12px;
+  color: var(--text-3, rgba(255, 255, 255, 0.45));
+}
+
+.turnstile-slot iframe {
+  border-radius: 8px;
+}
+
 /* 日志筛选芯片 + 加载更多 */
 .log-filters {
   display: flex;

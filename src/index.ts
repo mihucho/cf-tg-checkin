@@ -104,6 +104,54 @@ function agentStub(env: Env) {
   return hint ? env.TG_AGENT.get(id, { locationHint: hint as DurableObjectLocationHint }) : env.TG_AGENT.get(id);
 }
 
+interface TurnstileConfig {
+  siteKey: string;
+  secretKey: string;
+}
+
+/** 两个 key 都配了才启用 Turnstile（只配一半视为没配，避免半残状态把人挡在门外） */
+function turnstileOf(env: Env): TurnstileConfig | null {
+  const siteKey = env.TURNSTILE_SITE_KEY?.trim();
+  const secretKey = env.TURNSTILE_SECRET_KEY?.trim();
+  if (!siteKey || !secretKey) return null;
+  return { siteKey, secretKey };
+}
+
+const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+
+/**
+ * 校验 Turnstile token。
+ *
+ * 失败一律 **fail closed**：校验服务不可用时拒绝登录（而不是放过）。
+ * 如果 Turnstile 出故障需要应急登录，把 TURNSTILE_SECRET_KEY 删掉即可（Turnstile 视为未启用）。
+ */
+async function verifyTurnstile(
+  config: TurnstileConfig,
+  token: string,
+  ip: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!token) return { ok: false, error: "请先完成人机验证" };
+
+  const form = new FormData();
+  form.set("secret", config.secretKey);
+  form.set("response", token);
+  if (ip && ip !== "unknown") form.set("remoteip", ip);
+
+  try {
+    const response = await fetch(TURNSTILE_VERIFY_URL, {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = (await response.json()) as { success?: boolean; "error-codes"?: string[] };
+    if (data.success) return { ok: true };
+    const codes = (data["error-codes"] ?? []).join(",");
+    return { ok: false, error: codes ? `人机验证未通过（${codes}）` : "人机验证未通过" };
+  } catch {
+    return { ok: false, error: "人机验证服务暂时不可用，请稍后再试" };
+  }
+}
+
 /**
  * 登录限速：同一来源失败 10 次 / 10 分钟就锁定（429）。
  * 计数落在 DO 的 SQLite 里，多 colo 一致。
@@ -197,6 +245,8 @@ export default {
       return json({
         authenticated: await isAuthenticated(request, env),
         needsSetup: !secretOf(env),
+        // 站点 key 是公开信息；配了才会在登录页渲染 Turnstile
+        turnstileSiteKey: turnstileOf(env)?.siteKey ?? null,
       });
     }
 
@@ -209,9 +259,12 @@ export default {
         return json({ error: "还没有配置 ADMIN_PASSWORD，请先执行 wrangler secret put ADMIN_PASSWORD" }, 500);
       }
       let password = "";
+      let turnstileToken = "";
       try {
         const body = (await request.text()).slice(0, 4096);
-        password = String((JSON.parse(body) as { password?: string }).password ?? "");
+        const parsed = JSON.parse(body) as { password?: string; turnstileToken?: string };
+        password = String(parsed.password ?? "");
+        turnstileToken = String(parsed.turnstileToken ?? "");
       } catch {
         return json({ error: "请求格式错误" }, 400);
       }
@@ -224,6 +277,23 @@ export default {
           429,
           { "retry-after": String(verdict.retryAfterSeconds) },
         );
+      }
+
+      // 人机验证（配置了才要求）：失败也算一次登录失败，防止被拿来刷
+      const turnstile = turnstileOf(env);
+      if (turnstile) {
+        const checked = await verifyTurnstile(turnstile, turnstileToken, ip);
+        if (!checked.ok) {
+          const after = await authThrottle(env, ip, "fail");
+          if (!after.allowed) {
+            return json(
+              { error: `尝试次数过多，请 ${Math.ceil(after.retryAfterSeconds / 60)} 分钟后再试` },
+              429,
+              { "retry-after": String(after.retryAfterSeconds) },
+            );
+          }
+          return json({ error: checked.error ?? "人机验证未通过" }, 400);
+        }
       }
 
       if (!password || !constantTimeEqual(password, env.ADMIN_PASSWORD ?? "")) {

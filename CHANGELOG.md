@@ -11,6 +11,15 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-24
+
+- 新增 **Cloudflare Turnstile** 人机验证（可选）：配 `TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY` 后
+  登录页出现验证框，服务端 `siteverify` 校验通过才发 Cookie；校验失败计入登录限速；
+  校验服务不可用时 fail-closed。未配置时行为与之前一致
+- `/api/session` 返回 `turnstileSiteKey`（公开），前端据此按需加载 widget
+- CSP 放行 `https://challenges.cloudflare.com`（脚本 / iframe / 连接）
+- docs/DEPLOY.md 新增 Turnstile 配置章节（含官方测试 key）
+
 ## [0.2.3] - 2026-10-24
 
 - 日志列表改为**游标分页**：`/api/logs?before=<id>&level=&taskId=`，前端「加载更早的日志」

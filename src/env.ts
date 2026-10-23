@@ -4,6 +4,9 @@ export interface Env {
   ASSETS: Fetcher;
   ADMIN_PASSWORD?: string;
   SESSION_SECRET?: string;
+  /** Cloudflare Turnstile：站点 key（公开，会给前端）/ 密钥（secret，只用于校验） */
+  TURNSTILE_SITE_KEY?: string;
+  TURNSTILE_SECRET_KEY?: string;
   TZ_OFFSET?: string;
   /** 可选：只允许这些 Host 访问（逗号分隔），配合 Cloudflare Access 用 */
   ALLOWED_HOSTS?: string;
