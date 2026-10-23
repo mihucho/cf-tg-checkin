@@ -2447,6 +2447,11 @@ input[type="radio"] {
   }
 }
 
+.stat-foot.stat-sub {
+  margin-top: 2px;
+  opacity: 0.75;
+}
+
 /* 登录页的人机验证（Turnstile）槽位 */
 .turnstile-slot {
   display: flex;
