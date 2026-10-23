@@ -101,6 +101,8 @@ export interface AccountInfo {
   me: { id: string; username: string | null; firstName: string } | null;
   connected: boolean;
   pendingLogin: { phone: string; stage: "code" | "password" } | null;
+  /** Telegram 账号归属的数据中心（登录时探测到才会填） */
+  dc?: number | null;
   lastError: string | null;
 }
 

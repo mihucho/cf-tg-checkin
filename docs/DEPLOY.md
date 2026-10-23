@@ -242,6 +242,7 @@ npx wrangler secret put ADMIN_PASSWORD   # 之后再设口令，不会动脚本
 | `does not export class 'TgAgent'` | 见上面 **[专门小节](#报错does-not-export-class-tgagent)**；一般 `npm run deploy` 重传一次即可 |
 | 登录报 `API_ID_INVALID` | `apiId` 与 `apiHash` 不配套；回 my.telegram.org 重新复制 |
 | 验证码一直「不正确」 | 用最新一次收到的码；超过 10 分钟要重新获取 |
+| 登录报 `PHONE_MIGRATE_5` / `NETWORK_MIGRATE_n` | 账号归属的数据中心不是默认的 DC2。程序会自动切到目标 DC 重试，并记住 DC；如果仍失败，重新点一次「获取验证码」（此时验证码会直接在正确的 DC 上申请） |
 | 任务日志一直是「还没登录 Telegram」 | session 被踢（在别的设备退出登录）→ 账号页重新登录 |
 | 收藏夹发指令没反应 | 触发器轮询默认 60 秒；检查设置里的「触发器开关」「控制会话」；看日志页 |
 | 点按钮步骤失败 | 机器人可能改版了；日志里会列出当时可点的按钮文本，照着重配 `btn:...` |
