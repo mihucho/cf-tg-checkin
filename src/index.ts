@@ -173,6 +173,15 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
+    // 只允许指定 Host（配置了 ALLOWED_HOSTS 时）：防止绕过 Cloudflare Access 直连 workers.dev
+    const allowedHosts = (env.ALLOWED_HOSTS ?? "")
+      .split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean);
+    if (allowedHosts.length && !allowedHosts.includes(url.hostname.toLowerCase())) {
+      return json({ error: "该域名不允许访问" }, 403);
+    }
+
     if (!url.pathname.startsWith("/api/")) {
       return env.ASSETS.fetch(request);
     }
