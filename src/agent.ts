@@ -69,7 +69,24 @@ function json(data: unknown, status = 200): Response {
 }
 
 function jsonError(error: unknown, status = 400): Response {
-  return json({ error: errorMessage(error) }, status);
+  return json({ error: publicError(error) }, status);
+}
+
+/** 把内部错误翻译成对外可读、且不泄露实现细节的信息 */
+function publicError(error: unknown): string {
+  const message = errorMessage(error);
+  // 数据库/驱动层错误不外泄（例如 "datatype mismatch: SQLITE_MISMATCH"）
+  if (/SQLITE|datatype|constraint|no such (table|column)/i.test(message)) {
+    return "请求参数不合法";
+  }
+  return message;
+}
+
+/** query/body 里的数字参数：非数字一律回落到默认值，避免把 "abc" 塞进 SQL */
+function intParam(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
 }
 
 function isOwnReply(text: string): boolean {
@@ -145,7 +162,7 @@ export class TgAgent implements DurableObject {
           return json({ ok: log[0]?.ok ?? false, log: log[0] });
         }
         if (suffix === "/logs" && method === "GET") {
-          const limit = Number(url.searchParams.get("limit") ?? 20);
+          const limit = intParam(url.searchParams.get("limit"), 20, 1, 100);
           return json({ logs: this.store.listLogs(limit, id) });
         }
         if (!suffix && (method === "PATCH" || method === "PUT")) {
@@ -162,12 +179,38 @@ export class TgAgent implements DurableObject {
       }
 
       if (path === "/logs" && method === "GET") {
-        const limit = Number(url.searchParams.get("limit") ?? 100);
+        const limit = intParam(url.searchParams.get("limit"), 100, 1, 500);
         return json({ logs: this.store.listLogs(limit) });
       }
       if (path === "/logs/clear" && method === "POST") {
         this.store.clearLogs();
         return json({ ok: true });
+      }
+
+      if (path === "/auth/attempt" && method === "POST") {
+        const body = (await request.json()) as { ip?: string; mode?: "peek" | "fail" | "success" };
+        const ip = String(body.ip ?? "unknown").slice(0, 64);
+        const mode = body.mode === "fail" || body.mode === "success" ? body.mode : "peek";
+        const now = Date.now();
+        const limit = 10;
+        const windowMs = 10 * 60_000;
+
+        if (mode === "peek") {
+          const failures = this.store.countAuthFailures(ip, now - windowMs);
+          return json({ allowed: failures < limit, failures, retryAfterSeconds: failures < limit ? 0 : 600 });
+        }
+
+        if (mode === "success") {
+          this.store.clearAuthAttempts(ip);
+          return json({ allowed: true, attempts: 0 });
+        }
+
+        const failures = this.store.recordAuthAttempt(ip, false, now);
+        return json({
+          allowed: failures < limit,
+          failures,
+          retryAfterSeconds: failures < limit ? 0 : 600,
+        });
       }
 
       if (path === "/trigger/parse" && method === "POST") {
@@ -757,10 +800,28 @@ export class TgAgent implements DurableObject {
     settings: Settings,
     logs: string[],
   ): Promise<void> {
-    const text = (message.message ?? "").trim();
+    const raw = (message.message ?? "").trim();
+    // 超长消息不解析（保护 CPU，也避免被拿来塞垃圾）
+    const text = raw.slice(0, 2000);
     if (!text || isOwnReply(text)) return;
 
     if (settings.adminUserId && String(message.senderId ?? "") && String(message.senderId) !== settings.adminUserId) {
+      return;
+    }
+
+    // 控制会话是群组、又没配 adminUserId 时，只认「自己发的」消息。
+    // 否则群里任何人都能让我这个账号往任意聊天发消息（等于开放了发信能力）。
+    const controlChatIsSelf = (settings.controlChat || "self") === "self";
+    if (!controlChatIsSelf && !settings.adminUserId && !message.out) {
+      this.store.addLog({
+        taskId: null,
+        taskName: null,
+        at: Date.now(),
+        ok: false,
+        level: "warn",
+        message: "忽略了非本人发送的触发消息（群聊里请到设置填 adminUserId）",
+        detail: text.slice(0, 200),
+      });
       return;
     }
 
@@ -1256,6 +1317,27 @@ function sanitizeSettings(patch: Partial<Settings>): Partial<Settings> {
   return clean;
 }
 
+const MAX_NAME = 80;
+const MAX_HANDLE = 80;
+const MAX_STEP_TEXT = 500;
+const MAX_KEYWORDS = 20;
+
+function clampText(value: unknown, max: number): string {
+  return String(value ?? "").slice(0, max);
+}
+
+function normalizeTarget(input: TaskInput | Task): Target {
+  const kind = input.target?.kind;
+  const safeKind = kind === "channel" || kind === "chat" || kind === "user" ? kind : "user";
+  return {
+    kind: safeKind,
+    id: clampText(input.target?.id, MAX_HANDLE).trim(),
+    title: input.target?.title ? clampText(input.target.title, MAX_HANDLE) : undefined,
+    username: input.target?.username ? clampText(input.target.username, MAX_HANDLE) : undefined,
+    accessHash: input.target?.accessHash ? clampText(input.target.accessHash, 32) : undefined,
+  };
+}
+
 function normalizeTaskInput(input: TaskInput | Task): TaskInput {
   const schedule = { ...input.schedule };
   if (schedule.kind === "daily" || schedule.kind === "window" || schedule.kind === "once") {
@@ -1266,12 +1348,27 @@ function normalizeTaskInput(input: TaskInput | Task): TaskInput {
   schedule.jitterSeconds = Math.max(0, Math.min(3600, Number(schedule.jitterSeconds ?? 0)));
 
   const steps = (input.steps ?? [])
+    .slice(0, 20)
     .map((step) => {
-      if (step.type === "wait") return { type: "wait" as const, seconds: Math.max(0, Number(step.seconds ?? 3)) };
-      if (step.type === "random") return { type: "random" as const, options: (step.options ?? []).filter(Boolean) };
-      if (step.type === "click") return { ...step, text: step.text ?? "", row: step.row, column: step.column };
-      if (step.type === "number") return { type: "number" as const, value: String(step.value ?? "") };
-      return { type: "text" as const, text: String(step.text ?? "") };
+      if (step.type === "wait") {
+        return { type: "wait" as const, seconds: Math.max(0, Math.min(600, Number(step.seconds ?? 3) || 0)) };
+      }
+      if (step.type === "random") {
+        return {
+          type: "random" as const,
+          options: (step.options ?? []).slice(0, 10).map((item) => clampText(item, MAX_STEP_TEXT)).filter(Boolean),
+        };
+      }
+      if (step.type === "click") {
+        return {
+          ...step,
+          text: clampText(step.text, MAX_STEP_TEXT),
+          row: Number.isFinite(Number(step.row)) ? Math.max(0, Math.min(50, Number(step.row))) : undefined,
+          column: Number.isFinite(Number(step.column)) ? Math.max(0, Math.min(50, Number(step.column))) : undefined,
+        };
+      }
+      if (step.type === "number") return { type: "number" as const, value: clampText(step.value, 20) };
+      return { type: "text" as const, text: clampText(step.text, MAX_STEP_TEXT) };
     })
     .filter((step) => {
       if (step.type === "text") return !!step.text;
@@ -1280,14 +1377,19 @@ function normalizeTaskInput(input: TaskInput | Task): TaskInput {
       return true;
     });
 
+  const threadId = Number(input.threadId);
+
   return {
-    name: String(input.name ?? "").trim() || "未命名任务",
+    name: clampText(input.name, MAX_NAME).trim() || "未命名任务",
     enabled: input.enabled !== false,
-    target: input.target,
-    threadId: input.threadId ?? null,
+    target: normalizeTarget(input),
+    threadId: Number.isFinite(threadId) && threadId > 0 ? threadId : null,
     schedule,
     steps,
-    successKeywords: (input.successKeywords ?? []).map((keyword) => String(keyword).trim()).filter(Boolean),
+    successKeywords: (input.successKeywords ?? [])
+      .slice(0, MAX_KEYWORDS)
+      .map((keyword) => clampText(keyword, 60).trim())
+      .filter(Boolean),
     timeoutSeconds: Math.max(5, Math.min(120, Number(input.timeoutSeconds ?? 30))),
     stepDelaySeconds: Math.max(0, Math.min(60, Number(input.stepDelaySeconds ?? 3))),
     deleteAfterSeconds: Math.max(0, Math.min(3600, Number(input.deleteAfterSeconds ?? 0))),
