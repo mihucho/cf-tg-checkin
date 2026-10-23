@@ -6,7 +6,13 @@ import assert from "node:assert/strict";
 import { parseTimeOfDay, nextDaily, nextWindow, computeNextRun, formatTimeOfDay } from "../src/schedule/time.ts";
 import { parseTrigger, tokenize } from "../src/schedule/dsl.ts";
 import type { Target } from "../src/types.ts";
-import { flattenButtons, selectButton, describeButtons } from "../src/telegram/executor.ts";
+import {
+  flattenButtons,
+  selectButton,
+  describeButtons,
+  targetRef,
+  inputPeerFromTarget,
+} from "../src/telegram/executor.ts";
 import { createTgClientOnDc, migrateDcFromError, DC_SEEDS } from "../src/telegram/client.ts";
 import { messageTargetHint, usernameFromLink } from "../src/telegram/targets.ts";
 
@@ -388,6 +394,31 @@ test("目标推断：t.me 链接与 @username", () => {
 
 test("目标推断：没有线索时返回 null", () => {
   assert.equal(messageTargetHint({ out: true, message: "9.30 签到" }), null);
+});
+
+// ---------------------------------------------------------------- 目标解析
+test("targetRef：同时有 username 和数字 id 时优先 username", () => {
+  // 数字 id 解析需要 access_hash，新连接可能拿不到 → 报 Could not find the input entity
+  assert.equal(targetRef({ kind: "user", id: "8045138039", username: "sheeridvn_bot" }), "@sheeridvn_bot");
+  assert.equal(targetRef({ kind: "user", id: "8045138039" }), "8045138039");
+  assert.equal(targetRef({ kind: "channel", id: "-1001234567890", username: "channel_name" }), "@channel_name");
+  assert.equal(targetRef({ kind: "channel", id: "-1001234567890" }), "-1001234567890");
+  assert.equal(targetRef("me"), "me");
+  assert.equal(targetRef("@foo_bot"), "@foo_bot");
+});
+
+test("inputPeerFromTarget：有 access_hash 才能构造出 InputPeer", () => {
+  assert.equal(inputPeerFromTarget({ kind: "user", id: "8045138039" }), null);
+  const user = inputPeerFromTarget({ kind: "user", id: "8045138039", accessHash: "1234567890123456789" });
+  assert.equal(user?.className, "InputPeerUser");
+  assert.equal(String((user as { userId?: unknown }).userId), "8045138039");
+
+  const channel = inputPeerFromTarget({ kind: "channel", id: "-1001234567890", accessHash: "42" });
+  assert.equal(channel?.className, "InputPeerChannel");
+  assert.equal(String((channel as { channelId?: unknown }).channelId), "1234567890");
+
+  const chat = inputPeerFromTarget({ kind: "chat", id: "-42", accessHash: "7" });
+  assert.equal(chat?.className, "InputPeerChat");
 });
 
 // ---------------------------------------------------------------- 结果
