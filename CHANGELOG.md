@@ -11,6 +11,15 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-24
+
+- 修复「按钮类型不支持点击」：layer 232 的普通键盘按钮是
+  `KeyboardButton { text, type: ButtonTypeDefault }`（没有 data/url），之前被判成 unknown。
+  现在按「发文本」处理（等价于用户按下键盘按钮），未识别类型也会先试发文本，
+  最后才尝试 teleproto 自带的 `MessageButton.click()`
+- 按钮日志带上类型：`[3,0] 个人资料 (text,ButtonTypeDefault)`；匹配不到时打印原始 replyMarkup
+- 单测 +2（ButtonTypeDefault、KeyboardInlineButton 回调/链接），共 39 个
+
 ## [0.2.0] - 2026-10-24
 
 这一版集中在「让它真的能签到成功」和「出问题能看见」。

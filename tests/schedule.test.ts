@@ -339,6 +339,60 @@ test("flattenButtons 解析普通键盘（reply keyboard）", () => {
   assert.equal(buttons[0].kind, "text");
 });
 
+test("flattenButtons：layer 232 的 ButtonTypeDefault 普通键盘按钮要按文本发送", () => {
+  // 线上真实结构：KeyboardButton { text, type: ButtonTypeDefault } —— 没有 data/url
+  const buttons = flattenButtons(
+    fakeMessage({
+      className: "ReplyKeyboardMarkup",
+      rows: [
+        {
+          buttons: [
+            { className: "KeyboardButton", text: "👤 个人资料", type: { className: "ButtonTypeDefault" } },
+            { className: "KeyboardButton", text: "🅰 语言", type: { className: "ButtonTypeDefault" } },
+          ],
+        },
+      ],
+    }),
+  );
+  assert.equal(buttons.length, 2);
+  assert.deepEqual(
+    buttons.map((button) => [button.text, button.kind, button.typeClassName]),
+    [
+      ["👤 个人资料", "text", "ButtonTypeDefault"],
+      ["🅰 语言", "text", "ButtonTypeDefault"],
+    ],
+  );
+  assert.equal(selectButton(buttons, { type: "click", text: "个人资料" })?.text, "👤 个人资料");
+});
+
+test("flattenButtons：layer 232 的 KeyboardInlineButton 回调按钮要能点", () => {
+  const buttons = flattenButtons(
+    fakeMessage({
+      className: "ReplyInlineMarkup",
+      rows: [
+        {
+          buttons: [
+            {
+              className: "KeyboardInlineButton",
+              text: "✅ Verify SheerID",
+              type: { className: "InlineButtonTypeCallback", data: new Uint8Array([1, 2, 3]) },
+            },
+            {
+              className: "KeyboardInlineButton",
+              text: "🌐 频道",
+              type: { className: "InlineButtonTypeUrl", url: "https://t.me/sheeridvn" },
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  assert.equal(buttons[0].kind, "callback");
+  assert.deepEqual([...buttons[0].data!], [1, 2, 3]);
+  assert.equal(buttons[1].kind, "url");
+  assert.equal(buttons[1].url, "https://t.me/sheeridvn");
+});
+
 test("flattenButtons 对没有按钮的消息返回空", () => {
   assert.deepEqual(flattenButtons(fakeMessage(undefined)), []);
   assert.deepEqual(flattenButtons(fakeMessage({ className: "ReplyKeyboardHide" })), []);
