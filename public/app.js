@@ -1666,8 +1666,9 @@ function triggerHelp() {
         el(
           "ol",
           { class: "ordered" },
-          el("li", {}, "消息文本里的 @target"),
+          el("li", {}, "消息文本里的 @target / t.me 链接"),
           el("li", {}, "转发 / 分享来源的会话"),
+          el("li", {}, "被回复那条消息的发送者（回复机器人消息即可）"),
           el("li", {}, "设置里的 defaultTarget"),
         ),
       ),

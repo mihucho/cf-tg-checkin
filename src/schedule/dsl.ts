@@ -379,7 +379,8 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
   if (!resolvedTarget) {
     return {
       ok: false,
-      error: "找不到签到目标：把机器人消息转发到收藏夹，或在消息里写 @机器人，或在设置里填默认目标",
+      error:
+        "找不到签到目标：把机器人消息转发/分享到收藏夹、或直接回复那条消息，也可以在消息里写 @机器人，或在设置里填默认目标",
     };
   }
 
