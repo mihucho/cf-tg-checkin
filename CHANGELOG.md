@@ -11,6 +11,40 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-24
+
+这一版集中在「让它真的能签到成功」和「出问题能看见」。
+
+### 新增
+
+- **步骤日志**：任务列表「最近结果 → 步骤日志」弹窗展示最近一次运行的每一步
+  （发送内容、消息上有哪些按钮、点击类型、机器人回应、失败原因），完整历史仍在「日志」页
+- **`@here`**：目标是当前会话（在群里发配置不用再指定目标）；`指向顺序`：显式目标 → `@here`
+  → 转发/回复来源 → 最近登记的目标 → 默认目标
+- **步骤间隔**：每个动作之间默认停 3 秒（任务级 `#delay:N`，`#delay:0` 关掉）
+- **步骤检测**：设置里可配「检测间隔（默认 3 秒）/ 最多等待（默认 30 秒）」
+- **`/api/version`**：公开返回 `{ version, commit, buildId }`，页面底部/登录页/设置页都会显示
+
+### 修复
+
+- **按钮点不动**：layer 232 的 inline 按钮是 `KeyboardInlineButton { type: InlineButtonTypeCallback { data } }`，
+  之前按旧结构读 `data` 导致「匹配上了但点不动」。现在新旧结构都认，并区分 url / webview / switch_inline
+- **按钮文本带图标**：比较前去掉空格/emoji/标点，「👤 个人资料」可匹配「个人资料」
+- **`Could not find the input entity`**：解析数字 id 需要 access_hash。目标优先用 `@username`、
+  建任务时保存 `access_hash`、实体缓存落地到 DO、失败时 `getDialogs()` 预热重试
+- **`PHONE_MIGRATE_n`**：`requestRetries` 过小导致 DC 迁移策略没跑；现在自动切到目标 DC 重试并记住 DC
+- **时间不在第一个位置也能解析**：`https://t.me/x 9 /start …`、`@bot 9.30 签到` 都认；
+  `https://…` 不再被误当成键值对
+- **只转发机器人不再刷「缺少时间」**：无时间但有目标时只做「目标登记」（30 分钟内有效），静默不回复
+- **手动触发不打乱定时**：立即执行不改变 `nextRunAt`（除非本来就到期），也不会提前消费 `once` 任务
+- **`/api/*` 加 `cache-control: no-store`**：避免浏览器启发式缓存读到旧状态
+
+### 部署
+
+- `npm run deploy` 前会自检产物是否导出 `TgAgent`（挡住 `does not export class 'TgAgent'` 那类事故）
+- `keep_vars: true`：CLI 部署不再清掉控制台里加的变量
+- 新增 `docs/DEPLOY.md`「确认线上跑的是哪一版」排查法
+
 ## [0.1.0] - 2026-10-24
 
 首个可用版本。
