@@ -11,6 +11,14 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-24
+
+- 修「从链接建任务抓不到机器人显示名」：`https://t.me/xxx_bot 7.40 /sign` 这类消息里，
+  DSL 从链接解析出的目标只有 username，覆盖了能拿到显示名的推断结果。
+  现在建任务前会解析一次实体，补上 `title` / `accessHash`，任务名变成「签到小助手 /sign」
+- 执行时若目标缺 `title`，也会自动补全，并把当初按 `@username` 自动生成的任务名同步换成显示名
+- `/api/trigger/parse` 试算也会做同样的补全（已登录时）
+
 ## [0.3.2] - 2026-10-24
 
 - 修正「MTProto 连接」状态：之前 `connected` 是硬编码的 `false`（永远显示"待连接"），
