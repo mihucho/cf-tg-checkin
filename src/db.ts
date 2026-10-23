@@ -41,6 +41,13 @@ const SCHEMA = [
       detail TEXT
     )`,
   `CREATE INDEX IF NOT EXISTS idx_logs_at ON logs(at DESC)`,
+  `CREATE TABLE IF NOT EXISTS auth_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ip TEXT NOT NULL,
+      at INTEGER NOT NULL,
+      ok INTEGER NOT NULL
+    )`,
+  `CREATE INDEX IF NOT EXISTS idx_auth_at ON auth_attempts(at)`,
   `CREATE TABLE IF NOT EXISTS deletions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       chat TEXT NOT NULL,
@@ -216,9 +223,12 @@ export class Store {
       const byId = this.getTask(numeric);
       if (byId) return byId;
     }
-    const rows = this.sql
-      .exec<TaskRow>("SELECT * FROM tasks WHERE name LIKE ? ORDER BY id ASC LIMIT 1", `%${trimmed}%`)
-      .toArray();
+    // LIKE 里的 % / _ 要转义，否则「删除 %」这类输入会一次匹配到不相干的任务
+    const escaped = trimmed.replace(/[\\%_]/g, (char) => `\\${char}`);
+    const rows = this.rows<TaskRow>(
+      "SELECT * FROM tasks WHERE name LIKE ? ESCAPE '\\' ORDER BY id ASC LIMIT 1",
+      `%${escaped}%`,
+    );
     return rows.length ? rowToTask(rows[0]) : null;
   }
 
@@ -360,6 +370,28 @@ export class Store {
 
   clearLogs(): void {
     this.sql.exec("DELETE FROM logs");
+  }
+
+  // ---------- 登录尝试（限速） ----------
+  /** 窗口内该 IP 的失败次数 */
+  countAuthFailures(ip: string, since: number): number {
+    const rows = this.rows<{ failures: number | null }>(
+      "SELECT COUNT(*) AS failures FROM auth_attempts WHERE ip = ? AND ok = 0 AND at > ?",
+      ip.slice(0, 64),
+      since,
+    );
+    return rows.length ? Number(rows[0].failures ?? 0) : 0;
+  }
+
+  /** 记录一次登录失败，返回窗口内累计失败次数 */
+  recordAuthAttempt(ip: string, ok: boolean, at: number): number {
+    this.sql.exec("INSERT INTO auth_attempts (ip, at, ok) VALUES (?, ?, ?)", ip.slice(0, 64), at, ok ? 1 : 0);
+    this.sql.exec("DELETE FROM auth_attempts WHERE at < ?", at - 24 * 3600_000);
+    return this.countAuthFailures(ip, at - 10 * 60_000);
+  }
+
+  clearAuthAttempts(ip: string): void {
+    this.sql.exec("DELETE FROM auth_attempts WHERE ip = ?", ip.slice(0, 64));
   }
 
   // ---------- 待删除消息（延迟删除） ----------

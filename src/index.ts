@@ -12,7 +12,16 @@ import type { Env } from "./env";
 export { TgAgent };
 
 const COOKIE_NAME = "tg_checkin";
-const TOKEN_TTL_MS = 30 * 24 * 3600 * 1000;
+/** 登录有效期：7 天（无状态 token，登出只清浏览器 Cookie，改密码/密钥才能全端失效） */
+const TOKEN_TTL_MS = 7 * 24 * 3600 * 1000;
+/** API 请求体上限 */
+const MAX_BODY_BYTES = 64 * 1024;
+
+const SECURITY_HEADERS: Record<string, string> = {
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "x-frame-options": "DENY",
+};
 
 function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data), {
@@ -21,6 +30,7 @@ function json(data: unknown, status = 200, headers: Record<string, string> = {})
       "content-type": "application/json; charset=utf-8",
       // 状态随时在变，绝对不能让浏览器/边缘缓存住
       "cache-control": "no-store",
+      ...SECURITY_HEADERS,
       ...headers,
     },
   });
@@ -94,6 +104,42 @@ function agentStub(env: Env) {
   return hint ? env.TG_AGENT.get(id, { locationHint: hint as DurableObjectLocationHint }) : env.TG_AGENT.get(id);
 }
 
+/**
+ * 登录限速：同一来源失败 10 次 / 10 分钟就锁定（429）。
+ * 计数落在 DO 的 SQLite 里，多 colo 一致。
+ *
+ * mode=peek 只查询是否被封；mode=fail / mode=success 记录结果。
+ */
+async function authThrottle(
+  env: Env,
+  ip: string,
+  mode: "peek" | "fail" | "success",
+): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+  try {
+    const response = await agentStub(env).fetch("https://agent/auth/attempt", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ip, mode }),
+    });
+    const data = (await response.json()) as { allowed?: boolean; retryAfterSeconds?: number };
+    return { allowed: data.allowed !== false, retryAfterSeconds: Number(data.retryAfterSeconds ?? 0) };
+  } catch {
+    // DO 不可用时不要把人锁在门外
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+}
+
+/** 状态变更类请求：浏览器跨站发来的（Origin 与本站不一致）直接拒绝 */
+function originRejected(request: Request, url: URL): boolean {
+  const origin = request.headers.get("origin");
+  if (!origin) return false; // curl / 服务端调用没有 Origin
+  try {
+    return new URL(origin).host !== url.host;
+  } catch {
+    return true;
+  }
+}
+
 async function proxyToAgent(request: Request, env: Env, url: URL): Promise<Response> {
   const doPath = url.pathname.replace(/^\/api/, "");
   const target = `https://agent${doPath}${url.search}`;
@@ -106,7 +152,15 @@ async function proxyToAgent(request: Request, env: Env, url: URL): Promise<Respo
     },
   };
   if (request.method !== "GET" && request.method !== "HEAD") {
-    init.body = await request.text();
+    const declared = Number(request.headers.get("content-length") ?? 0);
+    if (declared > MAX_BODY_BYTES) {
+      return json({ error: `请求体过大（上限 ${Math.round(MAX_BODY_BYTES / 1024)} KB）` }, 413);
+    }
+    const body = await request.text();
+    if (body.length > MAX_BODY_BYTES) {
+      return json({ error: `请求体过大（上限 ${Math.round(MAX_BODY_BYTES / 1024)} KB）` }, 413);
+    }
+    init.body = body;
   }
   const response = await agentStub(env).fetch(target, init);
   const headers = new Headers(response.headers);
@@ -138,20 +192,44 @@ export default {
     }
 
     if (path === "/api/login" && request.method === "POST") {
+      // 登录也是状态变更（会下发 Cookie），同样挡掉跨站来源
+      if (originRejected(request, url)) return json({ error: "请求来源不被允许" }, 403);
+
       const secret = secretOf(env);
       if (!secret) {
         return json({ error: "还没有配置 ADMIN_PASSWORD，请先执行 wrangler secret put ADMIN_PASSWORD" }, 500);
       }
       let password = "";
       try {
-        password = String(((await request.json()) as { password?: string }).password ?? "");
+        const body = (await request.text()).slice(0, 4096);
+        password = String((JSON.parse(body) as { password?: string }).password ?? "");
       } catch {
         return json({ error: "请求格式错误" }, 400);
       }
+
+      const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
+      const verdict = await authThrottle(env, ip, "peek");
+      if (!verdict.allowed) {
+        return json(
+          { error: `尝试次数过多，请 ${Math.ceil(verdict.retryAfterSeconds / 60)} 分钟后再试` },
+          429,
+          { "retry-after": String(verdict.retryAfterSeconds) },
+        );
+      }
+
       if (!password || !constantTimeEqual(password, env.ADMIN_PASSWORD ?? "")) {
+        const after = await authThrottle(env, ip, "fail");
         await new Promise((resolve) => setTimeout(resolve, 400));
+        if (!after.allowed) {
+          return json(
+            { error: `尝试次数过多，请 ${Math.ceil(after.retryAfterSeconds / 60)} 分钟后再试` },
+            429,
+            { "retry-after": String(after.retryAfterSeconds) },
+          );
+        }
         return json({ error: "密码不正确" }, 401);
       }
+      await authThrottle(env, ip, "success");
       const expires = Date.now() + TOKEN_TTL_MS;
       const signature = await sign(secret, `v1.${expires}`);
       return json(
@@ -167,6 +245,11 @@ export default {
 
     if (!(await isAuthenticated(request, env))) {
       return json({ error: "未登录", authenticated: false }, 401);
+    }
+
+    // 状态变更类请求的跨站防护（SameSite=Lax 之外再加一层）
+    if (request.method !== "GET" && request.method !== "HEAD" && originRejected(request, url)) {
+      return json({ error: "请求来源不被允许" }, 403);
     }
 
     try {

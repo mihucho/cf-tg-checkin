@@ -268,7 +268,9 @@ npx wrangler deploy --var DO_LOCATION_HINT:apac   # apac / enam / weur / eeur / 
 
 ## 安全
 
-- 管理界面用一个口令 + HMAC 签名的 HttpOnly Cookie；生产建议再叠一层 Cloudflare Access
+完整的威胁模型、实测结果和已知残余风险见 **[SECURITY.md](SECURITY.md)**。
+
+- 管理界面用一个口令 + HMAC 签名的 HttpOnly Cookie（7 天有效，登录失败 10 次/10 分钟会锁定）；生产建议再叠一层 Cloudflare Access
 - Telegram session（等价于登录态）加密前后都只存在你自己的 Durable Object 里
 - 触发消息会真的往目标聊天发消息，请确认控制会话里的人可信
 

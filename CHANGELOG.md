@@ -11,6 +11,18 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-24
+
+安全加固（详见 [SECURITY.md](SECURITY.md)，含实测记录）：
+
+- 登录限速：同 IP 10 次失败 / 10 分钟 → 429 + `Retry-After`，锁定期内正确密码也拒绝
+- 请求体上限 64 KB；输入长度全部设上限（任务名 80 / 步骤文本 500 / 关键词 20×60 …）
+- `?limit=abc` 之类参数不再把 SQLite 错误原文吐给前端
+- 状态变更接口校验 `Origin`（CSRF 纵深防御，Cookie 仍是 SameSite=Lax + HttpOnly + Secure）
+- 安全响应头：CSP / nosniff / X-Frame-Options / Referrer-Policy / Permissions-Policy
+- 群聊控制会话且未配 `adminUserId` 时，只接受本人发出的触发消息
+- 登录态 TTL 30 天 → 7 天；`findTask` 的 LIKE 通配符转义
+
 ## [0.2.1] - 2026-10-24
 
 - 修复「按钮类型不支持点击」：layer 232 的普通键盘按钮是
