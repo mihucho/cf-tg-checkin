@@ -1098,8 +1098,10 @@ async function openTaskDetail(task) {
     ),
   });
 
-  // 详情内容偏宽（键值表 + 运行列表），给弹窗加个宽度修饰类
-  if (modal && modal.dialog) modal.dialog.classList.add("dialog-wide");
+  // 详情内容偏宽（键值表 + 运行列表），给弹窗加个宽度修饰类（幂等）
+  if (modal && modal.dialog && !modal.dialog.classList.contains("dialog-wide")) {
+    modal.dialog.classList.add("dialog-wide");
+  }
 
   await renderTaskRuns(task, runsBox);
 }

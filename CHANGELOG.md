@@ -11,6 +11,13 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-10-24
+
+- **全局统一用弹窗**：移除抽屉（drawer）实现，任务编辑器改用宽弹窗（`dialog-wide`，桌面 760px、
+  ≤560px 全屏并避开安全区），`openModal()` 的 `variant` 参数删除、改为 `size: "md" | "lg"`
+- 任务详情与编辑器共用同一个宽度修饰类，去掉重复的宽度规则
+- `lib.js` / `editor.js` / `styles.css` 里关于抽屉的注释与样式一并清理
+
 ## [0.10.1] - 2026-10-24
 
 审计（v0.10.0）修复，完整报告见 `deliverables/audits/audit-0.10.0.md`。

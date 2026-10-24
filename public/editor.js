@@ -1,5 +1,5 @@
 /**
- * editor.js — 任务编辑器（右侧抽屉）。
+ * editor.js — 任务编辑器（弹窗，内容较多的表单）。
  * 表单状态保存在内存 model 中，DOM 只是投影；步骤列表可增删/上下移动。
  */
 
@@ -892,7 +892,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
 
   const modal = openModal({
     title: isEdit ? "编辑任务" : "新建任务",
-    variant: "drawer",
+    size: "lg",
     body: el("div", {}, body, errorBox, commandBox),
     footer: el("div", { class: "dialog-actions" }, cancelButton, saveButton),
   });
