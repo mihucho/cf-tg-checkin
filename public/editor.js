@@ -119,7 +119,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
     timeoutSeconds: task?.timeoutSeconds ?? 30,
     stepDelaySeconds: task?.stepDelaySeconds ?? 3,
     deleteAfterSeconds: task?.deleteAfterSeconds ?? 0,
-    cleanupPrevious: Boolean(task?.cleanupPrevious),
+    cleanupPrevious: task ? Boolean(task.cleanupPrevious) : true,
   };
 
   /* ---------------- 基础字段 ---------------- */

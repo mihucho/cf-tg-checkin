@@ -38,6 +38,13 @@ test("normalizeTaskInput：名称/句柄超长会被截断（防 1MB 落库）",
   assert.equal(normalizeTaskInput(input({ name: "   " })).name, "未命名任务");
 });
 
+test("normalizeTaskInput：cleanupPrevious 未传时默认开启", () => {
+  const withoutField = { ...input() } as Partial<TaskInput>;
+  delete (withoutField as { cleanupPrevious?: boolean }).cleanupPrevious;
+  assert.equal(normalizeTaskInput(withoutField as TaskInput).cleanupPrevious, true);
+  assert.equal(normalizeTaskInput(input({ cleanupPrevious: false })).cleanupPrevious, false);
+});
+
 test("normalizeTaskInput：非法 target.kind 收敛成 user", () => {
   const task = normalizeTaskInput(input({ target: { kind: "hacker" as never, id: "1" } }));
   assert.equal(task.target.kind, "user");
