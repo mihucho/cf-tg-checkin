@@ -1,5 +1,5 @@
 /**
- * lib.js — 通用工具：DOM 构建、内联图标、API 封装、时间/调度格式化、toast、弹窗与抽屉。
+ * lib.js — 通用工具：DOM 构建、内联图标、API 封装、时间/调度格式化、toast、弹窗。
  * 纯前端，无外部依赖，无 mock 数据。
  */
 
@@ -330,7 +330,7 @@ export function toast(message, { kind = "info", duration = 4200 } = {}) {
   while (region.children.length > 4) region.firstElementChild.remove();
 }
 
-/* -------------------------------------------------------- 弹窗 / 抽屉 */
+/* ------------------------------------------------------------- 弹窗 */
 
 let modalState = null;
 let overlayBound = false;
@@ -377,10 +377,11 @@ function bindOverlayOnce() {
 }
 
 /**
- * 打开弹窗（variant: "dialog" | "drawer"）。
- * @param {{title: string, body: Node, footer?: Node|null, variant?: string, onClose?: Function}} options
+ * 打开弹窗。全局只用弹窗，不再有抽屉（variant 参数已移除）。
+ * @param {{title: string, body: Node, footer?: Node|null, size?: "md"|"lg", onClose?: Function}} options
+ *   size: "md" 默认 540px；"lg" 760px（表单类内容，如任务编辑器）
  */
-export function openModal({ title, body, footer = null, variant = "dialog", onClose }) {
+export function openModal({ title, body, footer = null, size = "md", onClose }) {
   bindOverlayOnce();
   if (modalState) closeModal(true);
 
@@ -389,7 +390,7 @@ export function openModal({ title, body, footer = null, variant = "dialog", onCl
   if (!overlay || !dialog) return null;
 
   const restoreFocus = document.activeElement;
-  dialog.className = variant === "drawer" ? "dialog drawer" : "dialog";
+  dialog.className = size === "lg" ? "dialog dialog-wide" : "dialog";
   dialog.innerHTML = "";
   dialog.setAttribute("tabindex", "-1");
 
@@ -409,7 +410,6 @@ export function openModal({ title, body, footer = null, variant = "dialog", onCl
   if (footer) dialog.append(el("div", { class: "dialog-foot" }, footer));
   dialog.setAttribute("aria-labelledby", titleId);
 
-  overlay.classList.toggle("is-drawer", variant === "drawer");
   overlay.hidden = false;
   document.body.classList.add("is-locked");
   modalState = { restoreFocus, onClose };
@@ -431,10 +431,7 @@ export function closeModal(inside = false) {
   modalState = null;
   const overlay = document.getElementById("overlay");
   const dialog = document.getElementById("dialog");
-  if (overlay) {
-    overlay.hidden = true;
-    overlay.classList.remove("is-drawer");
-  }
+  if (overlay) overlay.hidden = true;
   if (dialog) dialog.innerHTML = "";
   document.body.classList.remove("is-locked");
   if (state.restoreFocus instanceof HTMLElement && document.contains(state.restoreFocus)) {
