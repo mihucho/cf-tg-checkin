@@ -577,7 +577,7 @@ function renderOverview() {
       label: "消息指令",
       dot: settings.triggerEnabled ? "ok" : "idle",
       value: settings.triggerEnabled ? "运行中" : "已关闭",
-      foot: `在${controlChatLabel(settings)}里发指令 · 每 ${Number(settings.pollSeconds) || 60} 秒检查一次${
+      foot: `来源 ${controlChatLabel(settings)} · 检查间隔 ${Number(settings.pollSeconds) || 60}s${
         runtime && runtime.nextPollAt ? `（下次 ${formatClock(runtime.nextPollAt)}）` : ""
       }`,
       sub:
@@ -593,7 +593,7 @@ function renderOverview() {
               runtime.lastTriggerEvent.at,
             )}）`
           : "最近事件：还没处理过消息指令",
-      sub: `等按钮：每 ${Number(settings.stepPollSeconds) || 3}s 看一次，最多等 ${Number(settings.stepWaitSeconds) || 30}s`,
+      sub: `按钮检测 ${Number(settings.stepPollSeconds) || 3}s / 上限 ${Number(settings.stepWaitSeconds) || 30}s`,
     }),
   );
 
@@ -639,7 +639,7 @@ function renderOverview() {
             "p",
             { class: "hint-sub" },
             settings.triggerEnabled
-              ? "会自动读取新消息。支持点击按钮、随机文本、成功关键词等写法。"
+              ? "会自动读取新消息，支持点击按钮、随机文本、成功关键词等写法。"
               : "消息指令已关闭，可在设置里重新开启。",
           ),
           el("a", { class: "link link-sm", href: "#/settings" }, "看看怎么写指令", icon("arrowRight", { size: 14 })),
@@ -1644,40 +1644,40 @@ function renderSettings() {
       { class: "form-row" },
       field({
         id: "settings-timezone",
-        label: "时区（小时）",
+        label: "时区（UTC 偏移）",
         control: numberControl("timezone", settings.timezone ?? 8, { step: "0.5", min: "-12", max: "14" }),
-        hint: "北京时间填 8。其他时区可填小数，例如 5.5。",
+        hint: "按小时计的 UTC 偏移。北京时间填 8，支持小数（如 5.5）。",
       }),
       field({
         id: "settings-pollSeconds",
-        label: "多久检查一次新消息（秒）",
+        label: "检查间隔（秒）",
         control: numberControl("pollSeconds", settings.pollSeconds ?? 60, { step: "5", min: "15", max: "3600" }),
-        hint: "越短越及时，但会消耗更多额度。",
+        hint: "读取新消息的频率。越短越及时，但请求量也越大。",
       }),
     ),
-    el("div", { class: "form-section-title" }, "等按钮出现"),
+    el("div", { class: "form-section-title" }, "按钮等待"),
     el(
       "div",
       { class: "form-row" },
       field({
         id: "settings-stepPollSeconds",
-        label: "每隔多久看一次（秒）",
+        label: "检测间隔（秒）",
         control: numberControl("stepPollSeconds", settings.stepPollSeconds ?? 3, {
           step: "1",
           min: "1",
           max: "30",
         }),
-        hint: "机器人回复后，每隔多久去看一次有没有出现下一步的按钮。",
+        hint: "机器人回复后，按此间隔检查下一步按钮是否出现。",
       }),
       field({
         id: "settings-stepWaitSeconds",
-        label: "最多等多久（秒）",
+        label: "等待上限（秒）",
         control: numberControl("stepWaitSeconds", settings.stepWaitSeconds ?? 30, {
           step: "5",
           min: "5",
           max: "300",
         }),
-        hint: "超过这个时间还没出现下一步，就算这一步失败。",
+        hint: "超过该时长仍无下一步按钮，则判定这一步失败。",
       }),
     ),
     el(
@@ -1695,31 +1695,31 @@ function renderSettings() {
         el("span", { class: "switch-track", "aria-hidden": "true" }),
         el("span", { class: "switch-text" }, "允许用 Telegram 消息管理任务"),
       ),
-      el("p", { class: "field-hint" }, "关闭后不再读取新消息；已有任务的定时照常执行。"),
+      el("p", { class: "field-hint" }, "关闭后不再读取新消息；已有任务的定时不受影响。"),
     ),
     field({
       id: "settings-controlChat",
-      label: "去哪里读指令",
+      label: "指令来源",
       control: textControl("controlChat", settings.controlChat ?? "self", "self"),
-      hint: "默认 self = 收藏夹。也可以填群组 @用户名 或数字 ID。",
+      hint: "默认 self（收藏夹）。也可填群组 @用户名 或数字 ID。",
     }),
     field({
       id: "settings-triggerPrefix",
       label: "指令前缀",
       control: textControl("triggerPrefix", settings.triggerPrefix ?? "", "默认 tg；留空 = 所有消息都解析"),
-      hint: "只有以它开头的消息才会被当成指令（如「tg 9.30 签到」），收藏夹里的随手笔记不会被误解析。转发过来的消息仍会自动识别目标；留空表示所有消息都解析。",
+      hint: "仅以该前缀开头的消息会被解析为指令（如「tg 9.30 签到」）。留空表示解析全部消息。",
     }),
     field({
       id: "settings-adminUserId",
-      label: "管理员 Telegram ID",
+      label: "管理员 ID",
       control: textControl("adminUserId", settings.adminUserId ?? "", "", "numeric"),
-      hint: "填了之后，只有这个账号发的消息指令才生效（换成群组时建议填）。",
+      hint: "仅该 Telegram 账号发出的指令有效。指令来源改为群组时建议填写。",
     }),
     field({
       id: "settings-defaultTarget",
       label: "默认目标",
       control: textControl("defaultTarget", settings.defaultTarget ?? "", "@username 或数字 id"),
-      hint: "消息里认不出要发给谁时用这个，例如 @jerry_bot。",
+      hint: "指令中未能识别目标时使用，例如 @jerry_bot。",
     }),
     el("div", { class: "form-section-title" }, "登录验证（Cloudflare Turnstile）"),
     field({
@@ -1917,8 +1917,8 @@ function testerCard() {
   textarea.value = state.testText || "";
 
   return card({
-    title: "试试一条指令",
-    description: "把你想发的指令粘进来，看看会建出什么任务。",
+    title: "指令试算",
+    description: "输入一条指令，预览会解析成什么任务。",
     actions: [
       btn("查一下", {
         variant: "primary",
