@@ -10,7 +10,17 @@ import { Api } from "teleproto";
 import { password as PasswordModule } from "teleproto";
 import type { TelegramClient } from "teleproto";
 import { Store } from "./db";
-import type { AccountInfo, AgentState, LogEntry, LogSource, Settings, Target, Task, TaskInput } from "./types";
+import type {
+  AccountInfo,
+  AgentState,
+  LogEntry,
+  LogSource,
+  Settings,
+  Target,
+  Task,
+  TaskInput,
+  WebhookKind,
+} from "./types";
 import {
   buildDigest,
   buildWeeklyDigest,
@@ -24,6 +34,7 @@ import {
   weekStart,
 } from "./notify/digest";
 import { describeLowRate, pickLowRateTasks, taskRates } from "./notify/rate";
+import { buildTestMessage } from "./notify/test";
 import { NOTIFY_EVENTS, isNotifyEventId, isThrottledEvent, normalizeNotifyEvents } from "./notify/events";
 import type { NotifyEventId } from "./notify/events";
 import { buildWebhookPayload, detectWebhookKind, parseWebhookResult } from "./notify/webhook";
@@ -314,6 +325,59 @@ export class TgAgent implements DurableObject {
           nextBefore: beforeId && logs.length === pageSize ? logs[logs.length - 1].id : null,
         });
       }
+      if (path === "/notify/test" && method === "POST") {
+        // 允许前端带上「表单里当前的值」来测：改完地址不用先保存也能验证
+        const overlay = (await request.json().catch(() => ({}))) as Partial<Settings>;
+        const stored = this.store.getSettings();
+        const settings: Settings = {
+          ...stored,
+          ...sanitizeSettings(overlay),
+          // 密钥留空表示沿用已保存的（和保存设置的语义一致）
+          notifyWebhookSecret: String(overlay.notifyWebhookSecret ?? "").trim() || stored.notifyWebhookSecret,
+        };
+        const sample = buildTestMessage(settings);
+        const result: {
+          telegram: { ok: boolean; error?: string; skipped?: boolean };
+          webhook: { ok: boolean; kind: string; error?: string; skipped?: boolean };
+        } = {
+          telegram: { ok: false, skipped: true },
+          webhook: { ok: false, kind: settings.notifyWebhookKind ?? "generic", skipped: true },
+        };
+
+        // Telegram：只有登录过、且开着私聊提醒才发
+        if (settings.notifyOnFailure !== false && this.store.getKv(KV_SESSION)) {
+          result.telegram = { ok: false };
+          try {
+            await this.withClient((client) =>
+              client.sendMessage("me" as never, { message: `${sample.title}\n${sample.text}`, parseMode: false }),
+            );
+            result.telegram = { ok: true };
+          } catch (error) {
+            result.telegram = { ok: false, error: errorMessage(error) };
+          }
+        } else {
+          result.telegram = {
+            ok: false,
+            skipped: true,
+            error: settings.notifyOnFailure === false ? "私聊提醒已关闭" : "还没登录 Telegram",
+          };
+        }
+
+        // Webhook：配了地址就真打一遍（带上 card，能看到真实排版）
+        if ((settings.notifyWebhook ?? "").trim()) {
+          const sent = await this.sendWebhook(settings, {
+            title: sample.title,
+            text: sample.text,
+            card: sample.card,
+          });
+          result.webhook = { ok: sent.ok, kind: sent.kind, error: sent.error };
+        } else {
+          result.webhook = { ok: false, kind: result.webhook.kind, skipped: true, error: "还没有填 Webhook 地址" };
+        }
+
+        return json({ ok: result.telegram.ok || result.webhook.ok, result });
+      }
+
       if (path === "/notify/event" && method === "POST") {
         // 只给 Worker 内部调用（登录失败发生在 Worker 侧，那里拿不到 Telegram client）
         if (request.headers.get("x-internal-call") !== "notify") return jsonError("仅限内部调用", 403);
@@ -2202,12 +2266,15 @@ export class TgAgent implements DurableObject {
       text: string;
       card?: import("./notify/digest").DigestCard;
     },
-  ): Promise<boolean> {
+  ): Promise<{ ok: boolean; kind: WebhookKind; error?: string }> {
     const webhook = (settings.notifyWebhook ?? "").trim();
-    if (!webhook || !/^https?:\/\//i.test(webhook)) return false;
+    const kindHint = settings.notifyWebhookKind ?? "generic";
+    if (!webhook || !/^https?:\/\//i.test(webhook)) {
+      return { ok: false, kind: kindHint, error: "还没有填 Webhook 地址" };
+    }
 
     // 老配置没有渠道字段时按域名兜底猜一次
-    const kind = settings.notifyWebhookKind ?? detectWebhookKind(webhook);
+    const kind = kindHint ?? detectWebhookKind(webhook);
     const now = Date.now();
     try {
       const payload = await buildWebhookPayload(
@@ -2240,7 +2307,7 @@ export class TgAgent implements DurableObject {
           source: "system",
         });
       }
-      return result.ok;
+      return { ok: result.ok, kind: payload.kind, error: result.error };
     } catch (error) {
       this.store.addLog({
         taskId: message.taskId ?? null,
@@ -2252,7 +2319,7 @@ export class TgAgent implements DurableObject {
         detail: null,
         source: "system",
       });
-      return false;
+      return { ok: false, kind, error: errorMessage(error) };
     }
   }
 

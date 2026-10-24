@@ -14,5 +14,6 @@ import "./budget.test.ts";
 import "./webhook.test.ts";
 import "./digest.test.ts";
 import "./rate.test.ts";
+import "./notify-test.test.ts";
 
 void runAll();
