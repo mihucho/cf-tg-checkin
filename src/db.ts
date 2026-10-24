@@ -405,7 +405,7 @@ export class Store {
     this.deleteKv(`notify:${id}:at`);
   }
 
-  dueTasks(now: number, limit = 5): Task[] {
+  dueTasks(now: number, limit = 20): Task[] {
     return this.sql
       .exec<TaskRow>(
         "SELECT * FROM tasks WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ? ORDER BY next_run_at ASC LIMIT ?",
@@ -507,6 +507,9 @@ export class Store {
   recordEvent(name: string): void {
     const at = Date.now();
     const key = name.slice(0, 40);
+    // 累计总数单独存 kv：events 表每类只留 5000 条，用它统计会静默封顶
+    const totalKey = `event:total:${key}`;
+    this.setKv(totalKey, String(Number(this.getKv(totalKey) ?? 0) + 1));
     this.sql.exec("INSERT INTO events (name, at) VALUES (?, ?)", key, at);
     // 每类事件只留最近 5000 条，避免无限增长
     this.sql.exec(
@@ -524,8 +527,16 @@ export class Store {
   }
 
   countEvent(name: string): number {
+    // 优先用累计计数器（不受 5000 条上限影响）
+    const totalKey = `event:total:${name}`;
+    const stored = this.getKv(totalKey);
+    if (stored !== null && stored !== undefined) return Number(stored) || 0;
+
+    // 老部署第一次读：用现有条数初始化计数器，再写回去，避免升级后数字突然变 0
     const rows = this.rows<{ total: number | null }>("SELECT COUNT(*) AS total FROM events WHERE name = ?", name);
-    return rows.length ? Number(rows[0].total ?? 0) : 0;
+    const legacy = rows.length ? Number(rows[0].total ?? 0) : 0;
+    this.setKv(totalKey, String(legacy));
+    return legacy;
   }
 
   firstEventAt(name: string): number | null {

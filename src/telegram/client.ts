@@ -75,6 +75,19 @@ export function migrateDcFromError(error: unknown): number | null {
   return match ? Number(match[1]) : null;
 }
 
+/**
+ * 这个错误值不值得「换条新连接重试一次」。
+ *
+ * 只认连接/socket 层面的错误：像"目标不存在""参数不合法"这类业务错误重试也没用，
+ * 反而会把副作用（已经发出的消息、已经建好的任务）再执行一遍。
+ */
+export function isConnectionError(error: unknown): boolean {
+  const message = errorMessage(error);
+  return /disconnect|not connected|socket|timeout|timed out|network|closed|econn|etimedout|dc \d+|connection/i.test(
+    message,
+  );
+}
+
 /** teleproto 的错误对象通常带 errorMessage 字段 */
 export function errorMessage(error: unknown): string {
   if (!error) return "未知错误";

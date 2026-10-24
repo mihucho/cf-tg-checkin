@@ -11,7 +11,7 @@ import { password as PasswordModule } from "teleproto";
 import type { TelegramClient } from "teleproto";
 import { Store } from "./db";
 import type { AccountInfo, AgentState, LogEntry, LogSource, Settings, Target, Task, TaskInput } from "./types";
-import { createTgClient, createTgClientOnDc, errorMessage, migrateDcFromError } from "./telegram/client";
+import { createTgClient, createTgClientOnDc, errorMessage, isConnectionError, migrateDcFromError } from "./telegram/client";
 import { executeTask, resolveEntity, type ExecHooks } from "./telegram/executor";
 import { computeNextRun, formatInTimezone } from "./schedule/time";
 import { decideRun, shouldAutoPause } from "./schedule/guard";
@@ -54,6 +54,11 @@ const KV_PHONE = "account:phone";
 const KV_LAST_ERROR = "account:lastError";
 /** 控制会话里最近一次"转发/回复过来的目标"（先转发机器人、再单独发配置时用） */
 const KV_TRIGGER_TARGET = "trigger:target";
+/** 触发消息单批拉取条数 / 最多回溯几批（多了会拖慢轮询，少了会丢指令） */
+const TRIGGER_FETCH_BATCH = 100;
+const TRIGGER_FETCH_BATCHES = 5;
+/** run-all 每次处理的批大小：8 个任务 × 单任务预算，仍在网关超时以内 */
+const RUN_ALL_BATCH = 8;
 /**
  * 实体缓存（[markedId, accessHash, username, phone, name]）。
  * teleproto 把这份缓存放在 session 对象里，StringSession.save() 不会带上它，
@@ -96,6 +101,13 @@ function publicError(error: unknown): string {
 }
 
 /** query/body 里的数字参数：非数字一律回落到默认值，避免把 "abc" 塞进 SQL */
+/** 按消息 id 去重（分批拉取时相邻批次可能重叠） */
+function dedupeById<T extends { id: number }>(items: T[]): T[] {
+  const seen = new Map<number, T>();
+  for (const item of items) if (!seen.has(item.id)) seen.set(item.id, item);
+  return [...seen.values()];
+}
+
 function intParam(value: unknown, fallback: number, min: number, max: number): number {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed)) return fallback;
@@ -144,7 +156,7 @@ export class TgAgent implements DurableObject {
     try {
       const colo = request.headers.get("x-cf-colo");
       if (colo && this.store.getKv("runtime:colo") !== colo) this.store.setKv("runtime:colo", colo);
-      if (path === "/state" && method === "GET") return json(await this.buildState());
+      if (path === "/state" && method === "GET") return json(this.buildState());
       if (path === "/settings" && method === "POST") {
         const body = (await request.json()) as Partial<Settings> & { clearTurnstileSecret?: boolean };
         const { clearTurnstileSecret, ...rest } = body;
@@ -196,9 +208,13 @@ export class TgAgent implements DurableObject {
       }
 
       if (path === "/tasks/run-all" && method === "POST") {
-        const logs = await this.serialize(() => this.runAllTasks());
+        // 一次跑太多会撞网关超时（前端看到 524、其实任务还在跑）：
+        // 每次只处理一批，把剩余数量返回给前端，由前端接着调。
+        const limit = intParam(url.searchParams.get("limit"), RUN_ALL_BATCH, 1, 50);
+        const offset = intParam(url.searchParams.get("offset"), 0, 0, 10_000);
+        const result = await this.serialize(() => this.runAllTasksBatch(offset, limit));
         await this.scheduleNextAlarm();
-        return json({ ok: logs.every((log) => log.ok), logs });
+        return json(result);
       }
 
       const taskMatch = /^\/tasks\/(\d+)(\/run|\/logs|\/command)?$/.exec(path);
@@ -609,7 +625,9 @@ export class TgAgent implements DurableObject {
           this.afterUse(reusable);
           return result;
         } catch (error) {
-          // 复用的连接可能已经半死：丢掉它，重连一次再试
+          // 复用的连接可能已经半死：丢掉它，重连一次再试。
+          // 业务错误（目标不存在 / 参数不合法）不重试 —— 否则会把副作用重放一遍。
+          if (!isConnectionError(error)) throw error;
           this.store.setKv(KV_LAST_ERROR, errorMessage(error));
           await this.dropClient();
           return await this.runWithFreshClient(creds, fn);
@@ -990,7 +1008,24 @@ export class TgAgent implements DurableObject {
     const cursorKey = `trigger:cursor:${controlRef}`;
     const cursor = Number(this.store.getKv(cursorKey) ?? 0);
 
-    const messages = (await client.getMessages(entity as never, { limit: 20 })) as Api.Message[];
+    // 一次只取最近 20 条会在「短时间内发很多指令」时静默丢消息：
+    // 游标直接跳到最高 id，中间那些没被看到的就再也不会被处理了。
+    // 这里按批往回翻，直到取够 5 批（500 条）或已经翻到游标之前。
+    const batchSize = TRIGGER_FETCH_BATCH;
+    const collected: Api.Message[] = [];
+    let offsetId = 0;
+    for (let batch = 0; batch < TRIGGER_FETCH_BATCHES; batch += 1) {
+      const page = (await client.getMessages(entity as never, {
+        limit: batchSize,
+        ...(offsetId ? { offsetId } : {}),
+      })) as Api.Message[];
+      if (!page.length) break;
+      collected.push(...page);
+      const lowest = Math.min(...page.map((message) => message.id));
+      if (!cursor || lowest <= cursor) break;
+      offsetId = lowest;
+    }
+    const messages = dedupeById(collected);
     if (!messages.length) return;
     const highest = Math.max(cursor, ...messages.map((message) => message.id));
 
@@ -1534,10 +1569,22 @@ export class TgAgent implements DurableObject {
     }
   }
 
-  private async runAllTasks(): Promise<LogEntry[]> {
+  /** 单次 run-all 最多跑几个任务（前端会分批调用） */
+  private async runAllTasksBatch(
+    offset: number,
+    limit: number,
+  ): Promise<{ ok: boolean; logs: LogEntry[]; processed: number; remaining: number; nextOffset: number }> {
     const tasks = this.store.listTasks().filter((task) => task.enabled);
-    if (!tasks.length) return [];
-    return this.runTasks(tasks, undefined, { manual: true });
+    const batch = tasks.slice(offset, offset + limit);
+    const logs = batch.length ? await this.runTasks(batch, undefined, { manual: true }) : [];
+    const nextOffset = offset + batch.length;
+    return {
+      ok: logs.every((log) => log.ok),
+      logs,
+      processed: logs.length,
+      remaining: Math.max(0, tasks.length - nextOffset),
+      nextOffset,
+    };
   }
 
   /**
@@ -1809,7 +1856,28 @@ export class TgAgent implements DurableObject {
     return lastPoll ? lastPoll + this.pollIntervalMs() : Date.now();
   }
 
-  private async buildState(): Promise<AgentState> {
+  /**
+   * 近 7 天执行趋势。前端每 30 秒拉一次 state，没必要每次都扫一遍事件表 —— 缓存 60 秒。
+   */
+  private usageTrend(tzHours: number): Array<{ date: string; ok: number; fail: number }> {
+    const cached = this.store.getJson<{ at: number; tz: number; data: Array<{ date: string; ok: number; fail: number }> } | null>(
+      "cache:usageTrend",
+      null,
+    );
+    const now = Date.now();
+    if (cached && cached.tz === tzHours && now - cached.at < 60_000) return cached.data;
+
+    const data = bucketDaily(
+      this.store
+        .listEventSamples("run_finished:", now - 8 * 86400 * 1000)
+        .map((row) => ({ ok: row.name === "run_finished:ok", at: row.at })),
+      { now, tzHours, days: 7 },
+    );
+    this.store.setJson("cache:usageTrend", { at: now, tz: tzHours, data });
+    return data;
+  }
+
+  private buildState(): AgentState {
     let settings = this.store.getSettings();
     const tasks = this.store.listTasks();
     const me = this.store.getJson<AccountInfo["me"]>(KV_ME, null);
@@ -1861,12 +1929,7 @@ export class TgAgent implements DurableObject {
           fail: this.store.countEvent("run_finished:fail"),
         },
         failureHandled: this.store.countEvent("failure_handled"),
-        trend: bucketDaily(
-          this.store
-            .listEventSamples("run_finished:", Date.now() - 8 * 86400 * 1000)
-            .map((row) => ({ ok: row.name === "run_finished:ok", at: row.at })),
-          { now: Date.now(), tzHours: settings.timezone ?? 8, days: 7 },
-        ),
+        trend: this.usageTrend(settings.timezone ?? 8),
       },
       runtime: {
         colo: this.store.getKv("runtime:colo"),

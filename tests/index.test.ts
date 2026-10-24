@@ -9,5 +9,7 @@ import "./command.test.ts";
 import "./task.test.ts";
 import "./events.test.ts";
 import "./roundtrip.test.ts";
+import "./socket.test.ts";
+import "./budget.test.ts";
 
 void runAll();

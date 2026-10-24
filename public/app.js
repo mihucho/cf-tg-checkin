@@ -1489,15 +1489,25 @@ async function deleteTask(task) {
 async function runAll(button) {
   await withLoading(button, async () => {
     try {
-      const res = await api("/api/tasks/run-all", { method: "POST" });
-      const logs = Array.isArray(res && res.logs) ? res.logs : [];
-      const failed = logs.filter((log) => !log.ok).length;
-      toast(
-        logs.length
-          ? `执行了 ${logs.length} 个任务${failed ? `，${failed} 个失败` : "，全部成功"}`
-          : "没有可执行的任务",
-        { kind: failed ? "error" : "ok" },
-      );
+      let done = 0;
+      let failed = 0;
+      let offset = 0;
+      // 服务端每次只跑一批（避免网关超时），按 offset 推进直到跑完
+      for (let round = 0; round < 30; round += 1) {
+        const res = await api(`/api/tasks/run-all?offset=${offset}`, { method: "POST" });
+        const logs = Array.isArray(res && res.logs) ? res.logs : [];
+        done += logs.length;
+        failed += logs.filter((log) => !log.ok).length;
+        offset = Number(res && res.nextOffset) || offset + logs.length;
+        const remaining = Number(res && res.remaining) || 0;
+        if (!remaining) {
+          toast(
+            done ? `执行了 ${done} 个任务${failed ? `，${failed} 个失败` : "，全部成功"}` : "没有可执行的任务",
+            { kind: failed ? "error" : "ok" },
+          );
+          break;
+        }
+      }
       await refreshState({ silent: true });
     } catch (error) {
       toast(error.message || "执行失败", { kind: "error" });

@@ -451,6 +451,37 @@ function pickRandom(options: string[]): string {
   return options[Math.floor(Math.random() * options.length)] ?? "";
 }
 
+/**
+ * 一次执行最多能占多久（毫秒）。
+ *
+ * 估算方式：按步骤类型累加最坏情况 —— 等待步骤按秒数、点击步骤按「等菜单 + 等新菜单」、
+ * 其余步骤按步骤间隔，最后加上关键词判定的超时。夹在 30 秒 ~ 4 分钟之间：
+ * 再短会误伤正常任务，再长就有被 DO 驱逐、把 alarm 批次拖爆的风险。
+ */
+export function taskBudgetMs(
+  task: Pick<Task, "steps" | "timeoutSeconds" | "stepDelaySeconds">,
+  options: { pollIntervalMs?: number; stepWaitMs?: number } = {},
+): number {
+  const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+  const stepWait = clamp(options.stepWaitMs ?? 30_000, 500, 300_000);
+  const poll = clamp(options.pollIntervalMs ?? 3000, 500, 30_000);
+  const delay = clamp(Number(task.stepDelaySeconds ?? 3), 0, 60) * 1000;
+  const keywordWait = clamp(Number(task.timeoutSeconds ?? 30), 5, 90) * 1000;
+
+  let total = 0;
+  for (const step of task.steps ?? []) {
+    if (step.type === "wait") {
+      total += clamp(Number(step.seconds ?? 3), 0, 600) * 1000;
+    } else if (step.type === "click") {
+      total += stepWait * 2 + poll;
+    } else {
+      total += delay;
+    }
+  }
+
+  return clamp(total + keywordWait, 30_000, 4 * 60_000);
+}
+
 export interface ExecuteOptions {
   /** 上一次运行发出的消息 id，用于按需清理 */
   previousSent?: number[];
@@ -485,6 +516,13 @@ export async function executeTask(
   const stepWaitDeadline = () => Date.now() + Math.max(pollIntervalMs, Math.min(300_000, options.stepWaitMs ?? 30_000));
   const stepDelayMs = Math.max(0, Math.min(60, task.stepDelaySeconds ?? 3)) * 1000;
   const sent: number[] = [];
+  /**
+   * 整任务时间预算：一次 tick/alarm 的可用时间有限，多目标 × 多步骤很容易超。
+   * 超出预算就停止后续步骤并如实记账，而不是跑到被驱逐。
+   */
+  const budgetMs = taskBudgetMs(task, { pollIntervalMs, stepWaitMs: options.stepWaitMs ?? 30_000 });
+  const deadline = Date.now() + budgetMs;
+  let budgetExceeded = false;
 
   if (task.cleanupPrevious && options.previousSent?.length) {
     try {
@@ -501,6 +539,11 @@ export async function executeTask(
 
   for (const [index, step] of task.steps.entries()) {
     const stepNo = index + 1;
+    if (Date.now() >= deadline) {
+      budgetExceeded = true;
+      note("warn", `时间预算 ${Math.round(budgetMs / 1000)}s 用完，剩余 ${task.steps.length - index} 步未执行`);
+      break;
+    }
     try {
       switch (step.type) {
         case "text":
@@ -612,6 +655,16 @@ export async function executeTask(
       note("info", `步骤间等待 ${Math.round(stepDelayMs / 1000)}s`);
       await sleep(stepDelayMs);
     }
+  }
+
+  if (budgetExceeded) {
+    return {
+      ok: false,
+      message: "超出时间预算，未跑完所有步骤",
+      detail: detail.join("\n"),
+      sent,
+      chatId,
+    };
   }
 
   // 判定成功
