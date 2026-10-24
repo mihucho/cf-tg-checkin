@@ -225,6 +225,42 @@ async function main() {
     check("日报时间越界收敛到 23", badHour.settings?.digestHour === 23, `got ${badHour.settings?.digestHour}`);
     await post("/api/settings", { digestHour: 7 });
 
+    // ---------- 通知测试 ----------
+    // 先清空 webhook，保证这里是「未配置」分支（前面 Webhook 渠道那节配过地址）
+    await post("/api/settings", { notifyWebhook: "" });
+    const tested = await post("/api/notify/test", {});
+    check(
+      "通知测试返回两个通道的结果",
+      tested.result && typeof tested.result.telegram?.ok === "boolean" && typeof tested.result.webhook?.ok === "boolean",
+      JSON.stringify(tested.result),
+    );
+    check(
+      "没配 Webhook 时明确说明（而不是静默成功）",
+      tested.result?.webhook?.ok === false && /Webhook 地址/.test(String(tested.result?.webhook?.error ?? "")),
+      JSON.stringify(tested.result?.webhook),
+    );
+    check(
+      "未登录 Telegram 时说明原因（跳过而不是失败）",
+      tested.result?.telegram?.ok === false && tested.result?.telegram?.skipped === true,
+      JSON.stringify(tested.result?.telegram),
+    );
+    // overlay：用表单里的值测（指向本地未监听端口，快速失败且不碰外网）
+    const overlayTest = await post("/api/notify/test", {
+      notifyWebhook: "http://127.0.0.1:9/nowhere",
+      notifyWebhookKind: "feishu",
+    });
+    check(
+      "测试用表单里传的值（不用先保存）",
+      overlayTest.result?.webhook?.kind === "feishu",
+      JSON.stringify(overlayTest.result?.webhook),
+    );
+    const stateAfterTest = await get("/api/state");
+    check(
+      "测试不会写入设置",
+      (stateAfterTest.settings?.notifyWebhook ?? "") === "",
+      `保存的地址变成 ${stateAfterTest.settings?.notifyWebhook}`,
+    );
+
     // ---------- 事件白名单 ----------
     const badEvent = await post("/api/events", { name: "hack" });
     check("未知事件被拒（400）", badEvent.status === 400, `status=${badEvent.status}`);

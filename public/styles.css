@@ -2845,6 +2845,41 @@ input[type="radio"] {
   text-align: center;
 }
 
+.notify-test {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.notify-test-result {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.notify-test-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-2, rgba(255, 255, 255, 0.72));
+}
+
+.notify-test-line.is-ok {
+  color: var(--ok, #6aa86a);
+}
+
+.notify-test-line.is-error {
+  color: var(--danger, #e06c75);
+}
+
 .notify-type-unit {
   font-size: 11px;
   color: var(--text-3, rgba(255, 255, 255, 0.4));

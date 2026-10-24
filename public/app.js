@@ -2572,6 +2572,7 @@ function renderSettings() {
     }),
   ]);
 
+  const panel = el("div", { class: "notify-test-result", hidden: true });
   const groupSecurity = settingsGroup("security", "登录与安全", [
     el(
       "div",
@@ -2659,6 +2660,42 @@ function renderSettings() {
       el("input", { type: "checkbox", id: "settings-clearNotifyWebhookSecret", name: "clearNotifyWebhookSecret" }),
       el("label", { for: "settings-clearNotifyWebhookSecret" }, "清除已保存的加签密钥"),
     ),
+    el(
+      "div",
+      { class: "notify-test" },
+      el(
+        "button",
+        {
+          class: "btn btn-sm",
+          type: "button",
+          onclick: (event) =>
+            withLoading(event.currentTarget, () => {
+              const form = event.currentTarget.closest("form");
+              const read = (name) => {
+                const node = form && form.elements.namedItem(name);
+                return node && "value" in node ? String(node.value).trim() : "";
+              };
+              const checked = (name) => {
+                const node = form && form.elements.namedItem(name);
+                return Boolean(node && node.checked);
+              };
+              const overlay = {
+                notifyWebhook: read("notifyWebhook"),
+                notifyWebhookKind: read("notifyWebhookKind") || "generic",
+                notifyOnFailure: checked("notifyOnFailure"),
+                notifyEvents: [...(form ? form.querySelectorAll('input[name="notifyEvents"]:checked') : [])].map(
+                  (node) => node.value,
+                ),
+              };
+              if (read("notifyWebhookSecret")) overlay.notifyWebhookSecret = read("notifyWebhookSecret");
+              return sendTestNotification(panel, overlay);
+            }),
+        },
+        "发送测试通知",
+      ),
+      el("span", { class: "field-hint" }, "直接用表单里当前填的值发一条（不用先保存），能立刻看出地址/加签/关键词对不对。"),
+    ),
+    panel,
     field({
       id: "settings-turnstileSiteKey",
       label: "Turnstile 站点密钥（Site Key）",
@@ -2840,6 +2877,47 @@ function notifyExtras(id, settings) {
   }
 
   return null;
+}
+
+/** 发送测试通知：把两个通道的真实结果列出来 */
+async function sendTestNotification(panel, overlay = {}) {
+  panel.hidden = false;
+  panel.textContent = "";
+  panel.append(el("div", { class: "notify-test-line muted" }, "正在发送…"));
+  try {
+    const res = await api("/api/notify/test", { method: "POST", body: overlay });
+    const result = (res && res.result) || {};
+    const lines = [];
+
+    const telegram = result.telegram || {};
+    if (telegram.ok) lines.push(["ok", "Telegram 私聊：已发送"]);
+    else lines.push(["error", `Telegram 私聊：${telegram.error || "发送失败"}`]);
+
+    const webhook = result.webhook || {};
+    const channelLabels = { dingtalk: "钉钉", wecom: "企业微信", feishu: "飞书", generic: "通用 JSON" };
+    const channel = channelLabels[webhook.kind] || webhook.kind || "Webhook";
+    if (webhook.ok) lines.push(["ok", `${channel}：已发送`]);
+    else if (webhook.skipped) lines.push(["muted", `${channel}：${webhook.error || "未配置"}（跳过）`]);
+    else lines.push(["error", `${channel}：${webhook.error || "推送失败"}`]);
+
+    panel.textContent = "";
+    for (const [kind, text] of lines) {
+      panel.append(
+        el(
+          "div",
+          { class: `notify-test-line is-${kind}` },
+          el("span", { class: "dot", class: kind === "ok" ? "dot ok" : kind === "error" ? "dot danger" : "dot idle" }),
+          el("span", {}, text),
+        ),
+      );
+    }
+    const anyOk = lines.some(([kind]) => kind === "ok");
+    toast(anyOk ? "测试通知已发送" : "测试通知没发出去，看下面的原因", { kind: anyOk ? "ok" : "error" });
+  } catch (error) {
+    panel.textContent = "";
+    panel.append(el("div", { class: "notify-test-line is-error" }, error.message || "请求失败"));
+    toast(error.message || "测试失败", { kind: "error" });
+  }
 }
 
 function selectControl(name, value, options) {
