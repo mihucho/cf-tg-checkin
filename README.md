@@ -308,6 +308,7 @@ public/                   管理界面（纯静态）
 build/patches/            teleproto 的 no-eval 补丁
 tests/                    纯逻辑单测（time / dsl / buttons / targets / guard / task）
 docs/API.md               前后端接口契约
+docs/UI_COPY.md           界面文案规范（术语表 / 命名规则）
 docs/DEPLOY.md            部署、secrets、排查表
 SECURITY.md               安全审计记录
 ```

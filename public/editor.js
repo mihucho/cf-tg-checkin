@@ -410,7 +410,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
         el("option", { value: "pos", selected: step._mode === "pos" ? true : undefined }, "按行列位置"),
       );
       container.append(
-        field({ id: id(`${prefix}-mode`), label: "怎么找按钮", control: modeSelect }),
+        field({ id: id(`${prefix}-mode`), label: "定位方式", control: modeSelect }),
       );
       if (step._mode === "pos") {
         container.append(
@@ -461,7 +461,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
                 step.text = event.target.value;
               },
             }),
-            hint: "先找文字完全一致的，再找包含这段文字的。",
+            hint: "按按钮文字定位：优先完全一致，其次包含匹配。",
           }),
         );
       }
@@ -580,12 +580,12 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
               model.deleteAfterSeconds = Number(event.target.value);
             },
           }),
-          hint: "0 表示不删。填了就在这么多秒后删掉自己发出的消息。",
+          hint: "0 表示不删除。非 0 时在发送后该秒数删除自己发出的消息。",
         }),
       ),
       field({
         id: id("step-delay"),
-        label: "两步之间间隔（秒）",
+        label: "步骤间隔（秒）",
         control: el("input", {
           class: "input",
           id: id("step-delay"),
@@ -598,7 +598,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
             model.stepDelaySeconds = Number(event.target.value);
           },
         }),
-        hint: "每执行完一步停多久再做下一步，默认 3 秒。机器人反应慢可以调大。",
+        hint: "每执行完一步的停顿时间，默认 3 秒。机器人响应慢可调大。",
       }),
       el(
         "label",
@@ -627,7 +627,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
           "p",
           { class: "field-hint" },
           defaultTarget
-            ? `留空时，会发到设置里的默认目标：${defaultTarget}`
+            ? `留空时使用设置里的默认目标：${defaultTarget}`
             : "填 @username 或数字 id；点「解析」可以确认解析到的会话。",
         ),
       );
