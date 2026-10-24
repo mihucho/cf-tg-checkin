@@ -2,12 +2,17 @@
 
 版本号只在 `package.json` 里维护（构建时注入到产物，页面底部和 `GET /api/version` 都会显示它）。
 
-发版流程：
+发版流程（**改文档即发布**，不要手跑 `npm version`）：
 
 ```bash
-npm version patch      # 或 minor / major：改 package.json + 生成 commit 和 tag
-git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
+$EDITOR releases/unreleased.md   # 改 front matter 的 version / title，正文写这次发布说明
+node scripts/release.mjs --dry-run   # 可选：预览会做哪些改动
+git add releases/unreleased.md && git commit -m "docs(release): v0.18.0" && git push
 ```
+
+push 后 `.github/workflows/release.yml` 会自动：跑检查 → 写 `package.json`/lock → 插入本文件对应版本段
+→ 归档到 `releases/archive/` 并重置模板 → 打 annotated tag → 建/更新 GitHub Release → 触发部署。
+详见 `AGENTS.md` 的「发版」一节。
 
 ### 版本号怎么定
 
