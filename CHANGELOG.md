@@ -11,6 +11,17 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-24
+
+- **端到端集成测试**（`scripts/integration.mjs`，`npm run test:integration`）：真的起一个
+  `wrangler dev`（随机端口 + 临时持久化目录），用 HTTP 打通 Worker → Durable Object → 内嵌 SQLite，
+  覆盖 30 项：路由与 401、登录 Cookie 属性、Origin 跨站拒绝、内部接口隔离、
+  多目标建任务与去重指纹、PATCH 不丢字段、指令往返、导出/导入去重、设置与模板、
+  事件白名单与自增、日志分页、run-all 分批、删除、安全头
+  - 产物按**进程组**启动（wrangler + workerd + esbuild），结束整组 kill，不留孤儿进程
+  - 失败/卡住有 180 秒看门狗；跑完显式 `process.exit`，不会让 stdio 拖住 Node
+- CI 的 check job 增加这一步
+
 ## [0.11.0] - 2026-10-24
 
 审计报告 §P2 的第二轮修复（完整对照见 `deliverables/audits/audit-0.10.0.md` §3.5）。
