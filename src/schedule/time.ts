@@ -111,21 +111,31 @@ export function nextWindow(
   now: number,
   timezone: number,
   random: (min: number, max: number) => number = randomInt,
+  options: { skipCurrentDay?: boolean } = {},
 ): number {
   const from = parseTimeOfDay(start) ?? { hour: 9, minute: 0 };
   const to = parseTimeOfDay(end) ?? { hour: 10, minute: 0 };
   const dayStart = localDayStart(now, timezone);
+
+  // 已经执行过一次时，不再"留在今天窗口里"继续随机 —— 否则窗口内会几秒后又触发一轮
+  const windowAlreadyStartedToday = now >= atTimeOfDay(dayStart, from.hour, from.minute);
+
   for (let offset = 0; offset <= 2; offset++) {
     const day = dayStart + offset * DAY;
     let windowStart = atTimeOfDay(day, from.hour, from.minute);
     let windowEnd = atTimeOfDay(day, to.hour, to.minute);
     if (windowEnd <= windowStart) windowEnd += DAY;
+
+    if (offset === 0 && options.skipCurrentDay && windowAlreadyStartedToday) continue;
+
     if (windowStart <= now + 5_000) {
       if (windowEnd <= now + 5_000) continue;
       windowStart = now + 5_000;
     }
+
     const span = Math.max(0, windowEnd - windowStart);
-    return windowStart + random(0, Math.min(span, 3_600_000));
+    // 在整个窗口里均匀随机（之前错误地限制成了前 1 小时）
+    return windowStart + random(0, span);
   }
   return now + DAY;
 }
@@ -139,6 +149,8 @@ export interface NextRunOptions {
   /** 忽略 jitter（用于展示） */
   withoutJitter?: boolean;
   random?: (min: number, max: number) => number;
+  /** 刚执行完一次：窗口模式下要跳到「下一个窗口」，不能又落回今天的窗口 */
+  afterExecution?: boolean;
 }
 
 /**
@@ -161,7 +173,11 @@ export function computeNextRun(
       return now + minutes * MINUTE + jitter;
     }
     case "window": {
-      return nextWindow(schedule.time ?? "09:00", schedule.windowEnd ?? "10:00", now, timezone, random) + jitter;
+      return (
+        nextWindow(schedule.time ?? "09:00", schedule.windowEnd ?? "10:00", now, timezone, random, {
+          skipCurrentDay: options.afterExecution,
+        }) + jitter
+      );
     }
     case "once":
     case "daily":

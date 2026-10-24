@@ -62,6 +62,30 @@ test("nextWindow 落在窗口内且用注入的随机函数", () => {
   assert.equal(localHour, 9);
 });
 
+test("窗口模式：执行完之后必须跳到下一个窗口（不能几秒后又跑）", () => {
+  // 2026-10-24 08:45 +08：正处于 08:30–10:00 的窗口内
+  const now = Date.UTC(2026, 9, 24, 0, 45, 0);
+  const schedule = { kind: "window" as const, time: "08:30", windowEnd: "10:00" };
+
+  // 刚执行完 → 应该是明天窗口内的某个时刻
+  const next = computeNextRun(schedule, now, TZ, { afterExecution: true, random: () => 0 });
+  assert.equal(next, Date.UTC(2026, 9, 25, 0, 30, 0)); // 明天 08:30
+
+  // 新建任务（还没跑过）→ 允许落在今天窗口剩余时间内
+  const first = computeNextRun(schedule, now, TZ, { random: () => 0 });
+  assert.equal(first, now + 5_000);
+});
+
+test("窗口模式：随机点覆盖整个窗口，而不是只有前一小时", () => {
+  // 03:00 +08 建任务，窗口 08:30–12:00（3.5 小时）
+  const now = Date.UTC(2026, 9, 23, 19, 0, 0);
+  const schedule = { kind: "window" as const, time: "08:30", windowEnd: "12:00" };
+  const latest = computeNextRun(schedule, now, TZ, { random: (_min, max) => max });
+  const local = new Date(latest + TZ * 3_600_000);
+  assert.equal(local.getUTCHours(), 12);
+  assert.equal(local.getUTCMinutes(), 0);
+});
+
 test("computeNextRun interval + jitter", () => {
   const now = Date.UTC(2026, 9, 24, 0, 0, 0);
   const plain = computeNextRun({ kind: "interval", intervalMinutes: 30 }, now, TZ, { withoutJitter: true });

@@ -152,7 +152,8 @@ export class TgAgent implements DurableObject {
 
       if (path === "/tasks" && method === "POST") {
         const body = (await request.json()) as TaskInput;
-        const task = this.createTask(body);
+        const { task, created } = this.createTask(body);
+        if (!created) return json({ task, error: `已存在相同任务 #${task.id}` }, 409);
         await this.scheduleNextAlarm();
         return json({ task });
       }
@@ -394,7 +395,28 @@ export class TgAgent implements DurableObject {
           }
         }
         if (due.length) {
-          ran.push(...(await this.runTasks(due, client)));
+          // 护栏：同一任务 45 秒内不重复执行（防止调度 bug / 窗口边界造成连发）
+          const runnable: Task[] = [];
+          for (const task of due) {
+            if (task.lastRunAt && now - task.lastRunAt < 45_000) {
+              this.store.addLog({
+                taskId: task.id,
+                taskName: task.name,
+                at: now,
+                ok: false,
+                level: "warn",
+                message: `跳过：${Math.round((now - task.lastRunAt) / 1000)} 秒前刚执行过（防重复触发）`,
+                detail: null,
+              });
+              this.store.setTaskNextRun(
+                task.id,
+                computeNextRun(task.schedule, now, settings.timezone, { afterExecution: true }),
+              );
+              continue;
+            }
+            runnable.push(task);
+          }
+          if (runnable.length) ran.push(...(await this.runTasks(runnable, client)));
         }
       });
     } catch (error) {
@@ -1016,10 +1038,16 @@ export class TgAgent implements DurableObject {
         trace.push(`调度：${JSON.stringify(enriched.schedule)}`);
         trace.push(`动作：${(enriched.steps ?? []).map((step) => step.type).join(" → ")}`);
 
-        const task = this.createTask(enriched);
-        record(true, `触发器创建任务 #${task.id}`, { taskId: task.id, taskName: task.name });
+        const { task, created } = this.createTask(enriched);
+        trace.push(created ? `建任务：#${task.id}` : `已存在相同任务 #${task.id}，未重复创建`);
+        record(true, created ? `触发器创建任务 #${task.id}` : `跳过重复任务（已有 #${task.id}）`, {
+          taskId: task.id,
+          taskName: task.name,
+        });
         await reply(
-          `✅ 已创建任务 #${task.id}\n${task.name}\n⏰ ${formatInTimezone(task.nextRunAt, settings.timezone)}（${settings.timezone >= 0 ? "+" : ""}${settings.timezone}）\n${result.explanation ?? ""}`.trim(),
+          created
+            ? `✅ 已创建任务 #${task.id}\n${task.name}\n⏰ ${formatInTimezone(task.nextRunAt, settings.timezone)}（${settings.timezone >= 0 ? "+" : ""}${settings.timezone}）\n${result.explanation ?? ""}`
+            : `ℹ️ 已存在相同任务 #${task.id}（${task.name}），没有重复创建\n如需重建，先发「删除 ${task.id}」`,
         );
         return;
       }
@@ -1230,12 +1258,28 @@ export class TgAgent implements DurableObject {
     }
   }
 
-  private createTask(input: TaskInput): Task {
+  /** 建任务；如果已存在完全相同的任务则不重复创建（返回 existing） */
+  private createTask(input: TaskInput): { task: Task; created: boolean } {
     const settings = this.store.getSettings();
     const now = Date.now();
     const normalized = normalizeTaskInput(input);
+
+    const duplicate = this.store.findDuplicateTask(normalized);
+    if (duplicate) {
+      this.store.addLog({
+        taskId: duplicate.id,
+        taskName: duplicate.name,
+        at: now,
+        ok: true,
+        level: "warn",
+        message: `跳过重复任务：#${duplicate.id} 已存在相同的目标/调度/动作`,
+        detail: "同一条触发配置发多次、或反复点保存，都会产生重复任务；这里直接复用已有的。",
+      });
+      return { task: duplicate, created: false };
+    }
+
     const nextRunAt = normalized.enabled ? computeNextRun(normalized.schedule, now, settings.timezone) : null;
-    return this.store.createTask(normalized, now, nextRunAt);
+    return { task: this.store.createTask(normalized, now, nextRunAt), created: true };
   }
 
   private updateTask(id: number, patch: Partial<TaskInput>): Task | null {
@@ -1418,7 +1462,10 @@ export class TgAgent implements DurableObject {
       if (fresh.schedule.kind === "once") {
         this.store.updateTask(fresh.id, { enabled: false, nextRunAt: null }, Date.now());
       } else if (fresh.enabled) {
-        this.store.setTaskNextRun(fresh.id, computeNextRun(fresh.schedule, Date.now(), settings.timezone));
+        this.store.setTaskNextRun(
+          fresh.id,
+          computeNextRun(fresh.schedule, Date.now(), settings.timezone, { afterExecution: true }),
+        );
       }
     }
     return log;
