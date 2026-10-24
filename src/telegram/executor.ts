@@ -144,8 +144,14 @@ export async function resolveEntity(client: TelegramClient, target: Target | str
     if (found) return found;
   }
 
+  const rawMessage = errorMessage(first.error);
+  // 连接类错误跟"目标"无关，原样抛出，避免误导（例如 Disconnected from dc 5）
+  if (/disconnect|not connected|socket|timeout|network|closed/i.test(rawMessage)) {
+    throw new Error(`连接中断：${rawMessage}`);
+  }
+
   throw new Error(
-    `无法解析目标「${ref || (peer ? "access_hash" : "")}」：${errorMessage(first.error)}；` +
+    `无法解析目标「${ref || (peer ? "access_hash" : "")}」：${rawMessage}；` +
       `私有机器人请先在 Telegram 里和它对话，或把任务目标改成 @username`,
   );
 }
