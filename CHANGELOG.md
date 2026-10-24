@@ -11,6 +11,19 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-24
+
+P1 三项：
+
+- **指令 ⇄ 编辑器互转**：新增 `taskToCommand()`（纯函数，含 7 个往返单测）+ `GET /api/tasks/:id/command`
+  + `POST /api/command`；任务详情加「复制指令」，编辑器底部实时显示「等价指令」，
+  指令试算结果加「用这条指令建任务 / 复制指令」
+- **连续失败自动暂停**：任务记录 `fail_streak`，连续失败 3 次自动停用并写一条 error 日志
+  （`shouldAutoPause()` 纯函数 + 单测）；任务列表「最近结果」悬停可见连续失败次数
+- **失败提醒**：设置里新增「任务失败时给自己发一条 Telegram 消息」+ 可选 Webhook；
+  同一任务 1 小时最多提醒一次；自动暂停时也会提醒
+- `rand:` 的选项改为只用 `|` 分隔，选项里含逗号也能原样往返
+
 ## [0.5.0] - 2026-10-24
 
 按产品评审（`deliverables/product-strategy/overall-design-review.md`）落地 P0 四项：

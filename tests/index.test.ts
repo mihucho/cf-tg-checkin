@@ -5,6 +5,7 @@ import "./dsl.test.ts";
 import "./buttons.test.ts";
 import "./targets.test.ts";
 import "./guard.test.ts";
+import "./command.test.ts";
 import "./task.test.ts";
 
 void runAll();

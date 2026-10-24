@@ -139,6 +139,14 @@ export function findTimeToken(tokens: string[]): { index: number; time: TimeToke
   return null;
 }
 
+/** rand: 的选项只用 `|` 分隔（选项本身可能含逗号，比如「早上好，今天也要开心」） */
+function splitOptions(value: string): string[] {
+  return value
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
 function splitList(value: string): string[] {
   return value
     .split(/[|,，、]/)
@@ -336,7 +344,7 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
       case "rand":
       case "随机": {
         flushText();
-        const options = splitList(value);
+        const options = splitOptions(value);
         if (options.length) steps.push({ type: "random", options });
         break;
       }

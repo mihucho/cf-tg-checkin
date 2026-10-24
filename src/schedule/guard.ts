@@ -9,6 +9,13 @@ import { computeNextRun, isSameLocalDay } from "./time";
 
 export type SkipReason = "not-due" | "already-ran-today" | "too-soon";
 
+/** 连续失败达到阈值就自动暂停任务，避免每天失败还一直试 */
+export const FAIL_STREAK_THRESHOLD = 3;
+
+export function shouldAutoPause(failStreak: number, threshold = FAIL_STREAK_THRESHOLD): boolean {
+  return Number.isFinite(failStreak) && failStreak >= threshold;
+}
+
 export interface RunDecision {
   run: boolean;
   reason?: SkipReason;

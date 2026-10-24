@@ -944,7 +944,12 @@ function resultCell(task) {
     { class: "result-cell" },
     el(
       "span",
-      { class: `status ${ok ? "is-ok" : "is-fail"}`, title: task.lastMessage || "" },
+      {
+        class: `status ${ok ? "is-ok" : "is-fail"}`,
+        title:
+          (task.lastMessage || "") +
+          (Number(task.failStreak) > 0 ? `（已连续失败 ${task.failStreak} 次）` : ""),
+      },
       el("span", { class: `dot ${ok ? "ok" : "fail"}` }),
       el("span", {}, ok ? "成功" : "失败"),
     ),
@@ -1006,6 +1011,24 @@ async function openTaskDetail(task) {
     footer: el(
       "div",
       { class: "dialog-actions" },
+      el(
+        "button",
+        {
+          class: "btn",
+          type: "button",
+          onclick: async (event) => {
+            await withLoading(event.currentTarget, async () => {
+              try {
+                const res = await api(`/api/tasks/${encodeURIComponent(task.id)}/command`);
+                await copyText(res.command, "指令已复制，可粘到收藏夹重建这个任务");
+              } catch (error) {
+                toast(error.message || "生成指令失败", { kind: "error" });
+              }
+            });
+          },
+        },
+        "复制指令",
+      ),
       el(
         "button",
         {
@@ -1417,6 +1440,39 @@ function filterSummary() {
   }
   if (state.logQuery) parts.push(`搜索「${state.logQuery}」`);
   return parts.length ? `（${parts.join(" · ")}）` : "";
+}
+
+async function copyText(text, hint = "已复制") {
+  const value = String(text ?? "");
+  if (!value) return false;
+  try {
+    await navigator.clipboard.writeText(value);
+    toast(hint, { kind: "ok" });
+    return true;
+  } catch {
+    // 无剪贴板权限（http、无焦点等）时，给一个可手动复制的弹窗，比 toast 好用
+    const area = el("textarea", { class: "textarea code-input", rows: "4", readonly: "" });
+    area.value = value;
+    openModal({
+      title: "复制这段内容",
+      body: el(
+        "div",
+        { class: "stack-sm" },
+        el("p", { class: "hint" }, "浏览器没给剪贴板权限，选中后按 ⌘/Ctrl+C 即可。"),
+        area,
+      ),
+      footer: el(
+        "div",
+        { class: "dialog-actions" },
+        el("button", { class: "btn btn-primary", type: "button", onclick: () => closeModal() }, "关闭"),
+      ),
+    });
+    requestAnimationFrame(() => {
+      area.focus();
+      area.select();
+    });
+    return false;
+  }
 }
 
 const LOG_SOURCE_LABEL = { auto: "自动", manual: "手动", trigger: "指令", system: "系统" };
@@ -2092,6 +2148,24 @@ function renderSettings() {
       control: textControl("defaultTarget", settings.defaultTarget ?? "", "@username 或数字 id"),
       hint: "指令中未能识别目标时使用，例如 @jerry_bot。",
     }),
+    el("div", { class: "form-section-title" }, "失败提醒"),
+    el(
+      "div",
+      { class: "check-row" },
+      el("input", {
+        type: "checkbox",
+        id: "settings-notifyOnFailure",
+        name: "notifyOnFailure",
+        checked: settings.notifyOnFailure !== false,
+      }),
+      el("label", { for: "settings-notifyOnFailure" }, "任务失败时给自己发一条 Telegram 消息"),
+    ),
+    field({
+      id: "settings-notifyWebhook",
+      label: "Webhook（可选）",
+      control: textControl("notifyWebhook", settings.notifyWebhook ?? "", "https://…"),
+      hint: "失败时额外 POST 一个 JSON 到这个地址。同一任务 1 小时内最多提醒一次。",
+    }),
     el("div", { class: "form-section-title" }, "登录验证（Cloudflare Turnstile）"),
     field({
       id: "settings-turnstileSiteKey",
@@ -2243,6 +2317,8 @@ async function saveSettings(event) {
     stepPollSeconds,
     stepWaitSeconds,
     triggerPrefix: read("triggerPrefix").trim(),
+    notifyOnFailure: checked("notifyOnFailure"),
+    notifyWebhook: read("notifyWebhook").trim(),
     turnstileSiteKey: read("turnstileSiteKey").trim(),
   };
   // 密钥留空表示"不修改"，填了才提交；勾选「清除」则显式清空
@@ -2379,6 +2455,38 @@ function renderParseResult() {
         !(task.successKeywords || []).length && !(Number(task.schedule && task.schedule.jitterSeconds) > 0)
           ? el("span", { class: "muted" }, "无")
           : null,
+      ),
+    ),
+    el(
+      "div",
+      { class: "parse-actions" },
+      el(
+        "button",
+        {
+          class: "btn btn-sm btn-primary",
+          type: "button",
+          onclick: async (event) => {
+            await withLoading(event.currentTarget, async () => {
+              try {
+                const created = await api("/api/tasks", { method: "POST", body: task });
+                toast(`已创建任务 #${created.task.id}`, { kind: "ok" });
+                await refreshState({ silent: true });
+              } catch (error) {
+                toast(error.message || "创建失败（可能已存在相同任务）", { kind: "error" });
+              }
+            });
+          },
+        },
+        "用这条指令建任务",
+      ),
+      el(
+        "button",
+        {
+          class: "btn btn-sm",
+          type: "button",
+          onclick: () => copyText(state.testText || "", "指令已复制"),
+        },
+        "复制指令",
       ),
     ),
   );

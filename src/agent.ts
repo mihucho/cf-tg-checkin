@@ -14,7 +14,8 @@ import type { AccountInfo, AgentState, LogEntry, LogSource, Settings, Target, Ta
 import { createTgClient, createTgClientOnDc, errorMessage, migrateDcFromError } from "./telegram/client";
 import { executeTask, resolveEntity, type ExecHooks } from "./telegram/executor";
 import { computeNextRun, formatInTimezone } from "./schedule/time";
-import { decideRun } from "./schedule/guard";
+import { decideRun, shouldAutoPause } from "./schedule/guard";
+import { taskToCommand } from "./schedule/command";
 import {
   defaultName,
   findTimeToken,
@@ -169,7 +170,7 @@ export class TgAgent implements DurableObject {
         return json({ ok: logs.every((log) => log.ok), logs });
       }
 
-      const taskMatch = /^\/tasks\/(\d+)(\/run|\/logs)?$/.exec(path);
+      const taskMatch = /^\/tasks\/(\d+)(\/run|\/logs|\/command)?$/.exec(path);
       if (taskMatch) {
         const id = Number(taskMatch[1]);
         const suffix = taskMatch[2];
@@ -180,6 +181,10 @@ export class TgAgent implements DurableObject {
           const log = await this.serialize(() => this.runTasks([task], undefined, { manual: true }));
           await this.scheduleNextAlarm();
           return json({ ok: log[0]?.ok ?? false, log: log[0] });
+        }
+        if (suffix === "/command" && method === "GET") {
+          const settings = this.store.getSettings();
+          return json({ command: taskToCommand(task, settings.triggerPrefix ?? "") });
         }
         if (suffix === "/logs" && method === "GET") {
           const limit = intParam(url.searchParams.get("limit"), 20, 1, 100);
@@ -267,6 +272,13 @@ export class TgAgent implements DurableObject {
           failures,
           retryAfterSeconds: failures < limit ? 0 : 600,
         });
+      }
+
+      if (path === "/command" && method === "POST") {
+        const body = (await request.json()) as TaskInput;
+        const settings = this.store.getSettings();
+        const normalized = normalizeTaskInput({ ...body, name: body.name ?? "" });
+        return json({ command: taskToCommand(normalized, settings.triggerPrefix ?? "") });
       }
 
       if (path === "/trigger/parse" && method === "POST") {
@@ -1600,6 +1612,25 @@ export class TgAgent implements DurableObject {
       });
     }
 
+    // 连续失败到阈值 → 自动暂停（避免天天失败还一直跑）
+    const streak = this.store.failStreakOf(task.id);
+    if (log && !log.ok && shouldAutoPause(streak)) {
+      this.store.updateTask(task.id, { enabled: false, nextRunAt: null }, Date.now());
+      this.store.addLog({
+        taskId: task.id,
+        taskName: task.name,
+        at: Date.now(),
+        ok: false,
+        level: "error",
+        message: `已自动暂停：连续失败 ${streak} 次`,
+        detail: "排查后到任务详情里重新启用；可在设置里关掉失败提醒。",
+        source: "system",
+      });
+      await this.notifyFailure(client, task, `连续失败 ${streak} 次，已自动暂停任务。`);
+    } else if (log && !log.ok) {
+      await this.notifyFailure(client, task, log.message || "执行失败");
+    }
+
     // 计算下一次执行：手动跑一次不打乱定时
     const wasDue = task.nextRunAt !== null && task.nextRunAt <= Date.now();
     const shouldReschedule = !options.manual || wasDue;
@@ -1615,6 +1646,46 @@ export class TgAgent implements DurableObject {
       }
     }
     return log;
+  }
+
+  /**
+   * 失败提醒：默认给自己发一条 Telegram 私聊（同一任务 1 小时最多一次），
+   * 另外可选 POST 到自定义 Webhook。
+   */
+  private async notifyFailure(client: TelegramClient, task: Task, reason: string): Promise<void> {
+    const settings = this.store.getSettings();
+    if (!settings.notifyOnFailure) return;
+
+    const throttleKey = `notify:${task.id}:at`;
+    const last = Number(this.store.getKv(throttleKey) ?? 0);
+    if (Date.now() - last < 60 * 60_000) return;
+    this.store.setKv(throttleKey, String(Date.now()));
+
+    const text = `⚠️ 任务「${task.name}」执行失败\n${reason}\n时间：${formatInTimezone(Date.now(), settings.timezone)}`;
+    try {
+      await client.sendMessage("me" as never, { message: text, parseMode: false });
+    } catch {
+      /* 自己给自己发也可能失败（比如被限流），不影响主流程 */
+    }
+
+    const webhook = (settings.notifyWebhook ?? "").trim();
+    if (webhook && /^https?:\/\//i.test(webhook)) {
+      try {
+        await fetch(webhook, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            taskId: task.id,
+            taskName: task.name,
+            ok: false,
+            message: reason,
+            at: Date.now(),
+          }),
+        });
+      } catch {
+        /* 忽略 */
+      }
+    }
   }
 
   private async processDeletions(
@@ -1727,6 +1798,10 @@ function sanitizeSettings(patch: Partial<Settings>): Partial<Settings> {
   if (patch.stepWaitSeconds !== undefined) {
     const value = Number(patch.stepWaitSeconds);
     if (Number.isFinite(value)) clean.stepWaitSeconds = Math.max(5, Math.min(300, value));
+  }
+  if (patch.notifyOnFailure !== undefined) clean.notifyOnFailure = !!patch.notifyOnFailure;
+  if (patch.notifyWebhook !== undefined) {
+    clean.notifyWebhook = String(patch.notifyWebhook).trim().slice(0, 300);
   }
   if (patch.triggerPrefix !== undefined) {
     clean.triggerPrefix = String(patch.triggerPrefix).trim().slice(0, 20);

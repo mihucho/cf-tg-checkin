@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "./harness.ts";
 import { local, makeTask, TZ } from "./fixtures.ts";
-import { decideRun } from "../src/schedule/guard.ts";
+import { decideRun, shouldAutoPause, FAIL_STREAK_THRESHOLD } from "../src/schedule/guard.ts";
 
 const now = local(2026, 10, 24, 9, 15);
 
@@ -77,6 +77,16 @@ test("decideRun：interval 45 秒内不重复（护栏）", () => {
   assert.equal(decision.run, false);
   assert.equal(decision.reason, "too-soon");
   assert.ok(decision.nextRunAt! > now);
+});
+
+test("shouldAutoPause：连续失败到阈值才暂停", () => {
+  assert.equal(shouldAutoPause(0), false);
+  assert.equal(shouldAutoPause(FAIL_STREAK_THRESHOLD - 1), false);
+  assert.equal(shouldAutoPause(FAIL_STREAK_THRESHOLD), true);
+  assert.equal(shouldAutoPause(FAIL_STREAK_THRESHOLD + 5), true);
+  assert.equal(shouldAutoPause(Number.NaN), false);
+  // 阈值可调
+  assert.equal(shouldAutoPause(2, 2), true);
 });
 
 test("decideRun：interval 超过最小间隔后允许跑", () => {
