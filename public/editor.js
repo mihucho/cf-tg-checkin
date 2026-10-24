@@ -91,8 +91,9 @@ function fromStep(step) {
 
 const targetQueryOf = (target) => {
   if (!target) return "";
-  if (target.username) return `@${target.username}`;
-  return String(target.id ?? "");
+  const base = target.username ? `@${target.username}` : String(target.id ?? "");
+  // 话题跟目标一起编辑，回填时带上，避免保存后丢失
+  return target.threadId ? `${base}#${target.threadId}` : base;
 };
 
 export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}) {
@@ -123,7 +124,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
     // 多目标：第一个是主目标，其余放在这里（`|` 分隔）
     extraTargets: (task?.targets ?? [])
       .slice(1)
-      .map((target) => (target.username ? `@${target.username}` : String(target.id)))
+      .map((target) => `${target.username ? `@${target.username}` : String(target.id)}${target.threadId ? `#${target.threadId}` : ""}`)
       .join(" | "),
   };
 
@@ -625,7 +626,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
 
   function renderTargetState(message) {
     targetResult.innerHTML = "";
-    const query = model.targetQuery.trim();
+    const query = targetQueryClean();
     if (!query) {
       targetResult.append(
         el(
@@ -659,8 +660,13 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
     );
   }
 
+  /** 主目标输入去掉 #话题 后缀后的查询串 */
+  function targetQueryClean() {
+    return model.targetQuery.trim().replace(/#\d{1,12}$/, "").trim();
+  }
+
   async function doResolve() {
-    const query = model.targetQuery.trim();
+    const query = targetQueryClean();
     if (!query) {
       toast("先填一个目标再解析", { kind: "error" });
       targetInput.focus();
@@ -842,6 +848,9 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
           name: model.name.trim() || "任务",
           enabled: Boolean(model.enabled),
           target: buildTarget() || { kind: "user", id: "" },
+          targets: buildExtraTargets().length
+            ? [buildTarget() || { kind: "user", id: "" }, ...buildExtraTargets()]
+            : undefined,
           schedule: buildSchedule(),
           steps: buildSteps(),
           successKeywords: String(model.successKeywords || "")
@@ -908,10 +917,29 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
     return target.title || (target.username ? `@${target.username}` : "") || String(target.id || "");
   }
 
+  /** 「其他目标」输入框 → 多目标数组（支持 @group#12 话题后缀） */
+  function buildExtraTargets() {
+    return String(model.extraTargets || "")
+      .split("|")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => {
+        const threadMatch = /^(.*?)#(\d{1,12})$/.exec(item);
+        const base = threadMatch ? threadMatch[1] : item;
+        const threadId = threadMatch && Number(threadMatch[2]) > 0 ? Number(threadMatch[2]) : undefined;
+        return {
+          kind: base.startsWith("-100") ? "channel" : base.startsWith("-") ? "chat" : "user",
+          id: base.startsWith("@") ? base.slice(1) : base,
+          username: base.startsWith("@") ? base.slice(1) : undefined,
+          ...(threadId ? { threadId } : {}),
+        };
+      });
+  }
+
   /** 任务名为空时，用「目标名 + 第一个动作」自动生成 */
   function suggestName() {
-    const target = model.resolved && model.resolvedFor === model.targetQuery.trim() ? model.resolved : null;
-    const base = targetDisplayName(target) || model.targetQuery.trim();
+    const target = model.resolved && model.resolvedFor === targetQueryClean() ? model.resolved : null;
+    const base = targetDisplayName(target) || targetQueryClean();
     if (!base) return "";
     const firstText = (model.steps.find((step) => step.type === "text") || {}).text || "";
     const firstRandom = (model.steps.find((step) => step.type === "random") || {}).options?.[0] || "";
@@ -920,14 +948,25 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
     return name.length > 40 ? name.slice(0, 40) : name;
   }
 
+  /** 主目标输入里允许 `@group#12` 表示「这个目标的话题」 */
   function buildTarget() {
-    const query = model.targetQuery.trim();
+    const raw = model.targetQuery.trim();
+    if (!raw) return null;
+    const threadMatch = /^(.*?)#(\d{1,12})$/.exec(raw);
+    const query = threadMatch ? threadMatch[1].trim() : raw;
+    const threadId = threadMatch && Number(threadMatch[2]) > 0 ? Number(threadMatch[2]) : undefined;
     if (!query) return null;
-    if (model.resolved && model.resolvedFor === query) return { ...model.resolved };
-    if (/^-?\d+$/.test(query)) return { kind: "user", id: query, title: query, username: null };
-    const username = query.startsWith("@") ? query.slice(1) : null;
-    return { kind: "user", id: query, title: query, username };
+    const base =
+      model.resolved && model.resolvedFor === query
+        ? { ...model.resolved }
+        : /^-?\d+$/.test(query)
+          ? { kind: "user", id: query, title: query, username: null }
+          : { kind: "user", id: query, title: query, username: query.startsWith("@") ? query.slice(1) : null };
+    if (threadId) base.threadId = threadId;
+    else delete base.threadId;
+    return base;
   }
+
 
   function buildSchedule() {
     const s = model.schedule;
@@ -1000,15 +1039,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
         }
         const target = buildTarget();
         if (!target) throw new Error("请填写任务目标，或使用设置里的默认目标");
-        const extraTargets = String(model.extraTargets || "")
-          .split("|")
-          .map((item) => item.trim())
-          .filter(Boolean)
-          .map((item) => ({
-            kind: item.startsWith("-100") ? "channel" : item.startsWith("-") ? "chat" : "user",
-            id: item.startsWith("@") ? item.slice(1) : item,
-            username: item.startsWith("@") ? item.slice(1) : undefined,
-          }));
+        const extraTargets = buildExtraTargets();
         const schedule = buildSchedule();
         const steps = buildSteps();
         const keywords = String(model.successKeywords || "")

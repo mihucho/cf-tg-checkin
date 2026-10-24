@@ -121,6 +121,15 @@ test("taskToCommand：多目标输出 到:a|b 并可往返", () => {
   assert.equal(task.targets?.[1].username, "group_b");
 });
 
+test("taskToCommand：目标话题输出 #N 并可往返", () => {
+  const source = makeTask({
+    target: { kind: "channel", id: "-1001234567890", username: "group_a", threadId: 12 },
+  });
+  const { command, task } = roundTrip(source);
+  assert.match(command, /到:@group_a#12/);
+  assert.equal(task.target.threadId, 12);
+});
+
 test("normalizeTaskInput：多目标去重并限制 8 个", () => {
   const many = normalizeTaskInput({
     name: "x",

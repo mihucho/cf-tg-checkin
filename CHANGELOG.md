@@ -11,6 +11,15 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-24
+
+- **目标级话题**：`Target.threadId` 优先于任务 `threadId`；指令写法 `到:@group_a#12|@b_bot`（可往返），
+  编辑器主目标与「其他目标」输入框都支持 `#N` 后缀，解析时会自动剥掉后缀
+- **日志时间筛选**：`GET /api/logs?sinceHours=`，日志页新增「全部时间 / 近 1 小时 / 近 24 小时 / 近 7 天」，
+  摘要行会写出当前时间范围
+- 编辑器「等价指令」预览现在也带上多目标（之前只显示主目标）
+- 单测 +2（话题解析、话题指令往返），共 80 个
+
 ## [0.9.0] - 2026-10-24
 
 - **复制兼容**：`copyText()` 三级回退——`navigator.clipboard` → 临时 textarea + `document.execCommand("copy")`

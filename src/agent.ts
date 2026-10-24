@@ -246,8 +246,10 @@ export class TgAgent implements DurableObject {
         const taskIdParam = intParam(url.searchParams.get("taskId"), 0, 0, Number.MAX_SAFE_INTEGER) || null;
         const query = url.searchParams.get("q");
         const beforeId = intParam(url.searchParams.get("before"), 0, 0, Number.MAX_SAFE_INTEGER) || null;
+        const sinceHours = intParam(url.searchParams.get("sinceHours"), 0, 0, 24 * 365);
+        const since = sinceHours > 0 ? Date.now() - sinceHours * 3600 * 1000 : null;
 
-        const filter = { limit: pageSize, beforeId, level, taskId: taskIdParam, query };
+        const filter = { limit: pageSize, beforeId, level, taskId: taskIdParam, query, since };
         const total = this.store.countLogs(filter);
         const pages = Math.max(1, Math.ceil(total / pageSize));
         const page = Math.min(pages, intParam(url.searchParams.get("page"), 1, 1, 100_000));

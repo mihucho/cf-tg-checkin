@@ -160,17 +160,29 @@ export function usernameFromLink(value: string): string | null {
   return match ? match[1] : null;
 }
 
+/**
+ * 目标里的 `#12` 后缀表示话题 id：`@group#12`、`-1001234#12`。
+ * 返回目标本体 + 话题 id（没写就是 undefined）。
+ */
+function splitThread(value: string): { value: string; threadId?: number } {
+  const match = /^(.*?)#(\d{1,12})$/.exec(value.trim());
+  if (!match) return { value: value.trim() };
+  const threadId = Number(match[2]);
+  return { value: match[1].trim(), threadId: Number.isFinite(threadId) && threadId > 0 ? threadId : undefined };
+}
+
 function targetFromId(value: string, source?: Target | null): Target {
-  const cleaned = value.trim().replace(/^到[:：]/, "").replace(/^(to|at)[:：]/, "");
+  const base = value.trim().replace(/^到[:：]/, "").replace(/^(to|at)[:：]/, "");
+  const { value: cleaned, threadId } = splitThread(base);
   const linkUsername = usernameFromLink(cleaned);
   if (linkUsername) {
-    return { kind: "user", id: linkUsername, username: linkUsername };
+    return { kind: "user", id: linkUsername, username: linkUsername, ...(threadId ? { threadId } : {}) };
   }
   if (cleaned.startsWith("@")) {
-    return { kind: "user", id: cleaned.slice(1), username: cleaned.slice(1) };
+    return { kind: "user", id: cleaned.slice(1), username: cleaned.slice(1), ...(threadId ? { threadId } : {}) };
   }
   const kind: Target["kind"] = cleaned.startsWith("-100") ? "channel" : cleaned.startsWith("-") ? "chat" : "user";
-  return { kind, id: cleaned };
+  return { kind, id: cleaned, ...(threadId ? { threadId } : {}) };
 }
 
 function describeSteps(steps: Step[]): string {
