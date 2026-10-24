@@ -11,6 +11,7 @@
  */
 
 import type { WebhookKind } from "../types";
+import type { DigestCard } from "./digest";
 
 export type { WebhookKind };
 
@@ -20,6 +21,8 @@ export interface WebhookMessage {
   title: string;
   text: string;
   at: number;
+  /** 日报/周报的卡片内容：钉钉、飞书、企业微信会渲染成 Markdown / 卡片 */
+  card?: DigestCard;
 }
 
 export interface WebhookPayload {
@@ -79,9 +82,76 @@ export async function buildWebhookUrl(
   return url.toString();
 }
 
+/** 卡片里的两列指标渲染成 Markdown（钉钉/企微的 markdown 不支持表格，用加粗行代替） */
+export function cardToMarkdown(card: DigestCard): string {
+  const parts: string[] = [`### ${card.title}`];
+  if (card.rows.length) parts.push("");
+  for (const row of card.rows) {
+    parts.push(`**${row.label}**：${row.value}  `);
+  }
+  if (card.bullets.length) {
+    parts.push("", "**明细**");
+    for (const item of card.bullets) parts.push(`- ${item}`);
+  }
+  if (card.footnotes.length) {
+    parts.push("", `> ${card.footnotes.join(" · ")}`);
+  }
+  return parts.join("\n").trim();
+}
+
+/** 飞书交互卡片（两列 fields 是最接近表格的排版，且稳定支持） */
+export function cardToFeishu(card: DigestCard): Record<string, unknown> {
+  const elements: unknown[] = [];
+  if (card.rows.length) {
+    elements.push({
+      tag: "div",
+      fields: card.rows.map((row) => ({
+        is_short: true,
+        text: { tag: "lark_md", content: `**${row.label}**\n${row.value}` },
+      })),
+    });
+  }
+  if (card.bullets.length) {
+    if (elements.length) elements.push({ tag: "hr" });
+    elements.push({
+      tag: "div",
+      text: { tag: "lark_md", content: `**明细**\n${card.bullets.map((item) => `- ${item}`).join("\n")}` },
+    });
+  }
+  if (card.footnotes.length) {
+    elements.push({ tag: "note", elements: [{ tag: "lark_md", content: card.footnotes.join(" · ") }] });
+  }
+  return {
+    config: { wide_screen_mode: true },
+    header: {
+      template: card.title.includes("周报") ? "indigo" : "blue",
+      title: { tag: "plain_text", content: card.title },
+    },
+    elements,
+  };
+}
+
 /** 各平台的包体 */
 export function buildWebhookBody(kind: WebhookKind, message: WebhookMessage): string {
   const content = message.title ? `${message.title}\n${message.text}` : message.text;
+  const card = message.card;
+
+  if (card) {
+    if (kind === "dingtalk") {
+      return JSON.stringify({
+        msgtype: "markdown",
+        markdown: { title: card.title, text: cardToMarkdown(card) },
+        at: { isAtAll: false },
+      });
+    }
+    if (kind === "wecom") {
+      return JSON.stringify({ msgtype: "markdown", markdown: { content: cardToMarkdown(card) } });
+    }
+    if (kind === "feishu") {
+      return JSON.stringify({ msg_type: "interactive", card: cardToFeishu(card) });
+    }
+  }
+
   switch (kind) {
     case "dingtalk":
       return JSON.stringify({ msgtype: "text", text: { content }, at: { isAtAll: false } });

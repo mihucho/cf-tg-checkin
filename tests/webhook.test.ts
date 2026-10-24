@@ -107,3 +107,85 @@ test("parseWebhookResult：HTTP 200 也可能是业务失败", () => {
   assert.equal(parseWebhookResult("generic", 200, '{"ok":false,"error":"denied"}').ok, false);
   assert.equal(parseWebhookResult("generic", 500, "boom").ok, false);
 });
+
+/* ------------------------------------------------ 日报/周报的卡片渲染 */
+
+import { buildDigest, buildWeeklyDigest } from "../src/notify/digest.ts";
+
+const digestCard = buildDigest(
+  {
+    ok: 9,
+    fail: 3,
+    failedTasks: ["每日签到", "群签到"],
+    totalTasks: 5,
+    enabledTasks: 4,
+    nextRunAt: Date.UTC(2026, 9, 25, 1, 30),
+    lastMessage: "命中关键词「签到成功」",
+  },
+  { timezone: 8, now: Date.UTC(2026, 9, 24, 12, 0) },
+).card;
+
+test("卡片：钉钉用 markdown 包体", () => {
+  const body = JSON.parse(buildWebhookBody("dingtalk", { ...message, card: digestCard }));
+  assert.equal(body.msgtype, "markdown");
+  assert.equal(body.markdown.title, "📊 签到日报 10/24");
+  assert.match(body.markdown.text, /### 📊 签到日报 10\/24/);
+  assert.match(body.markdown.text, /\*\*成功率\*\*：75% {2}/);
+  assert.match(body.markdown.text, /- 每日签到/);
+  assert.match(body.markdown.text, /> 任务 5 个（启用 4）/);
+  assert.equal(body.at.isAtAll, false);
+});
+
+test("卡片：飞书用交互卡片 + 两列 fields", () => {
+  const body = JSON.parse(buildWebhookBody("feishu", { ...message, card: digestCard }));
+  assert.equal(body.msg_type, "interactive");
+  assert.equal(body.card.header.title.content, "📊 签到日报 10/24");
+  const fields = body.card.elements[0].fields;
+  assert.ok(fields.length >= 3);
+  assert.equal(fields[0].is_short, true);
+  assert.match(fields[0].text.content, /执行次数/);
+  // 明细 + 备注都在
+  const text = JSON.stringify(body.card.elements);
+  assert.match(text, /每日签到/);
+  assert.match(text, /任务 5 个（启用 4）/);
+});
+
+test("卡片：企业微信用 markdown，周报标题换颜色", () => {
+  const weekly = buildWeeklyDigest(
+    {
+      ok: 20,
+      fail: 5,
+      prevOk: 10,
+      prevFail: 10,
+      topFailed: [{ name: "每日签到", count: 3 }],
+      totalTasks: 4,
+      enabledTasks: 3,
+      nextRunAt: null,
+    },
+    { timezone: 8, now: Date.UTC(2026, 9, 24, 4, 0) },
+  ).card;
+  const wecom = JSON.parse(buildWebhookBody("wecom", { ...message, card: weekly }));
+  assert.equal(wecom.msgtype, "markdown");
+  assert.match(wecom.markdown.content, /本周执行\*\*：25 次/);
+  assert.match(wecom.markdown.content, /↑ 30 个百分点/);
+
+  const feishu = JSON.parse(buildWebhookBody("feishu", { ...message, card: weekly }));
+  assert.equal(feishu.card.header.template, "indigo", "周报用另一种主题色");
+});
+
+test("卡片：没有执行记录时也给一句人话（不留空白）", () => {
+  const empty = buildDigest(
+    { ok: 0, fail: 0, failedTasks: [], totalTasks: 2, enabledTasks: 1, nextRunAt: null },
+    { timezone: 8, now: Date.UTC(2026, 9, 24, 12, 0) },
+  ).card;
+  const body = JSON.parse(buildWebhookBody("dingtalk", { ...message, card: empty }));
+  assert.match(body.markdown.text, /今天没有任务执行记录/);
+  assert.doesNotMatch(body.markdown.text, /\n\n\n/, "不该出现连续空行");
+});
+
+test("卡片：通用 JSON 不用卡片，仍发扁平字段", () => {
+  const body = JSON.parse(buildWebhookBody("generic", { ...message, card: digestCard }));
+  assert.equal(body.ok, false);
+  assert.equal(body.text, `${message.title}\n${message.text}`);
+  assert.equal(body.msgtype, undefined);
+});

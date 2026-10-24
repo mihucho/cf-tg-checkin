@@ -30,6 +30,21 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-24
+
+日报 / 周报按渠道换成 **Markdown / 卡片**（原来一律发纯文本）：
+
+- **钉钉**：`msgtype: "markdown"`，正文 `### 标题` + `**指标**：值` 换行对齐 + `- 明细` + `> 备注`
+  （钉钉 markdown 不支持表格，用加粗行 + 两空格硬换行替代）
+- **企业微信**：`msgtype: "markdown"`，同一套正文
+- **飞书**：`msg_type: "interactive"` 交互卡片——`header` 标题（周报换个主题色）+ 两列 `fields`
+  指标 + `hr` + 明细 + `note` 备注，这是飞书里最接近表格且稳定支持的排版
+- 通用 JSON 与 Telegram 私聊不受影响（仍是纯文本）
+- 没有执行记录时卡片里会给一句「今天没有任务执行记录」，不再留空白
+- `buildDigest` / `buildWeeklyDigest` 现在返回结构化 `card`（rows / bullets / footnotes），
+  纯文本仍由它拼出来，两个通道内容不会各写一份
+- 单测 124（+5 卡片渲染：钉钉 markdown、飞书 card、企微、通用 JSON、空数据）
+
 ## [0.15.0] - 2026-10-24
 
 通知类型扩到 **11 种**，新增三个（都可单独勾选、都可单独关）：
