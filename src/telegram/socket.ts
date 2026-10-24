@@ -29,7 +29,7 @@ class SocketClosedError extends Error {
   }
 }
 
-class ByteQueue {
+export class ByteQueue {
   private chunks: Uint8Array[] = [];
   private head = 0;
   private offset = 0;
@@ -80,7 +80,9 @@ export class CloudflareSocket implements SocketInterface {
   private writer?: WritableStreamDefaultWriter<Uint8Array>;
   private writeChain: Promise<unknown> = Promise.resolve();
   private error?: Error;
-  private wake?: () => void;
+  /** 多个读者可能同时等（read / readExactly），逐个唤醒，不能只留一个槽 */
+  private waiters = new Set<() => void>();
+  private reader?: ReadableStreamDefaultReader<Uint8Array>;
   lastDataAt = 0;
 
   get closed() {
@@ -101,12 +103,19 @@ export class CloudflareSocket implements SocketInterface {
     });
     try {
       await Promise.race([handle.opened, timeout]);
+    } catch (error) {
+      // 连接超时 / 失败要主动关掉底层 socket，否则会一直挂着占资源
+      await handle.close().catch(() => undefined);
+      this.handle = undefined;
+      this.end(error instanceof Error ? error : new Error(String(error)));
+      throw error;
     } finally {
       if (timer) clearTimeout(timer);
     }
 
     this.writer = handle.writable.getWriter();
     const reader = handle.readable.getReader();
+    this.reader = reader;
     const pump = async () => {
       try {
         for (;;) {
@@ -133,16 +142,20 @@ export class CloudflareSocket implements SocketInterface {
   }
 
   private notify() {
-    const wake = this.wake;
-    this.wake = undefined;
-    wake?.();
+    const waiters = [...this.waiters];
+    this.waiters.clear();
+    for (const wake of waiters) wake();
   }
 
   private async waitFor(n: number) {
     while (this.queue.bytes < n) {
       if (this.error) throw this.error;
       await new Promise<void>((resolve) => {
-        this.wake = resolve;
+        const wake = () => {
+          this.waiters.delete(wake);
+          resolve();
+        };
+        this.waiters.add(wake);
       });
     }
   }
@@ -171,6 +184,10 @@ export class CloudflareSocket implements SocketInterface {
     this.handle = undefined;
     this.end();
     this.queue.clear();
+    // reader 不 cancel 会一直持有底层流
+    const reader = this.reader;
+    this.reader = undefined;
+    if (reader) await reader.cancel().catch(() => undefined);
     try {
       // 拒绝所有挂起的 write，避免 close 卡住
       await Promise.race([this.writeChain, new Promise((r) => setTimeout(r, 1_000))]);

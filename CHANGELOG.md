@@ -11,6 +11,26 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-24
+
+审计报告 §P2 的第二轮修复（完整对照见 `deliverables/audits/audit-0.10.0.md` §3.5）。
+
+- **触发消息不再丢指令**：`pollTriggers` 从"只取最近 20 条"改成按批回溯（100 条 × 最多 5 批，
+  按 id 去重）。原来短时间连发超过 20 条配置时，游标直接跳到最高 id，中间的指令永远不会被处理
+- **执行有时间预算**：新增 `taskBudgetMs()`（按步骤类型估算，30 秒 ~ 4 分钟），
+  超出就停止后续步骤并如实记录「超出时间预算，未跑完所有步骤」，不再跑到被 DO 驱逐
+- **`run-all` 分批**：接口支持 `offset` / `limit`，返回 `nextOffset` / `remaining`；
+  前端按 offset 循环推进，任务多也不会撞网关超时（原来同步跑完容易 524）
+- **只对连接错误重试**：新增 `isConnectionError()`，`withClient` 不再对业务错误重连重跑
+  （避免把"已经发出去的消息"再发一遍）
+- **事件计数不再封顶**：`recordEvent` 另存累计计数，`countEvent` 优先读它；
+  老部署首次读时用现有条数初始化，升级后数字不会掉
+- **socket 加固**：多读者等待队列、连接超时主动关闭底层 socket、`close()` 取消 reader
+- **修死代码**：`clickWithTeleprotoHelper` 里恒为 false 的行匹配改成按 `grid[row][column]` 定位
+- `dueTasks` 单批上限 5 → 20；`/api` 响应补 HSTS；`buildState` 去掉多余的 `async`，
+  7 天趋势加 60 秒缓存
+- 测试：新增 `tests/socket.test.ts`（4 例）、`tests/budget.test.ts`（4 例），共 93 个
+
 ## [0.10.2] - 2026-10-24
 
 - **全局统一用弹窗**：移除抽屉（drawer）实现，任务编辑器改用宽弹窗（`dialog-wide`，桌面 760px、

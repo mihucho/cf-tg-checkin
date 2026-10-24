@@ -110,7 +110,7 @@ HTTP 端到端复核：
 
 ---
 
-## 3. P2：待排期（未修，按性价比排序）
+## 3. P2：待排期（其中 P2-1 ~ P2-7 已在 v0.11.0 修掉，见文末「第二轮」）
 
 | # | 问题 | 位置 | 影响 | 建议 |
 | --- | --- | --- | --- | --- |
@@ -122,6 +122,21 @@ HTTP 端到端复核：
 | P2-6 | `countEvent` 每类只留 5000 条 | `db.ts:513` | 「设置 → 关于」里的执行次数会静默封顶在 5000 | 用累加计数器（kv）另存总数 |
 | P2-7 | `withClient` 对**任何**错误都重连并重跑一次 | `agent.ts:599` | 非连接类错误会重放副作用（依赖指纹去重兜底） | 只对 `disconnect/socket/timeout` 等错误重试 |
 | P2-8 | `dueTasks` 每次只取 5 个 | `db.ts:408` | 任务多且同时到点时，要分多轮 5s 才跑完 | 文档写明，或按剩余时间动态放宽 |
+
+## 3.5 第二轮修复（v0.11.0）
+
+| # | 修复方式 | 回归测试 |
+| --- | --- | --- |
+| P2-1 | `pollTriggers` 改成按批回溯（100 条 × 最多 5 批）+ 按 id 去重，不再"游标一跳、中间指令全丢" | — |
+| P2-2 | `clickWithTeleprotoHelper` 去掉恒假条件，改为 `grid[row][column]` 定位 | — |
+| P2-3 | socket：等待者改 `Set`（多读者都能被唤醒）、连接超时主动 `handle.close()`、`close()` 里 `reader.cancel()` | `tests/socket.test.ts`（4 例 ByteQueue） |
+| P2-4 | 新增 `taskBudgetMs()`：按步骤类型估算整任务预算（30s ~ 4min），超预算就停止后续步骤并记「超出时间预算」 | `tests/budget.test.ts`（3 例） |
+| P2-5 | `POST /tasks/run-all` 支持 `offset`/`limit` 分批，返回 `nextOffset`/`remaining`；前端按 offset 循环推进 | 实测两批 8 + 2 跑完 10 个任务 |
+| P2-6 | `recordEvent` 另存 `event:total:<name>` 累计计数，`countEvent` 优先读它（老部署首次读时用现有条数初始化，数字不会掉） | 实测历史 2 条 + 3 次自增 = 4 |
+| P2-7 | 新增 `isConnectionError()`，`withClient` 只对连接层错误重连重跑，业务错误不再重放副作用 | `tests/budget.test.ts`（12 个正反例） |
+| P2-8 | `dueTasks` 每次上限 5 → 20 | — |
+| P3-1 | `buildState()` 去掉多余的 `async`；7 天趋势加 60 秒缓存（`cache:usageTrend`） | — |
+| P3-5 | API 响应补 `Strict-Transport-Security` | 实测响应头存在 |
 
 ## 4. P3：工程与文档
 

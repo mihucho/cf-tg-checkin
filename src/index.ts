@@ -21,6 +21,8 @@ const SECURITY_HEADERS: Record<string, string> = {
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
   "x-frame-options": "DENY",
+  // 只影响 https 访问；自建纯 http 部署会被浏览器忽略，不会造成问题
+  "strict-transport-security": "max-age=31536000; includeSubDomains",
 };
 
 function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
