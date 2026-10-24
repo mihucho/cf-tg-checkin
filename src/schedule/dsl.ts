@@ -40,6 +40,25 @@ const SHORT_INTERVAL = /^(\d+)(m|h)$/i;
 const ONCE_WORDS = new Set(["once", "一次", "仅一次", "只一次"]);
 const DELETE_WORDS = new Set(["删除", "delete", "del", "移除"]);
 
+/**
+ * 触发前缀（可选）。设置后只有以它开头的消息才当配置解析，
+ * 收藏夹里顺手记的笔记就不会被误解析。
+ *
+ * @example stripTriggerPrefix("tg 9.30 签到", "tg") → { matched: true, rest: "9.30 签到" }
+ */
+export function stripTriggerPrefix(
+  text: string,
+  prefix: string,
+): { matched: boolean; rest: string } {
+  const cleanedPrefix = prefix.trim();
+  if (!cleanedPrefix) return { matched: true, rest: text };
+  const trimmed = text.trimStart();
+  if (!trimmed.toLowerCase().startsWith(cleanedPrefix.toLowerCase())) {
+    return { matched: false, rest: text };
+  }
+  return { matched: true, rest: trimmed.slice(cleanedPrefix.length).trimStart() };
+}
+
 export function tokenize(input: string): string[] {
   const tokens: string[] = [];
   let current = "";

@@ -1626,6 +1626,12 @@ function renderSettings() {
       hint: "self 表示收藏夹（Saved Messages）；也可以填 @username 或数字 id。",
     }),
     field({
+      id: "settings-triggerPrefix",
+      label: "触发前缀（triggerPrefix）",
+      control: textControl("triggerPrefix", settings.triggerPrefix ?? "", "例如 tg（留空 = 所有消息都解析）"),
+      hint: "设置后只有以它开头的消息才会被当成配置（如「tg 9.30 签到」），收藏夹里的随手笔记不会被误解析。转发过来的消息仍会登记目标。",
+    }),
+    field({
       id: "settings-adminUserId",
       label: "管理员 Telegram id（adminUserId）",
       control: textControl("adminUserId", settings.adminUserId ?? "", "", "numeric"),
@@ -1787,6 +1793,7 @@ async function saveSettings(event) {
     defaultTarget: read("defaultTarget").trim(),
     stepPollSeconds,
     stepWaitSeconds,
+    triggerPrefix: read("triggerPrefix").trim(),
     turnstileSiteKey: read("turnstileSiteKey").trim(),
   };
   // 密钥留空表示"不修改"，填了才提交；勾选「清除」则显式清空
