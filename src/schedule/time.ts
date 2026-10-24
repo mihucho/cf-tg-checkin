@@ -82,6 +82,11 @@ export function localParts(ms: number, timezone: number): LocalParts {
   };
 }
 
+/** 两个时间戳是否落在同一个"本地日"（用来保证每天类任务一天只跑一次） */
+export function isSameLocalDay(a: number, b: number, timezone: number): boolean {
+  return localDayStart(a, timezone) === localDayStart(b, timezone);
+}
+
 /** 本地「今天 00:00」在真实时间轴上的毫秒值 */
 function localDayStart(ms: number, timezone: number): number {
   const shifted = ms + timezone * 3_600_000;

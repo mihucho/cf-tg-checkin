@@ -3,7 +3,14 @@
  *   node --experimental-strip-types tests/schedule.test.ts
  */
 import assert from "node:assert/strict";
-import { parseTimeOfDay, nextDaily, nextWindow, computeNextRun, formatTimeOfDay } from "../src/schedule/time.ts";
+import {
+  parseTimeOfDay,
+  nextDaily,
+  nextWindow,
+  computeNextRun,
+  formatTimeOfDay,
+  isSameLocalDay,
+} from "../src/schedule/time.ts";
 import { defaultName, parseTrigger, renameForTarget, tokenize } from "../src/schedule/dsl.ts";
 import type { Target } from "../src/types.ts";
 import {
@@ -60,6 +67,19 @@ test("nextWindow 落在窗口内且用注入的随机函数", () => {
   const next = nextWindow("09:00", "10:00", now, TZ, (min, max) => (max <= 0 ? 0 : Math.floor((max - min) / 2)));
   const localHour = new Date(next + TZ * 3_600_000).getUTCHours();
   assert.equal(localHour, 9);
+});
+
+test("isSameLocalDay：跨零点的本地日判断", () => {
+  const tz = 8;
+  const morning = Date.UTC(2026, 9, 24, 0, 30, 0); // 08:30 +08
+  const evening = Date.UTC(2026, 9, 24, 13, 0, 0); // 21:00 +08
+  const nextMorning = Date.UTC(2026, 9, 25, 0, 30, 0);
+  assert.equal(isSameLocalDay(morning, evening, tz), true);
+  assert.equal(isSameLocalDay(evening, nextMorning, tz), false);
+  // UTC 还是 24 号，但本地已经是 25 号 01:00
+  assert.equal(isSameLocalDay(Date.UTC(2026, 9, 24, 17, 0, 0), nextMorning, tz), true);
+  // UTC 24 号 15:00 = 本地 24 号 23:00 → 不算同一天
+  assert.equal(isSameLocalDay(Date.UTC(2026, 9, 24, 15, 0, 0), nextMorning, tz), false);
 });
 
 test("窗口模式：执行完之后必须跳到下一个窗口（不能几秒后又跑）", () => {

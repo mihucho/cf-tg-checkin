@@ -13,7 +13,7 @@ import { Store } from "./db";
 import type { AccountInfo, AgentState, LogEntry, Settings, Target, Task, TaskInput } from "./types";
 import { createTgClient, createTgClientOnDc, errorMessage, migrateDcFromError } from "./telegram/client";
 import { executeTask, resolveEntity, type ExecHooks } from "./telegram/executor";
-import { computeNextRun, formatInTimezone } from "./schedule/time";
+import { computeNextRun, formatInTimezone, isSameLocalDay } from "./schedule/time";
 import {
   defaultName,
   findTimeToken,
@@ -398,6 +398,29 @@ export class TgAgent implements DurableObject {
           // 护栏：同一任务 45 秒内不重复执行（防止调度 bug / 窗口边界造成连发）
           const runnable: Task[] = [];
           for (const task of due) {
+            // 硬约束：daily / window / once 本质上"每天最多一次"，同一天内不再重复执行
+            if (
+              settings !== null &&
+              task.schedule.kind !== "interval" &&
+              task.lastRunAt &&
+              isSameLocalDay(task.lastRunAt, now, settings.timezone)
+            ) {
+              this.store.addLog({
+                taskId: task.id,
+                taskName: task.name,
+                at: now,
+                ok: false,
+                level: "warn",
+                message: "跳过：今天已经执行过（每天类型任务一天只跑一次）",
+                detail: `上次执行：${formatInTimezone(task.lastRunAt, settings.timezone)}`,
+              });
+              this.store.setTaskNextRun(
+                task.id,
+                computeNextRun(task.schedule, now, settings.timezone, { afterExecution: true }),
+              );
+              continue;
+            }
+
             if (task.lastRunAt && now - task.lastRunAt < 45_000) {
               this.store.addLog({
                 taskId: task.id,
