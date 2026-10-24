@@ -127,6 +127,12 @@ test("修饰符默认值：delay 3 / timeout 30 / jitter 0", () => {
   assert.equal(task.schedule.jitterSeconds, 0);
 });
 
+test("cleanupPrevious 默认开启，#keep 关闭，#clean 显式开启", () => {
+  assert.equal(parse("9.30 签到 @b", {}).task!.cleanupPrevious, true);
+  assert.equal(parse("9.30 签到 #keep @b", {}).task!.cleanupPrevious, false);
+  assert.equal(parse("9.30 签到 #clean @b", {}).task!.cleanupPrevious, true);
+});
+
 // ---------------------------------------------------------------- 目标
 test("目标优先级：显式 > @here > 转发 > 默认", () => {
   const here: Target = { kind: "channel", id: "-100123", title: "群" };

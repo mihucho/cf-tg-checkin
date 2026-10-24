@@ -82,7 +82,7 @@ export function normalizeTaskInput(input: TaskInput | Task): TaskInput {
     timeoutSeconds: Math.max(5, Math.min(120, Number(input.timeoutSeconds ?? 30))),
     stepDelaySeconds: Math.max(0, Math.min(60, Number(input.stepDelaySeconds ?? 3))),
     deleteAfterSeconds: Math.max(0, Math.min(3600, Number(input.deleteAfterSeconds ?? 0))),
-    cleanupPrevious: !!input.cleanupPrevious,
+    cleanupPrevious: input.cleanupPrevious !== false,
     source: input.source ?? "ui",
     nextRunAt: input.nextRunAt ?? null,
     lastRunAt: input.lastRunAt ?? null,
