@@ -27,7 +27,7 @@ import {
 import { messageTargetHint, usernameFromLink, type MessageLike, type MessageTargetHint } from "./telegram/targets";
 import type { Env } from "./env";
 import { normalizeTaskInput, taskFingerprint } from "./task";
-import { redactSettings } from "./settings";
+import { redactSettings, shouldAutoFillAdminId } from "./settings";
 
 interface Credentials {
   apiId: number | null;
@@ -838,6 +838,31 @@ export class TgAgent implements DurableObject {
     return { ok: true as const, me: outcome.me };
   }
 
+  /**
+   * 管理员 ID 默认 = 当前登录的 Telegram 账号。
+   * 只在「从没设置过」时填一次（用 kv 标记），用户日后手动清空不会被覆盖。
+   */
+  private applyDefaultAdminId(meId: string): void {
+    const settings = this.store.getSettings();
+    const should = shouldAutoFillAdminId({
+      adminUserId: settings.adminUserId,
+      meId,
+      alreadyAutoFilled: Boolean(this.store.getKv("adminId:autoFilled")),
+    });
+    if (!should) return;
+    this.store.saveSettings({ adminUserId: String(meId) });
+    this.store.setKv("adminId:autoFilled", "1");
+    this.store.addLog({
+      taskId: null,
+      taskName: null,
+      at: Date.now(),
+      ok: true,
+      level: "info",
+      message: `管理员 ID 已设为当前账号（${meId}）`,
+      detail: "只有这个账号发出的消息指令会生效；可在设置里修改。",
+    });
+  }
+
   private async logout() {
     const session = this.session();
     if (session) {
@@ -1592,11 +1617,18 @@ export class TgAgent implements DurableObject {
   }
 
   private async buildState(): Promise<AgentState> {
-    const settings = this.store.getSettings();
+    let settings = this.store.getSettings();
     const tasks = this.store.listTasks();
     const me = this.store.getJson<AccountInfo["me"]>(KV_ME, null);
     const creds = this.credentials();
     const pending = this.store.getJson<PendingLogin | null>(KV_PENDING, null);
+
+    // 老部署补一次：管理员 ID 默认 = 当前登录账号
+    if (me?.id) {
+      this.applyDefaultAdminId(me.id);
+      settings = this.store.getSettings();
+    }
+
     const lastRunAt = tasks.reduce<number | null>((acc, task) => {
       if (!task.lastRunAt) return acc;
       return acc === null ? task.lastRunAt : Math.max(acc, task.lastRunAt);

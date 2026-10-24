@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "./harness.ts";
 import { normalizeTaskInput, taskFingerprint } from "../src/task.ts";
-import { redactSettings } from "../src/settings.ts";
+import { redactSettings, shouldAutoFillAdminId } from "../src/settings.ts";
 import { DEFAULT_SETTINGS, type TaskInput } from "../src/types.ts";
 
 function input(patch: Partial<TaskInput> = {}): TaskInput {
@@ -124,6 +124,23 @@ test("redactSettings：Turnstile Secret 不回传，只给已配置标记", () =
 
   const empty = redactSettings({ ...DEFAULT_SETTINGS, turnstileSecretKey: "" });
   assert.equal(empty.turnstileSecretConfigured, false);
+});
+
+test("shouldAutoFillAdminId：管理员 ID 默认取当前登录账号（只填一次）", () => {
+  // 从没设置过 + 已登录 → 自动填
+  assert.equal(shouldAutoFillAdminId({ adminUserId: "", meId: "123456789" }), true);
+  assert.equal(shouldAutoFillAdminId({ adminUserId: null, meId: "123456789" }), true);
+  // 已经设置过 → 不覆盖
+  assert.equal(shouldAutoFillAdminId({ adminUserId: "123", meId: "123456789" }), false);
+  // 用户手动清空过（标记已存在）→ 不再自动填
+  assert.equal(
+    shouldAutoFillAdminId({ adminUserId: "", meId: "123456789", alreadyAutoFilled: true }),
+    false,
+  );
+  // 还没登录 Telegram → 不填
+  assert.equal(shouldAutoFillAdminId({ adminUserId: "", meId: null }), false);
+  // 只有空格也算没设置
+  assert.equal(shouldAutoFillAdminId({ adminUserId: "   ", meId: "1" }), true);
 });
 
 test("DEFAULT_SETTINGS：触发前缀默认 tg，安全默认值", () => {
