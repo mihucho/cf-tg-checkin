@@ -27,7 +27,7 @@ import {
 } from "./schedule/dsl";
 import { messageTargetHint, usernameFromLink, type MessageLike, type MessageTargetHint } from "./telegram/targets";
 import type { Env } from "./env";
-import { normalizeTaskInput, taskFingerprint } from "./task";
+import { normalizeTaskInput, taskFingerprint, taskToExport } from "./task";
 import { redactSettings, shouldAutoFillAdminId } from "./settings";
 
 interface Credentials {
@@ -164,6 +164,36 @@ export class TgAgent implements DurableObject {
         await this.scheduleNextAlarm();
         return json({ task });
       }
+      if (path === "/tasks/export" && method === "GET") {
+        const tasks = this.store.listTasks().map(taskToExport);
+        return json({
+          format: "cf-tg-checkin.tasks",
+          version: 1,
+          exportedAt: Date.now(),
+          tasks,
+        });
+      }
+
+      if (path === "/tasks/import" && method === "POST") {
+        const body = (await request.json()) as { tasks?: TaskInput[] };
+        const incoming = Array.isArray(body.tasks) ? body.tasks.slice(0, 200) : [];
+        if (!incoming.length) return jsonError("没有可导入的任务", 400);
+
+        const created: number[] = [];
+        const skipped: Array<{ name: string; reason: string }> = [];
+        for (const item of incoming) {
+          try {
+            const result = this.createTask(item);
+            if (result.created) created.push(result.task.id);
+            else skipped.push({ name: item.name ?? "未命名", reason: `已存在相同任务 #${result.task.id}` });
+          } catch (error) {
+            skipped.push({ name: item.name ?? "未命名", reason: errorMessage(error) });
+          }
+        }
+        await this.scheduleNextAlarm();
+        return json({ ok: true, created: created.length, ids: created, skipped });
+      }
+
       if (path === "/tasks/run-all" && method === "POST") {
         const logs = await this.serialize(() => this.runAllTasks());
         await this.scheduleNextAlarm();
