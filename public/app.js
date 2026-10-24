@@ -2638,7 +2638,7 @@ function renderSettings() {
       id: "settings-notifyWebhook",
       label: "Webhook 地址",
       control: textControl("notifyWebhook", settings.notifyWebhook ?? "", "https://oapi.dingtalk.com/robot/send?access_token=…"),
-      hint: "失败时推一条消息过去，同一任务 1 小时内最多提醒一次。机器人若设了「关键词」安全设置，消息里需要包含该关键词（标题固定含「失败」二字）。",
+      hint: "失败时推一条消息过去，同一任务 1 小时内最多提醒一次。只粘 access_token 也行（会按渠道自动补全成完整地址）；机器人若设了「关键词」安全设置，消息里需要包含该关键词（标题固定含「失败」二字）。",
     }),
     field({
       id: "settings-notifyWebhookSecret",

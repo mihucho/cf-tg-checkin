@@ -30,6 +30,18 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-10-24
+
+- **Webhook 地址可以只填 token**：钉钉/企微/飞书的机器人配置页把 token 单独列一行，
+  很容易只复制那一串。现在会按已选渠道补成完整地址：
+  `https://oapi.dingtalk.com/robot/send?access_token=…` /
+  `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…` /
+  `https://open.feishu.cn/open-apis/bot/v2/hook/…`；少了 `https://` 的地址也会补上。
+  保存设置与「发送测试通知」都走同一套 `normalizeWebhookUrl()`
+- **404 更有用了**：`未找到该接口：POST /notify/test（如果这是新接口，多半是部署的版本过旧，
+  看 GET /api/version）`——之前只有一句「未找到该接口」，排查起来只能猜
+- 单测 129（+2 地址补全）
+
 ## [0.16.1] - 2026-10-24
 
 - **发送测试通知**：设置 → 登录与安全 里加按钮，用**表单里当前填的值**（不用先保存）

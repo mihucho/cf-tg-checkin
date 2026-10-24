@@ -37,7 +37,7 @@ import { describeLowRate, pickLowRateTasks, taskRates } from "./notify/rate";
 import { buildTestMessage } from "./notify/test";
 import { NOTIFY_EVENTS, isNotifyEventId, isThrottledEvent, normalizeNotifyEvents } from "./notify/events";
 import type { NotifyEventId } from "./notify/events";
-import { buildWebhookPayload, detectWebhookKind, parseWebhookResult } from "./notify/webhook";
+import { buildWebhookPayload, detectWebhookKind, normalizeWebhookUrl, parseWebhookResult } from "./notify/webhook";
 import { createTgClient, createTgClientOnDc, errorMessage, isConnectionError, migrateDcFromError } from "./telegram/client";
 import { executeTask, resolveEntity, type ExecHooks } from "./telegram/executor";
 import { computeNextRun, formatInTimezone, localDayElapsedMs } from "./schedule/time";
@@ -209,6 +209,12 @@ export class TgAgent implements DurableObject {
         const saved = this.store.saveSettings(sanitizeSettings(patch));
         if (clearTurnstileSecret) this.store.saveSettings({ turnstileSecretKey: "" });
         if (clearNotifyWebhookSecret) this.store.saveSettings({ notifyWebhookSecret: "" });
+        // 只粘了 token / 少了 https:// 的地址，按渠道补全（再存一次）
+        const effective = this.store.getSettings();
+        const normalizedUrl = normalizeWebhookUrl(effective.notifyWebhook ?? "", effective.notifyWebhookKind ?? "generic");
+        if (normalizedUrl !== (effective.notifyWebhook ?? "")) {
+          this.store.saveSettings({ notifyWebhook: normalizedUrl });
+        }
         if (before.controlChat !== saved.controlChat) this.resetTriggerCursor();
         if (before.triggerEnabled !== saved.triggerEnabled) await this.scheduleNextAlarm();
         return json({ settings: redactSettings(this.store.getSettings()) });
@@ -329,9 +335,13 @@ export class TgAgent implements DurableObject {
         // 允许前端带上「表单里当前的值」来测：改完地址不用先保存也能验证
         const overlay = (await request.json().catch(() => ({}))) as Partial<Settings>;
         const stored = this.store.getSettings();
+        const merged = { ...stored, ...sanitizeSettings(overlay) };
         const settings: Settings = {
-          ...stored,
-          ...sanitizeSettings(overlay),
+          ...merged,
+          notifyWebhook: normalizeWebhookUrl(
+            String(overlay.notifyWebhook ?? stored.notifyWebhook ?? ""),
+            merged.notifyWebhookKind ?? "generic",
+          ),
           // 密钥留空表示沿用已保存的（和保存设置的语义一致）
           notifyWebhookSecret: String(overlay.notifyWebhookSecret ?? "").trim() || stored.notifyWebhookSecret,
         };
@@ -522,7 +532,10 @@ export class TgAgent implements DurableObject {
         return json({ ok: true, ran, nextRunAt: this.store.earliestNextRun() });
       }
 
-      return jsonError("未找到该接口", 404);
+      return jsonError(
+        `未找到该接口：${method} ${path}（如果这是新接口，多半是部署的版本过旧，看 GET /api/version）`,
+        404,
+      );
     } catch (error) {
       return jsonError(error, 500);
     }

@@ -189,3 +189,36 @@ test("卡片：通用 JSON 不用卡片，仍发扁平字段", () => {
   assert.equal(body.text, `${message.title}\n${message.text}`);
   assert.equal(body.msgtype, undefined);
 });
+
+/* ------------------------------------------------ 地址补全 */
+
+import { normalizeWebhookUrl } from "../src/notify/webhook.ts";
+
+test("normalizeWebhookUrl：裸 token 按渠道补成完整地址", () => {
+  const token = "76296f3669f0c48fab916ed96cc183cc9f17e8a5a063447e065555538e114acd";
+  assert.equal(
+    normalizeWebhookUrl(token, "dingtalk"),
+    `https://oapi.dingtalk.com/robot/send?access_token=${token}`,
+  );
+  assert.equal(
+    normalizeWebhookUrl("abc123def456abc123def456", "wecom"),
+    "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc123def456abc123def456",
+  );
+  assert.equal(
+    normalizeWebhookUrl("abc123def456abc123def456", "feishu"),
+    "https://open.feishu.cn/open-apis/bot/v2/hook/abc123def456abc123def456",
+  );
+  // 通用渠道不认识 token，原样保留（让用户自己写全）
+  assert.equal(normalizeWebhookUrl(token, "generic"), token);
+});
+
+test("normalizeWebhookUrl：完整地址不动，缺协议头补 https", () => {
+  const full = "https://oapi.dingtalk.com/robot/send?access_token=x";
+  assert.equal(normalizeWebhookUrl(full, "dingtalk"), full);
+  assert.equal(
+    normalizeWebhookUrl("oapi.dingtalk.com/robot/send?access_token=x", "dingtalk"),
+    `https://${"oapi.dingtalk.com/robot/send?access_token=x"}`,
+  );
+  assert.equal(normalizeWebhookUrl("  ", "dingtalk"), "");
+  assert.equal(normalizeWebhookUrl("https://example.com/hook", "generic"), "https://example.com/hook");
+});

@@ -279,6 +279,7 @@ npx wrangler deploy --var DO_LOCATION_HINT:apac   # apac/enam/weur/eeur/me/afr/o
     比纯文本好读；Telegram 与通用 JSON 仍是纯文本
   - 存储告警：DO 存储用量超过阈值（默认 70%）时提醒，关于页能看到当前占用
   - 成功率告警：最近 7 天成功率低于阈值（默认 80%）时提醒，专治「偶尔失败、连续失败计数到不了 3」
+- Webhook 地址只粘 `access_token` / `key` 也行（按渠道自动补全成完整地址）
 - 配好通知后点「**发送测试通知**」即可验证：会用表单里当前填的值真发一条（不用先保存），
   并分别显示 Telegram / Webhook 两个通道的结果与失败原因
 - 建议再叠一层 **Cloudflare Access** 并把 `ALLOWED_HOSTS` 设成你的自定义域名（否则 workers.dev 会绕过 Access）
