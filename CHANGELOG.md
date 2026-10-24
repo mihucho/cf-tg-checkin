@@ -30,6 +30,15 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+### 工程
+
+- **改文档即发版**：新增 `releases/unreleased.md`（就是 Release notes 本身）+
+  `.github/workflows/release.yml`。只有这个文件被改动才触发发布：自动 bump `package.json`、
+  插入本 CHANGELOG、归档到 `releases/archive/`、打 annotated tag、建 GitHub Release、触发部署；
+  版本号等于当前版本时只补 tag/Release，重复执行安全
+- 新增 `scripts/release.mjs`（解析 front matter、校验版本递增、写 CHANGELOG、归档与重置模板），
+  `--dry-run` 可本地预览；`tests/release-doc.test.ts` 覆盖解析与插入逻辑（共 140 个单测）
+
 ## [0.17.1] - 2026-10-24
 
 - **测试结果回显「推送地址」**：`webhook.target` 带打码后的地址
