@@ -27,6 +27,7 @@ import {
 } from "./schedule/dsl";
 import { messageTargetHint, usernameFromLink, type MessageLike, type MessageTargetHint } from "./telegram/targets";
 import type { Env } from "./env";
+import { bucketDaily } from "./events";
 import { normalizeTaskInput, taskFingerprint, taskToExport } from "./task";
 import { redactSettings, shouldAutoFillAdminId } from "./settings";
 
@@ -1850,6 +1851,12 @@ export class TgAgent implements DurableObject {
           fail: this.store.countEvent("run_finished:fail"),
         },
         failureHandled: this.store.countEvent("failure_handled"),
+        trend: bucketDaily(
+          this.store
+            .listEventSamples("run_finished:", Date.now() - 8 * 86400 * 1000)
+            .map((row) => ({ ok: row.name === "run_finished:ok", at: row.at })),
+          { now: Date.now(), tzHours: settings.timezone ?? 8, days: 7 },
+        ),
       },
       runtime: {
         colo: this.store.getKv("runtime:colo"),
@@ -1902,6 +1909,16 @@ function sanitizeSettings(patch: Partial<Settings>): Partial<Settings> {
   }
   if (patch.triggerPrefix !== undefined) {
     clean.triggerPrefix = String(patch.triggerPrefix).trim().slice(0, 20);
+  }
+  if (patch.templates !== undefined) {
+    const list = Array.isArray(patch.templates) ? patch.templates.slice(0, 20) : [];
+    clean.templates = list
+      .map((item, index) => ({
+        id: String(item?.id || `t${Date.now()}${index}`).slice(0, 40),
+        name: String(item?.name || "未命名模板").trim().slice(0, 20),
+        command: String(item?.command || "").trim().slice(0, 500),
+      }))
+      .filter((item) => item.command);
   }
   return clean;
 }

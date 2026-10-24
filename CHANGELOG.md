@@ -11,6 +11,15 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-24
+
+- **复制兼容**：`copyText()` 三级回退——`navigator.clipboard` → 临时 textarea + `document.execCommand("copy")`
+  （http 环境、旧浏览器、iframe 内可用）→ 兜底弹窗并自动选中；概览快速开始、任务详情、指令示例统一走它
+- **模板存服务端**：自定义模板从 localStorage 迁到 `settings.templates`（跨设备/跨浏览器同步，最多 20 个），
+  首次登录自动迁移旧数据；编辑器里自定义模板也可直接删除
+- **用量趋势**：`events.trend` 近 7 天执行数（按设置时区分日、成功/失败分色），关于页画成小柱状图；
+  新增纯函数 `bucketDaily()` + 3 个单测（共 78 个）
+
 ## [0.8.0] - 2026-10-24
 
 - **任务导入 / 导出**：`GET /api/tasks/export` 导出可重建的精简 JSON（去掉运行态字段），

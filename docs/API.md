@@ -35,6 +35,7 @@
     "lastError": "字符串或 null"
   },
   "settings": {
+    "templates": [ /* 自定义模板：{ id, name, command }，最多 20 个，存服务端 */ ],
     "timezone": 8,               // 时区偏移（小时，可带小数）
     "pollSeconds": 60,           // 触发器轮询间隔
     "triggerEnabled": true,      // 是否监听触发消息

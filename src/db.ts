@@ -506,6 +506,13 @@ export class Store {
     );
   }
 
+  /** 取某类事件在 since 之后的样本（用于趋势图） */
+  listEventSamples(prefix: string, since: number): Array<{ name: string; at: number }> {
+    return this.sql
+      .exec("SELECT name, at FROM events WHERE name LIKE ? AND at >= ? ORDER BY at", `${prefix}%`, since)
+      .toArray() as unknown as Array<{ name: string; at: number }>;
+  }
+
   countEvent(name: string): number {
     const rows = this.rows<{ total: number | null }>("SELECT COUNT(*) AS total FROM events WHERE name = ?", name);
     return rows.length ? Number(rows[0].total ?? 0) : 0;
