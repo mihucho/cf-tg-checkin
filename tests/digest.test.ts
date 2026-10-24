@@ -34,11 +34,11 @@ test("normalizeNotifyEvents：过滤未知、去重、按目录顺序", () => {
 test("节流标记：周期性/噪音类事件才节流", () => {
   assert.equal(isThrottledEvent("run_failed"), true);
   assert.equal(isThrottledEvent("daily_digest"), false, "日报一天一次，不需要额外节流");
+  assert.equal(isThrottledEvent("weekly_digest"), false, "周报一周一次，不需要额外节流");
   assert.equal(isThrottledEvent("run_success"), false);
-  assert.equal(
-    NOTIFY_EVENTS.filter((item) => item.throttled).length,
-    4,
-    "run_failed / session_expired / connection_error / login_failed",
+  assert.deepEqual(
+    NOTIFY_EVENTS.filter((item) => item.throttled).map((item) => item.id),
+    ["run_failed", "session_expired", "connection_error", "login_failed", "storage_warning", "success_rate_low"],
   );
 });
 

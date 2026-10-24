@@ -2593,7 +2593,7 @@ function renderSettings() {
         { class: "notify-types" },
         ...((state.data && state.data.notifyCatalog) || []).map((item) => {
           const checked = (settings.notifyEvents || []).includes(item.id);
-          const hasTime = item.id === "daily_digest";
+          const extras = notifyExtras(item.id, settings);
           return el(
             "label",
             { class: `notify-type${checked ? " is-on" : ""}` },
@@ -2613,24 +2613,7 @@ function renderSettings() {
                 "span",
                 { class: "notify-type-head" },
                 el("span", { class: "notify-type-label" }, item.label),
-                hasTime
-                  ? el(
-                      "span",
-                      { class: "notify-type-time" },
-                      el("select", {
-                        class: "input input-tiny",
-                        name: "digestHour",
-                        "aria-label": "日报发送时间",
-                        onchange: (event) => event.stopPropagation(),
-                      }, ...Array.from({ length: 24 }, (_, hour) => hour).map((hour) =>
-                        el(
-                          "option",
-                          { value: String(hour), selected: Number(settings.digestHour ?? 22) === hour },
-                          `${String(hour).padStart(2, "0")}:00`,
-                        ),
-                      )),
-                    )
-                  : null,
+                extras,
               ),
               el("span", { class: "notify-type-hint" }, item.hint),
             ),
@@ -2777,6 +2760,88 @@ function numberControl(name, value, { step = "1", min, max } = {}) {
   });
 }
 
+/** 「通知类型」卡片里的附加控件：日报/周报的时间、存储与成功率阈值 */
+function notifyExtras(id, settings) {
+  const hourOptions = Array.from({ length: 24 }, (_, hour) => hour).map((hour) =>
+    el(
+      "option",
+      { value: String(hour), selected: Number(settings.digestHour ?? 22) === hour },
+      `${String(hour).padStart(2, "0")}:00`,
+    ),
+  );
+
+  if (id === "daily_digest") {
+    return el("span", { class: "notify-type-time" }, el("select", {
+      class: "input input-tiny",
+      name: "digestHour",
+      "aria-label": "日报发送时间",
+      onchange: (event) => event.stopPropagation(),
+    }, ...hourOptions));
+  }
+
+  if (id === "weekly_digest") {
+    const weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+    return el(
+      "span",
+      { class: "notify-type-time" },
+      el("select", {
+        class: "input input-tiny",
+        name: "digestWeekday",
+        "aria-label": "周报发送星期",
+        onchange: (event) => event.stopPropagation(),
+      }, ...weekdays.map((label, index) =>
+        el("option", { value: String(index), selected: Number(settings.digestWeekday ?? 0) === index }, label),
+      )),
+      el("select", {
+        class: "input input-tiny",
+        name: "weeklyHour",
+        "aria-label": "周报发送时间",
+        onchange: (event) => event.stopPropagation(),
+      }, ...Array.from({ length: 24 }, (_, hour) => hour).map((hour) =>
+        el(
+          "option",
+          { value: String(hour), selected: Number(settings.weeklyHour ?? 22) === hour },
+          `${String(hour).padStart(2, "0")}:00`,
+        ),
+      )),
+    );
+  }
+
+  if (id === "storage_warning") {
+    const value = el("input", {
+      class: "input input-tiny input-num",
+      type: "number",
+      name: "storageWarnPercent",
+      min: "0",
+      max: "99",
+      step: "5",
+      value: String(settings.storageWarnPercent ?? 70),
+      "aria-label": "存储告警阈值（百分比）",
+      onchange: (event) => event.stopPropagation(),
+      onclick: (event) => event.stopPropagation(),
+    });
+    return el("span", { class: "notify-type-time" }, value, el("span", { class: "notify-type-unit" }, "%"));
+  }
+
+  if (id === "success_rate_low") {
+    const value = el("input", {
+      class: "input input-tiny input-num",
+      type: "number",
+      name: "successRateThreshold",
+      min: "0",
+      max: "99",
+      step: "5",
+      value: String(settings.successRateThreshold ?? 80),
+      "aria-label": "成功率告警阈值（百分比）",
+      onchange: (event) => event.stopPropagation(),
+      onclick: (event) => event.stopPropagation(),
+    });
+    return el("span", { class: "notify-type-time" }, value, el("span", { class: "notify-type-unit" }, "%"));
+  }
+
+  return null;
+}
+
 function selectControl(name, value, options) {
   const node = el("select", { class: "input", id: `settings-${name}`, name });
   for (const [optionValue, label] of options) {
@@ -2848,6 +2913,10 @@ async function saveSettings(event) {
     notifyWebhookKind: read("notifyWebhookKind") || "generic",
     notifyEvents: [...form.querySelectorAll('input[name="notifyEvents"]:checked')].map((node) => node.value),
     digestHour: Number(read("digestHour") || 22),
+    digestWeekday: Number(read("digestWeekday") || 0),
+    weeklyHour: Number(read("weeklyHour") || 22),
+    storageWarnPercent: Number(read("storageWarnPercent") || 0),
+    successRateThreshold: Number(read("successRateThreshold") || 0),
     turnstileSiteKey: read("turnstileSiteKey").trim(),
   };
   // 密钥留空表示"不修改"，填了才提交；勾选「清除」则显式清空
@@ -3241,6 +3310,13 @@ function usagePanel() {
     item("任务", String(totalCreated), totalCreated ? `指令建 ${share}%` : "还没有任务"),
     item("执行", String(runs.ok + runs.fail), `成功 ${runs.ok} · 失败 ${runs.fail}`),
     item("故障已处理", String(events.failureHandled || 0), null),
+    (() => {
+      const storage = (state.data && state.data.runtime && state.data.runtime.storage) || null;
+      if (!storage) return null;
+      const mb = storage.bytes / (1024 * 1024);
+      const used = mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(storage.bytes / 1024))} KB`;
+      return item("存储占用", used, `${storage.percent}% · 上限约 ${Math.round(storage.limitBytes / 1024 ** 3)} GB`);
+    })(),
     ),
   );
 }
