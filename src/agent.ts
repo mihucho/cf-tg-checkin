@@ -19,6 +19,7 @@ import {
   findTimeToken,
   parseTrigger,
   renameForTarget,
+  stripTriggerPrefix,
   tokenize,
   type TriggerContext,
 } from "./schedule/dsl";
@@ -1016,9 +1017,33 @@ export class TgAgent implements DurableObject {
       }
     }
 
+    // 可选前缀：设置后只有以它开头的消息才当配置解析，收藏夹里的随手笔记不会被误处理
+    const prefix = (settings.triggerPrefix ?? "").trim();
+    let messageText = text;
+    if (prefix) {
+      const stripped = stripTriggerPrefix(text, prefix);
+      if (stripped.matched) {
+        messageText = stripped.rest;
+        trace.push(`命中前缀「${prefix}」，去掉后：${messageText.slice(0, 80)}`);
+      } else {
+        // 没前缀：只允许"纯转发/分享"用来登记目标，其余静默忽略
+        const hinted = await this.inferTarget(client, entity, message);
+        if (hinted) {
+          this.store.setJson(KV_TRIGGER_TARGET, { target: hinted, at: Date.now() });
+          trace.push(`未带前缀，但有可识别来源 → 登记目标：${JSON.stringify(hinted)}`);
+          record(true, `登记目标（无前缀）：${hinted.title || (hinted.username ? `@${hinted.username}` : hinted.id)}`);
+        } else if (findTimeToken(tokenize(text))) {
+          trace.push(`看起来像配置但缺少前缀「${prefix}」→ 忽略`);
+          record(false, `忽略：消息缺少触发前缀「${prefix}」`);
+        }
+        return;
+      }
+      if (!messageText) return;
+    }
+
     // 这条消息自己指向谁（转发来源 / 联系人卡片 / 链接 / 回复的那条 / 最近的上一条）
     const hint = await this.inferTarget(client, entity, message);
-    const hasTime = Boolean(findTimeToken(tokenize(text)));
+    const hasTime = Boolean(findTimeToken(tokenize(messageText)));
 
     // 没有时间表达式 → 当成「目标登记」。
     // 常见操作是「先转发机器人到收藏夹，再单独发一条 9.30 签到」；
@@ -1047,7 +1072,7 @@ export class TgAgent implements DurableObject {
       `上下文：推断目标=${hint ? JSON.stringify(hint) : "无"} 记住的目标=${this.rememberedTarget() ? "有" : "无"} 默认目标=${settings.defaultTarget || "无"}`,
     );
 
-    const parsed = parseTrigger(text, ctx);
+    const parsed = parseTrigger(messageText, ctx);
     if (!parsed.ok) {
       trace.push(`解析失败：${parsed.error}`);
       record(false, `触发解析失败：${parsed.error}`);
@@ -1056,7 +1081,7 @@ export class TgAgent implements DurableObject {
     }
 
     const result = parsed.result;
-    logs.push(`${result.kind}: ${text.slice(0, 60)}`);
+    logs.push(`${result.kind}: ${messageText.slice(0, 60)}`);
 
     switch (result.kind) {
       case "help": {
@@ -1632,6 +1657,9 @@ function sanitizeSettings(patch: Partial<Settings>): Partial<Settings> {
     const value = Number(patch.stepWaitSeconds);
     if (Number.isFinite(value)) clean.stepWaitSeconds = Math.max(5, Math.min(300, value));
   }
+  if (patch.triggerPrefix !== undefined) {
+    clean.triggerPrefix = String(patch.triggerPrefix).trim().slice(0, 20);
+  }
   return clean;
 }
 
@@ -1759,4 +1787,7 @@ const HELP_TEXT = `💡 触发语法：[时间] [动作...]
 8.30-9.30 参与 rand:早上好|午安
 每2小时 打卡
 
-管理命令：列表 / 立即 <编号> / 开启 <编号> / 关闭 <编号> / 删除 <编号> / 帮助`;
+管理命令：列表 / 立即 <编号> / 开启 <编号> / 关闭 <编号> / 删除 <编号> / 帮助
+
+提示：如果在设置里配了「触发前缀」（例如 tg），所有配置都要以它开头，如「tg 9.30 签到」。`;
+

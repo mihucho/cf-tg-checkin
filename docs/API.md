@@ -42,7 +42,8 @@
     "adminUserId": "123",        // 允许用命令管理任务的管理员 tg id（可空）
     "defaultTarget": "",         // 触发消息解析不到目标时的兜底目标
     "stepPollSeconds": 3,        // 等下一步按钮/回复时，每隔多少秒查一次（1–30）
-    "stepWaitSeconds": 30        // 单次最多等多久（5–300）
+    "stepWaitSeconds": 30,       // 单次最多等多久（5–300）
+    "triggerPrefix": "",         // 触发前缀：非空时只有以它开头的消息才当配置解析
   },
   "tasks": [ Task ],
   "logs": [ LogEntry ],          // 最近 50 条

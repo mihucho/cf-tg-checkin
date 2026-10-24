@@ -11,7 +11,7 @@ import {
   formatTimeOfDay,
   isSameLocalDay,
 } from "../src/schedule/time.ts";
-import { defaultName, parseTrigger, renameForTarget, tokenize } from "../src/schedule/dsl.ts";
+import { defaultName, parseTrigger, renameForTarget, stripTriggerPrefix, tokenize } from "../src/schedule/dsl.ts";
 import type { Target } from "../src/types.ts";
 import {
   resolveEntity,
@@ -181,6 +181,19 @@ test("defaultName 用补全后的目标生成名字", () => {
     defaultName({ kind: "user", id: "1", username: "example_bot", title: "签到小助手" }, "", steps),
     "签到小助手 /sign",
   );
+});
+
+test("触发前缀：只有以它开头的消息才当配置", () => {
+  assert.deepEqual(stripTriggerPrefix("tg 9.30 签到", "tg"), { matched: true, rest: "9.30 签到" });
+  // 冒号/斜杠前缀、大小写、多余空格
+  assert.deepEqual(stripTriggerPrefix("/tg 9.30 签到", "/tg"), { matched: true, rest: "9.30 签到" });
+  assert.deepEqual(stripTriggerPrefix("TG: 9.30 签到", "tg:"), { matched: true, rest: "9.30 签到" });
+  assert.deepEqual(stripTriggerPrefix("   tg   9.30 签到", "tg"), { matched: true, rest: "9.30 签到" });
+  // 不带前缀 → 不匹配（收藏夹随手记的笔记会被忽略）
+  assert.deepEqual(stripTriggerPrefix("明天买牛奶", "tg"), { matched: false, rest: "明天买牛奶" });
+  assert.deepEqual(stripTriggerPrefix("9.30 签到", "tg"), { matched: false, rest: "9.30 签到" });
+  // 空前缀 = 全部匹配
+  assert.deepEqual(stripTriggerPrefix("9.30 签到", ""), { matched: true, rest: "9.30 签到" });
 });
 
 test("时间可以写在链接/目标后面", () => {
