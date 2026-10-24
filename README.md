@@ -202,6 +202,11 @@ Telegram 的 userbot 协议是 MTProto，需要 TCP 连接；而 Workers 是无�
 
 ## 常见问题
 
+**关掉浏览器 / 不开页面还会发吗？** 会。调度完全在云端：Durable Object 的 alarm 存在存储里，
+到点自己醒来连 Telegram、发消息、断开；即使实例被驱逐、告警丢失，还有 `*/5` 的 Cron Trigger 兜底。
+网页只是控制面板，关掉没有任何影响 —— 唯一会停的情况是任务被禁用/到期、Telegram 登录失效（需要重新登录）、
+或你在设置里关掉了「允许用 Telegram 消息管理任务」。
+
 **"空闲/待连接"状态下还能从 Telegram 建任务吗？** 能。触发器轮询由 DO alarm 驱动，到点会现场连接
 （session 里的 auth key，1 RTT）、读完消息再断开；"空闲"只表示此刻没有 socket，最迟一个轮询周期
 （默认 60 秒，可调）就会生效。前提是**登录了 Telegram 且开了「允许用 Telegram 消息管理任务」**。
