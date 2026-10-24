@@ -222,3 +222,54 @@ test("normalizeWebhookUrl：完整地址不动，缺协议头补 https", () => {
   assert.equal(normalizeWebhookUrl("  ", "dingtalk"), "");
   assert.equal(normalizeWebhookUrl("https://example.com/hook", "generic"), "https://example.com/hook");
 });
+
+/* ------------------------------------------------ 渠道固定地址 */
+
+import { WEBHOOK_TEMPLATES, webhookTokenFromUrl, webhookUrlFromToken } from "../src/notify/webhook.ts";
+
+test("webhookUrlFromToken：三个渠道按固定模板拼地址", () => {
+  assert.equal(
+    webhookUrlFromToken("dingtalk", "abc123"),
+    "https://oapi.dingtalk.com/robot/send?access_token=abc123",
+  );
+  assert.equal(
+    webhookUrlFromToken("wecom", "key-123"),
+    "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=key-123",
+  );
+  assert.equal(webhookUrlFromToken("feishu", "tok-123"), "https://open.feishu.cn/open-apis/bot/v2/hook/tok-123");
+  // 自定义渠道原样返回
+  assert.equal(webhookUrlFromToken("generic", "https://example.com/hook"), "https://example.com/hook");
+});
+
+test("webhookUrlFromToken：粘整条地址也能抠出 token 重新拼", () => {
+  assert.equal(
+    webhookUrlFromToken("dingtalk", "https://oapi.dingtalk.com/robot/send?access_token=real-token-1"),
+    "https://oapi.dingtalk.com/robot/send?access_token=real-token-1",
+  );
+  assert.equal(
+    webhookUrlFromToken("feishu", "https://open.feishu.cn/open-apis/bot/v2/hook/abc-999"),
+    "https://open.feishu.cn/open-apis/bot/v2/hook/abc-999",
+  );
+});
+
+test("webhookTokenFromUrl：把 token 回填到输入框", () => {
+  assert.equal(
+    webhookTokenFromUrl("dingtalk", "https://oapi.dingtalk.com/robot/send?access_token=tok-1"),
+    "tok-1",
+  );
+  assert.equal(webhookTokenFromUrl("wecom", "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=k-1"), "k-1");
+  assert.equal(webhookTokenFromUrl("feishu", "https://open.feishu.cn/open-apis/bot/v2/hook/f-1"), "f-1");
+  // 自定义渠道：整条地址就是"token"
+  assert.equal(webhookTokenFromUrl("generic", "https://example.com/hook"), "https://example.com/hook");
+  assert.equal(webhookTokenFromUrl("dingtalk", ""), "");
+});
+
+test("模板元数据：token 输入框的标签与说明齐全", () => {
+  for (const kind of ["dingtalk", "wecom", "feishu"]) {
+    const template = WEBHOOK_TEMPLATES[kind];
+    assert.ok(template.label);
+    assert.ok(template.tokenLabel);
+    assert.ok(template.tokenHint);
+    assert.match(template.base, /^https:\/\//);
+  }
+});

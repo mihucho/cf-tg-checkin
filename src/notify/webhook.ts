@@ -31,6 +31,80 @@ export interface WebhookPayload {
   kind: WebhookKind;
 }
 
+export interface WebhookTemplate {
+  /** 固定地址前缀（token 拼在后面） */
+  base: string;
+  /** token 放在 query 的哪个参数上（自定义渠道为 null） */
+  queryKey: string | null;
+  label: string;
+  tokenLabel: string;
+  tokenHint: string;
+}
+
+/**
+ * 各渠道的固定地址：选了渠道就只剩「填 token」这一件事，不用自己拼 URL。
+ * 自定义渠道（自建服务）没有模板，仍然填完整地址。
+ */
+export const WEBHOOK_TEMPLATES: Record<Exclude<WebhookKind, "generic">, WebhookTemplate> = {
+  dingtalk: {
+    base: "https://oapi.dingtalk.com/robot/send",
+    queryKey: "access_token",
+    label: "钉钉自定义机器人",
+    tokenLabel: "机器人 Token（access_token）",
+    tokenHint: "钉钉群 → 群设置 → 机器人 → 自定义机器人 → Webhook 地址里 &access_token= 后面那一段。",
+  },
+  wecom: {
+    base: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send",
+    queryKey: "key",
+    label: "企业微信群机器人",
+    tokenLabel: "机器人 Key",
+    tokenHint: "企业微信群 → 群机器人 → 添加后 Webhook 地址里 key= 后面那一段。",
+  },
+  feishu: {
+    base: "https://open.feishu.cn/open-apis/bot/v2/hook",
+    queryKey: null,
+    label: "飞书自定义机器人",
+    tokenLabel: "机器人 Token",
+    tokenHint: "飞书群 → 设置 → 群机器人 → 自定义机器人 → Webhook 地址最后那一段。",
+  },
+};
+
+/** 用固定模板 + token 拼出地址（token 里如果是一整个 URL，会先把 token 抠出来） */
+export function webhookUrlFromToken(kind: WebhookKind, rawToken: string): string {
+  const value = String(rawToken ?? "").trim();
+  if (!value) return "";
+  const template = kind === "generic" ? null : WEBHOOK_TEMPLATES[kind];
+  if (!template) return value; // 自定义渠道：原样当地址用
+
+  // 用户直接粘了完整地址 / 自带参数时，先把 token 解析出来
+  const token = webhookTokenFromUrl(kind, value) || value;
+  // token 里混进了别的 query（很少见）：只取第一段
+  const clean = token.split(/[&#?]/)[0] ?? "";
+  if (!clean) return "";
+  if (template.queryKey) {
+    return `${template.base}?${template.queryKey}=${encodeURIComponent(clean)}`;
+  }
+  return `${template.base}/${encodeURIComponent(clean)}`;
+}
+
+/** 从已保存的地址里把 token 抠回来，好回填到输入框 */
+export function webhookTokenFromUrl(kind: WebhookKind, rawUrl: string): string {
+  const value = String(rawUrl ?? "").trim();
+  if (!value) return "";
+  const template = kind === "generic" ? null : WEBHOOK_TEMPLATES[kind];
+  if (!template) return value;
+
+  try {
+    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    if (template.queryKey) return url.searchParams.get(template.queryKey) ?? "";
+    const marker = "/hook/";
+    const index = url.pathname.indexOf(marker);
+    return index >= 0 ? url.pathname.slice(index + marker.length) : url.pathname.split("/").filter(Boolean).pop() ?? "";
+  } catch {
+    return value;
+  }
+}
+
 /**
  * 把人填的地址补成完整 URL。
  *
@@ -45,12 +119,8 @@ export function normalizeWebhookUrl(rawValue: string, kind: WebhookKind): string
   if (/^https?:\/\//i.test(value)) return value;
   // 少了协议头（oapi.dingtalk.com/robot/send?access_token=…）
   if (/^[a-z0-9.-]+\.[a-z]{2,}\//i.test(value)) return `https://${value}`;
-  // 看起来就是裸 token（32 位以上的字母数字）
-  if (/^[A-Za-z0-9_-]{16,}$/.test(value)) {
-    if (kind === "dingtalk") return `https://oapi.dingtalk.com/robot/send?access_token=${value}`;
-    if (kind === "wecom") return `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=${value}`;
-    if (kind === "feishu") return `https://open.feishu.cn/open-apis/bot/v2/hook/${value}`;
-  }
+  // 看起来就是裸 token（16 位以上的字母数字）：按渠道模板拼
+  if (/^[A-Za-z0-9_-]{16,}$/.test(value)) return webhookUrlFromToken(kind, value);
   return value;
 }
 

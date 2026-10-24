@@ -37,7 +37,14 @@ import { describeLowRate, pickLowRateTasks, taskRates } from "./notify/rate";
 import { buildTestMessage } from "./notify/test";
 import { NOTIFY_EVENTS, isNotifyEventId, isThrottledEvent, normalizeNotifyEvents } from "./notify/events";
 import type { NotifyEventId } from "./notify/events";
-import { buildWebhookPayload, detectWebhookKind, normalizeWebhookUrl, parseWebhookResult } from "./notify/webhook";
+import {
+  WEBHOOK_TEMPLATES,
+  buildWebhookPayload,
+  detectWebhookKind,
+  normalizeWebhookUrl,
+  parseWebhookResult,
+  webhookUrlFromToken,
+} from "./notify/webhook";
 import { createTgClient, createTgClientOnDc, errorMessage, isConnectionError, migrateDcFromError } from "./telegram/client";
 import { executeTask, resolveEntity, type ExecHooks } from "./telegram/executor";
 import { computeNextRun, formatInTimezone, localDayElapsedMs } from "./schedule/time";
@@ -198,12 +205,19 @@ export class TgAgent implements DurableObject {
       if (colo && this.store.getKv("runtime:colo") !== colo) this.store.setKv("runtime:colo", colo);
       if (path === "/state" && method === "GET") return json(this.buildState());
       if (path === "/settings" && method === "POST") {
-        const body = (await request.json()) as Partial<Settings> & {
+        type SettingsBody = Partial<Settings> & {
           clearTurnstileSecret?: boolean;
           clearNotifyWebhookSecret?: boolean;
+          notifyWebhookToken?: string;
         };
-        const { clearTurnstileSecret, clearNotifyWebhookSecret, ...rest } = body;
+        const body = (await request.json()) as SettingsBody;
+        const { clearTurnstileSecret, clearNotifyWebhookSecret, notifyWebhookToken, ...rest } = body;
         const patch: Partial<Settings> = { ...rest };
+        // 固定渠道（钉钉/企微/飞书）只要 token，地址由模板生成
+        if (notifyWebhookToken !== undefined) {
+          const kind = (patch.notifyWebhookKind ?? this.store.getSettings().notifyWebhookKind ?? "generic") as WebhookKind;
+          patch.notifyWebhook = webhookUrlFromToken(kind, notifyWebhookToken);
+        }
         if (clearTurnstileSecret) patch.turnstileSecretKey = "";
         const before = this.store.getSettings();
         const saved = this.store.saveSettings(sanitizeSettings(patch));
@@ -336,12 +350,13 @@ export class TgAgent implements DurableObject {
         const overlay = (await request.json().catch(() => ({}))) as Partial<Settings>;
         const stored = this.store.getSettings();
         const merged = { ...stored, ...sanitizeSettings(overlay) };
+        const overlayKind = (merged.notifyWebhookKind ?? "generic") as WebhookKind;
+        const overlayToken = String((overlay as { notifyWebhookToken?: string }).notifyWebhookToken ?? "");
         const settings: Settings = {
           ...merged,
-          notifyWebhook: normalizeWebhookUrl(
-            String(overlay.notifyWebhook ?? stored.notifyWebhook ?? ""),
-            merged.notifyWebhookKind ?? "generic",
-          ),
+          notifyWebhook: overlayToken
+            ? webhookUrlFromToken(overlayKind, overlayToken)
+            : normalizeWebhookUrl(String(overlay.notifyWebhook ?? stored.notifyWebhook ?? ""), overlayKind),
           // 密钥留空表示沿用已保存的（和保存设置的语义一致）
           notifyWebhookSecret: String(overlay.notifyWebhookSecret ?? "").trim() || stored.notifyWebhookSecret,
         };

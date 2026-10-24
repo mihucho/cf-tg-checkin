@@ -2627,18 +2627,34 @@ function renderSettings() {
       id: "settings-notifyWebhookKind",
       label: "Webhook 渠道",
       control: selectControl("notifyWebhookKind", settings.notifyWebhookKind || "generic", [
-        ["generic", "通用 JSON（自建服务）"],
         ["dingtalk", "钉钉自定义机器人"],
         ["wecom", "企业微信群机器人"],
         ["feishu", "飞书自定义机器人"],
+        ["generic", "自定义渠道（自建服务）"],
       ]),
-      hint: "按你填的地址手动选；选错会推不上去（各家的包体格式不一样）。",
+      hint: "选了渠道地址就固定了，只需要填机器人的 Token；自建服务才填完整地址。",
     }),
+    el(
+      "div",
+      { class: "field", id: "settings-webhook-token-field" },
+      el("label", { class: "field-label", for: "settings-notifyWebhookToken" }, WEBHOOK_TOKEN_LABEL[settings.notifyWebhookKind || "generic"] || "机器人 Token"),
+      el("input", {
+        class: "input",
+        id: "settings-notifyWebhookToken",
+        name: "notifyWebhookToken",
+        type: "password",
+        autocomplete: "off",
+        spellcheck: "false",
+        placeholder: "粘贴机器人 Token，或整条 Webhook 地址",
+        value: WEBHOOK_TOKEN_OF(settings),
+      }),
+      el("p", { class: "field-hint", id: "settings-webhook-url-hint" }, WEBHOOK_URL_HINT[settings.notifyWebhookKind || "generic"] || ""),
+    ),
     field({
       id: "settings-notifyWebhook",
       label: "Webhook 地址",
-      control: textControl("notifyWebhook", settings.notifyWebhook ?? "", "https://oapi.dingtalk.com/robot/send?access_token=…"),
-      hint: "失败时推一条消息过去，同一任务 1 小时内最多提醒一次。只粘 access_token 也行（会按渠道自动补全成完整地址）；机器人若设了「关键词」安全设置，消息里需要包含该关键词（标题固定含「失败」二字）。",
+      control: textControl("notifyWebhook", settings.notifyWebhook ?? "", "https://你的服务/hook"),
+      hint: "自定义渠道：失败时 POST 一份 JSON 过去（含 taskId / taskName / message / text / at）。",
     }),
     field({
       id: "settings-notifyWebhookSecret",
@@ -2679,9 +2695,12 @@ function renderSettings() {
                 const node = form && form.elements.namedItem(name);
                 return Boolean(node && node.checked);
               };
+              const kind = read("notifyWebhookKind") || "generic";
               const overlay = {
-                notifyWebhook: read("notifyWebhook"),
-                notifyWebhookKind: read("notifyWebhookKind") || "generic",
+                notifyWebhookKind: kind,
+                ...(kind === "generic"
+                  ? { notifyWebhook: read("notifyWebhook") }
+                  : { notifyWebhookToken: read("notifyWebhookToken") }),
                 notifyOnFailure: checked("notifyOnFailure"),
                 notifyEvents: [...(form ? form.querySelectorAll('input[name="notifyEvents"]:checked') : [])].map(
                   (node) => node.value,
@@ -2774,6 +2793,37 @@ function renderSettings() {
       el("button", { class: "btn btn-primary", type: "submit" }, "保存设置"),
     ),
   );
+
+  // 渠道一换，token / 地址输入框就互斥显示
+  const kindSelect = form.querySelector('#settings-notifyWebhookKind');
+  const tokenField = form.querySelector('#settings-webhook-token-field');
+  const urlField = form.querySelector('#settings-notifyWebhook')?.closest(".field");
+  const tokenLabel = tokenField?.querySelector(".field-label");
+  const urlHint = form.querySelector('#settings-webhook-url-hint');
+  const syncWebhookFields = () => {
+    const kind = kindSelect ? kindSelect.value : "generic";
+    const custom = kind === "generic";
+    if (tokenField) tokenField.hidden = custom;
+    if (urlField) urlField.hidden = !custom;
+    if (tokenLabel) tokenLabel.textContent = WEBHOOK_TOKEN_LABEL[kind] || "机器人 Token";
+    if (urlHint) urlHint.textContent = WEBHOOK_URL_HINT[kind] || "";
+    const signField = form.querySelector('#settings-notifyWebhookSecret')?.closest(".field");
+    const signClearRow = form.querySelector('#settings-clearNotifyWebhookSecret')?.closest(".check-row");
+    if (signField) signField.hidden = kind !== "dingtalk";
+    if (signClearRow) signClearRow.hidden = kind !== "dingtalk";
+  };
+  // 换渠道时把上一家的 token 清掉：不同平台的 token 不通用，
+  // 留着很容易「切到钉钉但填的是企微 key」，然后一直 300005。
+  let lastKind = kindSelect ? kindSelect.value : "generic";
+  const tokenInput = form.querySelector("#settings-notifyWebhookToken");
+  kindSelect?.addEventListener("change", () => {
+    const kind = kindSelect.value;
+    if (tokenInput && kind !== lastKind) tokenInput.value = "";
+    lastKind = kind;
+    syncWebhookFields();
+  });
+  syncWebhookFields();
+
 
   return frag(
     pageHead({ title: "设置", description: "执行时间、消息指令与登录安全。" }),
@@ -2920,6 +2970,37 @@ async function sendTestNotification(panel, overlay = {}) {
   }
 }
 
+const WEBHOOK_TOKEN_LABEL = {
+  dingtalk: "机器人 Token（access_token）",
+  wecom: "机器人 Key",
+  feishu: "机器人 Token",
+  generic: "Webhook 地址",
+};
+
+const WEBHOOK_URL_HINT = {
+  dingtalk: "固定推送到 https://oapi.dingtalk.com/robot/send?access_token=<Token>（加签密钥在下面单独填）",
+  wecom: "固定推送到 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=<Key>",
+  feishu: "固定推送到 https://open.feishu.cn/open-apis/bot/v2/hook/<Token>",
+  generic: "自建服务：填完整地址，内容是一份通用 JSON。",
+};
+
+/** 已保存的完整地址 → 回填到输入框的 token */
+function WEBHOOK_TOKEN_OF(settings) {
+  const kind = settings.notifyWebhookKind || "generic";
+  const url = String(settings.notifyWebhook || "");
+  if (!url) return "";
+  if (kind === "generic") return url;
+  try {
+    const parsed = new URL(url);
+    if (kind === "wecom") return parsed.searchParams.get("key") || "";
+    if (kind === "dingtalk") return parsed.searchParams.get("access_token") || "";
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    return parts[parts.length - 1] || "";
+  } catch {
+    return url;
+  }
+}
+
 function selectControl(name, value, options) {
   const node = el("select", { class: "input", id: `settings-${name}`, name });
   for (const [optionValue, label] of options) {
@@ -2987,7 +3068,9 @@ async function saveSettings(event) {
     stepWaitSeconds,
     triggerPrefix: read("triggerPrefix").trim(),
     notifyOnFailure: checked("notifyOnFailure"),
-    notifyWebhook: read("notifyWebhook").trim(),
+    ...(read("notifyWebhookKind") === "generic" || !read("notifyWebhookKind")
+      ? { notifyWebhook: read("notifyWebhook").trim() }
+      : { notifyWebhookToken: read("notifyWebhookToken").trim() }),
     notifyWebhookKind: read("notifyWebhookKind") || "generic",
     notifyEvents: [...form.querySelectorAll('input[name="notifyEvents"]:checked')].map((node) => node.value),
     digestHour: Number(read("digestHour") || 22),
