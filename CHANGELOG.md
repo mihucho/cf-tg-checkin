@@ -30,6 +30,17 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-24
+
+- **测试结果回显「推送地址」**：`webhook.target` 带打码后的地址
+  （`https://oapi.dingtalk.com/robot/send?access_token=7629…4acd`），
+  一眼能看出"到底推到哪了"——填错渠道/只填 token 时不用再猜
+- **修测试通知的误导性报错**：地址里只有 token（旧版本没有 token 输入框时很常见）时，
+  原来统一报「还没有填 Webhook 地址」，看起来像"我明明填了"。现在区分两种情况：
+  - 空 → 还没有填 Webhook 地址
+  - 有内容但不是 `http(s)://` 开头 → `地址不完整：「76296f36…」——钉钉/企微/飞书请填机器人 Token，
+    自定义渠道请填 http(s):// 开头的完整地址`
+
 ## [0.17.0] - 2026-10-24
 
 **Webhook 按渠道固定地址**：选了渠道就只剩「填 Token」一件事，不用自己拼 URL。

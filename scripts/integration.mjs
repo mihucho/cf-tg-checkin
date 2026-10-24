@@ -273,6 +273,22 @@ async function main() {
       overlayTest.result?.webhook?.kind === "feishu",
       JSON.stringify(overlayTest.result?.webhook),
     );
+    check(
+      "测试结果回显推送地址（token 打码）",
+      /^https?:\/\/127\.0\.0\.1:9\/nowhere/.test(String(overlayTest.result?.webhook?.target ?? "")),
+      String(overlayTest.result?.webhook?.target),
+    );
+    const tokenOverlay = await post("/api/notify/test", {
+      notifyWebhookKind: "dingtalk",
+      notifyWebhookToken: "integration-token-2",
+    });
+    check(
+      "测试也支持只传 token（自动拼渠道地址）",
+      String(tokenOverlay.result?.webhook?.target ?? "").startsWith(
+        "https://oapi.dingtalk.com/robot/send?access_token=inte",
+      ),
+      String(tokenOverlay.result?.webhook?.target),
+    );
     const stateAfterTest = await get("/api/state");
     check(
       "测试不会写入设置",

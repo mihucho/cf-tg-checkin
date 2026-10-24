@@ -125,6 +125,31 @@ export function normalizeWebhookUrl(rawValue: string, kind: WebhookKind): string
 }
 
 /**
+ * 打码后的地址，用于「测试通知」结果里回显——只露域名和 token 首尾，
+ * 既能让人确认"到底推去了哪"，又不会把 token 打进日志/截图。
+ */
+export function maskWebhookUrl(rawUrl: string): string {
+  const value = String(rawUrl ?? "").trim();
+  if (!value) return "";
+  // 不是地址（只填了 token 之类）就原样露出前几位，别再套一层 https:// 误导人
+  if (!/^https?:\/\//i.test(value) && !/^[a-z0-9.-]+\.[a-z]{2,}(\/|$|\?)/i.test(value)) {
+    return `${value.slice(0, 12)}${value.length > 12 ? "…" : ""}`;
+  }
+  try {
+    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    const masked = url.search.replace(/([?&][^=]+=)([^&]*)/g, (_all, prefix: string, val: string) => {
+      const shown = val.length <= 8 ? val : `${val.slice(0, 4)}…${val.slice(-4)}`;
+      return `${prefix}${shown}`;
+    });
+    const path = url.pathname.replace(/\/([A-Za-z0-9_-]{12,})$/, "/$1".replace("$1", "…"));
+    return `${url.protocol}//${url.host}${path || "/"}${masked}`;
+  } catch {
+    // 压根不是地址（比如只填了 token）：原样露出前 12 个字符，方便看出填错了
+    return `${value.slice(0, 12)}${value.length > 12 ? "…" : ""}`;
+  }
+}
+
+/**
  * 老配置没有 `notifyWebhookKind` 时用来兜底猜一次（之后以设置里的手动选择为准）。
  */
 export function detectWebhookKind(rawUrl: string): WebhookKind {

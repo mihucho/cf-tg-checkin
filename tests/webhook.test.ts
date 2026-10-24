@@ -273,3 +273,23 @@ test("模板元数据：token 输入框的标签与说明齐全", () => {
     assert.match(template.base, /^https:\/\//);
   }
 });
+
+/* ------------------------------------------------ 地址打码 */
+
+import { maskWebhookUrl } from "../src/notify/webhook.ts";
+
+test("maskWebhookUrl：保留域名，token 只露首尾", () => {
+  assert.equal(
+    maskWebhookUrl("https://oapi.dingtalk.com/robot/send?access_token=76296f3669f0c48fab916ed96cc183cc"),
+    "https://oapi.dingtalk.com/robot/send?access_token=7629…83cc",
+  );
+  assert.equal(
+    maskWebhookUrl("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdefghijkl"),
+    "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcd…ijkl",
+  );
+});
+
+test("maskWebhookUrl：填的不是地址时别套 https://", () => {
+  assert.equal(maskWebhookUrl("76296f3669f0c48fab916ed996cc183cc"), "76296f3669f0…");
+  assert.equal(maskWebhookUrl(""), "");
+});
