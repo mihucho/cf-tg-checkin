@@ -232,6 +232,27 @@ export class Store {
     return rows.length ? rowToTask(rows[0]) : null;
   }
 
+  /**
+   * 找「同一个目标 + 同样的调度 + 同样的动作」的任务。
+   * 用于阻止同一条触发配置被发多次、或反复点保存造成的重复任务（到点会连着发好几条）。
+   */
+  findDuplicateTask(input: TaskInput): Task | null {
+    const targetKey = (input.target?.username || input.target?.id || "").toString().toLowerCase();
+    const scheduleKey = JSON.stringify(input.schedule ?? {});
+    const stepsKey = JSON.stringify(input.steps ?? []);
+    if (!targetKey || !stepsKey) return null;
+    for (const task of this.listTasks()) {
+      if ((task.target.username || task.target.id || "").toLowerCase() !== targetKey) continue;
+      if (JSON.stringify(task.schedule) !== scheduleKey) continue;
+      if (JSON.stringify(task.steps) !== stepsKey) continue;
+      if ((task.threadId ?? null) !== (input.threadId ?? null)) continue;
+      // 名字不同视为"有意为之"（比如同一动作跑到不同话题/不同备注），不拦
+      if (task.name !== input.name) continue;
+      return task;
+    }
+    return null;
+  }
+
   createTask(input: TaskInput, now: number, nextRunAt: number | null): Task {
     this.sql.exec(
       `INSERT INTO tasks (name, enabled, target, thread_id, schedule, steps, success_keywords,

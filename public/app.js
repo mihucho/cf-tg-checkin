@@ -668,6 +668,19 @@ function renderTasks() {
     btn(label, { variant, iconName: "plus", onClick: () => openEditor(null) });
   const newBtn = newTaskBtn();
 
+  // 检出重复任务（同目标 + 同调度 + 同动作）：它们会同时触发，看起来像"连发好几次"
+  const buckets = new Map();
+  for (const task of tasks) {
+    const key = [
+      task.target && (task.target.username || task.target.id),
+      JSON.stringify(task.schedule || {}),
+      JSON.stringify(task.steps || []),
+    ].join("|");
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(task);
+  }
+  const duplicates = [...buckets.values()].filter((group) => group.length > 1);
+
   const header = pageHead({
     title: "任务",
     description: tasks.length
