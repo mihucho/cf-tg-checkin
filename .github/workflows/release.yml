@@ -1,0 +1,124 @@
+name: Release
+
+# 只有「发布说明文档」被改动时才发版；也可以在 Actions 页面手动跑
+on:
+  push:
+    branches: [main]
+    paths:
+      - "releases/unreleased.md"
+  workflow_dispatch:
+
+permissions:
+  contents: write # 打 tag / 建 Release / 回写文件
+  actions: write # 触发部署工作流（GITHUB_TOKEN 的 push 不会触发其他工作流）
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # 用 PAT 时，push 出去的 commit 才能触发部署工作流；没有 PAT 就走后面的 gh workflow run
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 解析发布文档
+        id: prepare
+        run: node scripts/release.mjs
+
+      - name: 不是可发布的文档，直接跳过
+        if: steps.prepare.outputs.mode == 'skip'
+        run: |
+          echo "发布文档还是模板（version 0.0.0），跳过" >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+      - name: 装依赖
+        if: steps.prepare.outputs.mode == 'bump'
+        run: npm ci
+
+      - name: 发版前跑一遍检查（不然不发）
+        if: steps.prepare.outputs.mode == 'bump'
+        run: |
+          npm run typecheck
+          npm test
+          node build.mjs
+          npm run check:bundle
+
+      - name: 提交版本号 / CHANGELOG / 归档文档
+        if: steps.prepare.outputs.mode == 'bump'
+        env:
+          VERSION: ${{ steps.prepare.outputs.version }}
+          TITLE: ${{ steps.prepare.outputs.title }}
+          NOTES_FILE: ${{ steps.prepare.outputs.notes_file }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json CHANGELOG.md releases
+          if git diff --cached --quiet; then
+            echo "没有需要提交的改动（可能已经发过这个版本）"
+          else
+            git commit -m "chore(release): $TITLE"
+            git push origin HEAD:main
+          fi
+
+      - name: 打 tag（已存在则跳过）
+        env:
+          VERSION: ${{ steps.prepare.outputs.version }}
+          TAG: ${{ steps.prepare.outputs.tag }}
+          NOTES_FILE: ${{ steps.prepare.outputs.notes_file }}
+        run: |
+          set -euo pipefail
+          if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "tag $TAG 已存在，跳过创建"
+          else
+            git tag -a "$TAG" -F "$NOTES_FILE"
+            git push origin "$TAG"
+          fi
+
+      - name: 创建 GitHub Release（已存在则更新说明）
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.prepare.outputs.tag }}
+          TITLE: ${{ steps.prepare.outputs.title }}
+          NOTES_FILE: ${{ steps.prepare.outputs.notes_file }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，更新说明"
+            gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE"
+          else
+            gh release create "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE" --verify-tag
+          fi
+
+      - name: 触发部署（把这一版发到线上）
+        if: steps.prepare.outputs.mode == 'bump'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: gh workflow run deploy.yml --ref main
+
+      - name: 结果
+        if: always()
+        env:
+          MODE: ${{ steps.prepare.outputs.mode }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+          TAG: ${{ steps.prepare.outputs.tag }}
+          TITLE: ${{ steps.prepare.outputs.title }}
+        run: |
+          {
+            echo "### release: $MODE"
+            echo ""
+            echo "- tag: \`$TAG\`"
+            echo "- version: \`$VERSION\`"
+            echo "- title: $TITLE"
+          } >> "$GITHUB_STEP_SUMMARY"

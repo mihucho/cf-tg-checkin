@@ -288,6 +288,33 @@ npx wrangler deploy --var DO_LOCATION_HINT:apac   # apac/enam/weur/eeur/me/afr/o
 
 ---
 
+## 发版（改文档即发布）
+
+发布说明就是 `releases/unreleased.md`。改它并 push 到 `main`，`.github/workflows/release.yml` 会自动：
+
+1. 解析文档头部的 `version` / `title`
+2. **版本号 > 当前版本** → 跑 typecheck + 单测 + 打包自检，通过后写 `package.json`、插入 `CHANGELOG.md`、
+   把文档归档到 `releases/archive/vX.Y.Z.md` 并重置模板，提交、打 annotated tag、建 GitHub Release、触发部署
+3. **版本号 = 当前版本** → 只补 tag / GitHub Release（代码已发布、说明写晚了的情况）
+4. **还是模板（`version: 0.0.0`）** → 直接跳过
+
+```bash
+# 日常发版就三步
+$EDITOR releases/unreleased.md      # 改 version + 写说明
+git add releases/unreleased.md
+git commit -m "docs(release): v0.18.0" && git push
+```
+
+本地预览会做哪些改动（不落盘）：
+
+```bash
+node scripts/release.mjs --dry-run
+```
+
+> 只有这个文件会触发发布工作流，其它改动走普通 CI。
+> 若配了 `RELEASE_TOKEN`（带 `repo` 权限的 PAT）就用它 push，这样部署工作流会被正常触发；
+> 没配时改用 `gh workflow run deploy.yml` 兜底。
+
 ## 开发
 
 ```bash

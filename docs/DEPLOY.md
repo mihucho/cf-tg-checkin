@@ -336,3 +336,23 @@ curl -s https://cf-tg-checkin.<你的子域>.workers.dev/api/version
 | 部署后 404 / 页面白屏 | `public/` 没一起上传；确认 `wrangler.jsonc` 的 `assets.directory` |
 | 报 Durable Object 相关错误 | 改过 `migrations` tag 或类名；需要新增 migration 而不是改旧的 |
 | 想省钱 | 设置页把「触发轮询间隔」调大（如 300 秒），DO 请求次数会明显下降 |
+
+
+---
+
+## 发布新版本
+
+版本说明写在 `releases/unreleased.md`（front matter 里 `version` + `title`，分隔线下面是 Release notes），
+push 到 `main` 后由 `.github/workflows/release.yml` 自动完成：
+
+| 文档里的 version | 行为 |
+| --- | --- |
+| 大于 `package.json` | 跑检查 → bump 版本 → 插 CHANGELOG → 归档文档 → 打 tag → 建 Release → 触发部署 |
+| 等于当前版本 | 只补 tag / Release（重复执行安全） |
+| `0.0.0`（模板） | 跳过 |
+
+本地先看一眼：`node scripts/release.mjs --dry-run`。
+
+> 用默认 `GITHUB_TOKEN` 时，它 push 的 commit **不会**触发其它工作流，所以 workflow 里额外用
+> `gh workflow run deploy.yml` 显式触发部署。想让它像普通 push 一样自动级联，
+> 就在仓库 Secrets 里加 `RELEASE_TOKEN`（带 `repo` 权限的 PAT）。

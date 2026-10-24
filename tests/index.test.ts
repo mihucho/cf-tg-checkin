@@ -15,5 +15,6 @@ import "./webhook.test.ts";
 import "./digest.test.ts";
 import "./rate.test.ts";
 import "./notify-test.test.ts";
+import "./release-doc.test.ts";
 
 void runAll();
