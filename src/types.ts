@@ -109,6 +109,9 @@ export interface TaskTemplate {
 
 export type WebhookKind = "generic" | "dingtalk" | "wecom" | "feishu";
 
+export type { NotifyEventId } from "./notify/events";
+import type { NotifyEventId } from "./notify/events";
+
 export interface Settings {
   /** 时区偏移小时，可为小数（Asia/Shanghai = 8） */
   timezone: number;
@@ -125,8 +128,12 @@ export interface Settings {
   stepWaitSeconds: number;
   /** 触发前缀：只有以它开头的消息才当配置解析（默认 "tg"；设成空字符串表示全部都解析） */
   triggerPrefix: string;
-  /** 任务连续失败时提醒自己（Telegram 私聊） */
+  /** 是否也在 Telegram 里提醒自己（私聊）；关闭后只有 Webhook */
   notifyOnFailure: boolean;
+  /** 要通知的事件类型（见 NOTIFY_EVENTS；Webhook 与 Telegram 共用） */
+  notifyEvents: NotifyEventId[];
+  /** 日报发送时间（本地时区的小时，0-23） */
+  digestHour: number;
   /** 可选：失败提醒推送到这个 Webhook */
   notifyWebhook: string;
   /** 推送渠道（手动选择）：钉钉 / 企业微信 / 飞书 / 通用 JSON */
@@ -173,6 +180,8 @@ export interface AgentState {
   };
   now: number;
   /** 最小埋点计数（只统计次数与时间，不采集内容） */
+  /** 前端渲染「通知类型」多选用的目录（服务端是唯一来源） */
+  notifyCatalog?: Array<{ id: string; label: string; hint: string; throttled: boolean }>;
   events?: {
     trend?: Array<{ date: string; ok: number; fail: number }>;
     firstLoginAt: number | null;
@@ -205,6 +214,8 @@ export const DEFAULT_SETTINGS: Settings = {
   stepWaitSeconds: 30,
   triggerPrefix: "tg",
   notifyOnFailure: true,
+  notifyEvents: ["run_failed", "auto_paused", "session_expired", "connection_error", "daily_digest"],
+  digestHour: 22,
   notifyWebhook: "",
   notifyWebhookKind: "generic",
   notifyWebhookSecret: "",

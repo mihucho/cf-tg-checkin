@@ -270,8 +270,10 @@ npx wrangler deploy --var DO_LOCATION_HINT:apac   # apac/enam/weur/eeur/me/afr/o
 - 口令 + HMAC 签名的 HttpOnly Cookie（7 天有效，10 次失败/10 分钟锁定）
 - 可选 **Cloudflare Turnstile** 人机验证（设置页填 Key 即可，Secret 只存服务端、不回传）
 - 状态变更接口校验 `Origin`，CSP / nosniff / X-Frame-Options 等安全头齐全
-- 失败通知可推到 **钉钉 / 企业微信 / 飞书** 群机器人（设置里手动选渠道；钉钉支持「加签」密钥，
+- 通知可推到 **钉钉 / 企业微信 / 飞书** 群机器人（设置里手动选渠道；钉钉支持「加签」密钥，
   密钥只存服务端）或任意自建 Webhook（通用 JSON）
+- 通知类型**多选**：执行失败 / 连续失败自动暂停 / 失败后恢复 / 会话过期 / 连接异常 /
+  登录失败 / 执行成功 / 日报（日报每天固定时间汇总当天成败与失败任务）
 - 建议再叠一层 **Cloudflare Access** 并把 `ALLOWED_HOSTS` 设成你的自定义域名（否则 workers.dev 会绕过 Access）
 - Telegram session 只存在你自己的 Durable Object 里
 
