@@ -574,7 +574,7 @@ export class TgAgent implements DurableObject {
           /* 发不出去就只发 webhook */
         }
       }
-      await this.sendWebhook(settings, { title: content.title, text: content.text });
+      await this.sendWebhook(settings, { title: content.title, text: content.text, card: content.card });
       this.store.addLog({
         taskId: null,
         taskName: null,
@@ -665,7 +665,7 @@ export class TgAgent implements DurableObject {
           /* 发不出去就只发 webhook */
         }
       }
-      await this.sendWebhook(settings, { title: content.title, text: content.text });
+      await this.sendWebhook(settings, { title: content.title, text: content.text, card: content.card });
       this.store.addLog({
         taskId: null,
         taskName: null,
@@ -2195,7 +2195,13 @@ export class TgAgent implements DurableObject {
    */
   private async sendWebhook(
     settings: Settings,
-    message: { taskId?: number | null; taskName?: string | null; title: string; text: string },
+    message: {
+      taskId?: number | null;
+      taskName?: string | null;
+      title: string;
+      text: string;
+      card?: import("./notify/digest").DigestCard;
+    },
   ): Promise<boolean> {
     const webhook = (settings.notifyWebhook ?? "").trim();
     if (!webhook || !/^https?:\/\//i.test(webhook)) return false;

@@ -48,6 +48,7 @@
     "notifyOnFailure": true,     // 任务失败时给自己发一条 Telegram 消息
     "notifyWebhook": "",         // 可选：失败提醒推送到这个地址
     "notifyWebhookKind": "generic", // 推送渠道：generic | dingtalk | wecom | feishu（手动选择）
+                                    // 日报/周报：dingtalk+wecom 用 markdown 包体，feishu 用交互卡片
     "notifyWebhookSecret": "",   // 钉钉加签密钥：永远不回传，用 notifyWebhookSecretConfigured 表示是否已配
     "notifyWebhookSecretConfigured": false,
     "notifyEvents": ["run_failed", "auto_paused", "session_expired", "connection_error", "daily_digest"],

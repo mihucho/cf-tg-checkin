@@ -21,9 +21,26 @@ export interface DigestStats {
   lastMessage?: string | null;
 }
 
+/** 日报/周报的结构化内容：纯文本给 Telegram，卡片给钉钉/飞书 */
+export interface DigestCardRow {
+  label: string;
+  value: string;
+}
+
+export interface DigestCard {
+  title: string;
+  /** 两列「指标 → 数值」，在卡片里渲染成字段/表格 */
+  rows: DigestCardRow[];
+  /** 需要逐条列出的内容（失败任务等） */
+  bullets: string[];
+  /** 末尾的灰字备注 */
+  footnotes: string[];
+}
+
 export interface DigestContent {
   title: string;
   text: string;
+  card: DigestCard;
 }
 
 /**
@@ -68,30 +85,42 @@ export function buildDigest(stats: DigestStats, options: { timezone: number; now
   const date = `${parts.month}/${parts.day}`;
   const total = stats.ok + stats.fail;
   const title = `📊 签到日报 ${date}`;
-
+  const rows: DigestCardRow[] = [];
+  const bullets: string[] = [];
+  const footnotes: string[] = [];
   const lines: string[] = [];
+
   if (!total) {
     lines.push("今天没有任务执行记录。");
+    bullets.push("今天没有任务执行记录");
   } else {
     const rate = Math.round((stats.ok / total) * 100);
     lines.push(`执行 ${total} 次：成功 ${stats.ok} · 失败 ${stats.fail}（成功率 ${rate}%）`);
+    rows.push({ label: "执行次数", value: String(total) });
+    rows.push({ label: "成功 / 失败", value: `${stats.ok} / ${stats.fail}` });
+    rows.push({ label: "成功率", value: `${rate}%` });
   }
 
   if (stats.failedTasks.length) {
     const shown = stats.failedTasks.slice(0, 5);
     lines.push(`失败任务：${shown.join("、")}${stats.failedTasks.length > shown.length ? " 等" : ""}`);
+    bullets.push(...shown);
   }
 
   lines.push(`任务 ${stats.totalTasks} 个（启用 ${stats.enabledTasks}）`);
+  footnotes.push(`任务 ${stats.totalTasks} 个（启用 ${stats.enabledTasks}）`);
   if (stats.nextRunAt) {
     const next = localParts(stats.nextRunAt, options.timezone);
-    lines.push(
-      `下次执行：${next.month}/${next.day} ${String(next.hour).padStart(2, "0")}:${String(next.minute).padStart(2, "0")}`,
-    );
+    const text = `${next.month}/${next.day} ${String(next.hour).padStart(2, "0")}:${String(next.minute).padStart(2, "0")}`;
+    lines.push(`下次执行：${text}`);
+    footnotes.push(`下次执行 ${text}`);
   }
-  if (stats.lastMessage) lines.push(`最近一次：${stats.lastMessage.slice(0, 80)}`);
+  if (stats.lastMessage) {
+    lines.push(`最近一次：${stats.lastMessage.slice(0, 80)}`);
+    footnotes.push(`最近一次：${stats.lastMessage.slice(0, 80)}`);
+  }
 
-  return { title, text: lines.join("\n") };
+  return { title, text: lines.join("\n"), card: { title, rows, bullets, footnotes } };
 }
 
 /** 从当天日志里挑出失败的任务名（去重，保留最近的顺序；只算执行日志） */
@@ -180,36 +209,47 @@ export function buildWeeklyDigest(stats: WeeklyStats, options: { timezone: numbe
   const total = stats.ok + stats.fail;
   const prevTotal = stats.prevOk + stats.prevFail;
   const lines: string[] = [];
+  const rows: DigestCardRow[] = [];
+  const bullets: string[] = [];
+  const footnotes: string[] = [];
 
   if (!total && !prevTotal) {
     lines.push("本周没有任务执行记录。");
+    bullets.push("本周没有任务执行记录");
   } else {
     const rate = total ? Math.round((stats.ok / total) * 100) : 0;
     const prevRate = prevTotal ? Math.round((stats.prevOk / prevTotal) * 100) : null;
     lines.push(`本周执行 ${total} 次：成功 ${stats.ok} · 失败 ${stats.fail}（成功率 ${rate}%）`);
+    rows.push({ label: "本周执行", value: `${total} 次` });
+    rows.push({ label: "成功 / 失败", value: `${stats.ok} / ${stats.fail}` });
+    rows.push({ label: "本周成功率", value: `${rate}%` });
     if (prevRate === null) {
       lines.push("上周没有执行记录，无法对比。");
     } else {
       const diff = rate - prevRate;
       const arrow = diff > 0 ? "↑" : diff < 0 ? "↓" : "→";
       lines.push(`上周 ${prevTotal} 次 · 成功率 ${prevRate}%（${arrow} ${Math.abs(diff)} 个百分点）`);
+      rows.push({ label: "上周成功率", value: `${prevRate}%` });
+      rows.push({ label: "变化", value: `${arrow} ${Math.abs(diff)} 个百分点` });
     }
   }
 
   if (stats.topFailed.length) {
     const list = stats.topFailed.slice(0, 5).map((item) => `${item.name}（${item.count} 次）`).join("、");
     lines.push(`失败最多的任务：${list}`);
+    bullets.push(...stats.topFailed.slice(0, 5).map((item) => `${item.name} —— ${item.count} 次`));
   }
 
   lines.push(`任务 ${stats.totalTasks} 个（启用 ${stats.enabledTasks}）`);
+  footnotes.push(`任务 ${stats.totalTasks} 个（启用 ${stats.enabledTasks}）`);
   if (stats.nextRunAt) {
     const next = localParts(stats.nextRunAt, options.timezone);
-    lines.push(
-      `下次执行：${next.month}/${next.day} ${String(next.hour).padStart(2, "0")}:${String(next.minute).padStart(2, "0")}`,
-    );
+    const text = `${next.month}/${next.day} ${String(next.hour).padStart(2, "0")}:${String(next.minute).padStart(2, "0")}`;
+    lines.push(`下次执行：${text}`);
+    footnotes.push(`下次执行 ${text}`);
   }
 
-  return { title, text: lines.join("\n") };
+  return { title, text: lines.join("\n"), card: { title, rows, bullets, footnotes } };
 }
 
 /** 从日志里统计「每个任务失败几次」，降序返回 */
