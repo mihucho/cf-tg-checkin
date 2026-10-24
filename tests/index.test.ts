@@ -8,5 +8,6 @@ import "./guard.test.ts";
 import "./command.test.ts";
 import "./task.test.ts";
 import "./events.test.ts";
+import "./roundtrip.test.ts";
 
 void runAll();

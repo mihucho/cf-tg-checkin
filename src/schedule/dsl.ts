@@ -71,7 +71,21 @@ export function tokenize(input: string): string[] {
     }
   };
 
-  for (const char of input) {
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i] as string;
+
+    // 反斜杠转义：`\"` → 字面量引号，`\\` → 字面量反斜杠（指令里要能表示引号）
+    if (char === "\\") {
+      const next = input[i + 1];
+      if (next !== undefined) {
+        current += next;
+        i += 1;
+        continue;
+      }
+      current += char;
+      continue;
+    }
+
     if (quote) {
       if (char === quote) quote = null;
       else current += char;

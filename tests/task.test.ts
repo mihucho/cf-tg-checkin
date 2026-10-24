@@ -1,9 +1,10 @@
 /** 任务输入规范化 + 去重指纹 + 设置脱敏（正反例） */
 import assert from "node:assert/strict";
 import { test } from "./harness.ts";
-import { normalizeTaskInput, taskFingerprint } from "../src/task.ts";
+import { applyTargetPatch, normalizeTaskInput, taskFingerprint } from "../src/task.ts";
+import { taskToCommand } from "../src/schedule/command.ts";
 import { redactSettings, shouldAutoFillAdminId } from "../src/settings.ts";
-import { DEFAULT_SETTINGS, type TaskInput } from "../src/types.ts";
+import { DEFAULT_SETTINGS, type Task, type TaskInput } from "../src/types.ts";
 
 function input(patch: Partial<TaskInput> = {}): TaskInput {
   return {
@@ -155,4 +156,76 @@ test("DEFAULT_SETTINGS：触发前缀默认 tg，安全默认值", () => {
   assert.equal(DEFAULT_SETTINGS.stepPollSeconds, 3);
   assert.equal(DEFAULT_SETTINGS.stepWaitSeconds, 30);
   assert.equal(DEFAULT_SETTINGS.triggerEnabled, true);
+});
+
+/* ---------- 审计补丁：多目标补全只写回自己那一格 ---------- */
+const patchBase = {
+  enabled: true, threadId: null,
+  schedule: { kind: "daily" as const, time: "09:30", jitterSeconds: 0 },
+  successKeywords: [], timeoutSeconds: 30, stepDelaySeconds: 3,
+  deleteAfterSeconds: 0, cleanupPrevious: true, source: "ui" as const,
+};
+const multi = normalizeTaskInput({
+  ...patchBase,
+  name: "多目标",
+  target: { kind: "user", id: "a_bot", username: "a_bot" },
+  targets: [
+    { kind: "user", id: "a_bot", username: "a_bot" },
+    { kind: "user", id: "b_bot", username: "b_bot" },
+  ],
+  steps: [{ type: "text", text: "签到" }],
+}) as Task;
+
+test("审计：补全附加目标不会顶掉主目标", () => {
+  const patch = applyTargetPatch(multi, 1, {
+    kind: "user", id: "b_bot", username: "b_bot", title: "B Bot", accessHash: "999",
+  });
+  assert.equal(patch.target, undefined, "附加目标不能写 target 字段");
+  assert.equal(patch.name, undefined, "附加目标不能改任务名");
+  assert.equal(patch.targets?.length, 2);
+  assert.equal(patch.targets?.[0].username, "a_bot", "主目标必须保持不变");
+  assert.equal(patch.targets?.[1].title, "B Bot");
+
+  const primary = applyTargetPatch(multi, 0, {
+    kind: "user", id: "a_bot", username: "a_bot", title: "A Bot",
+  }, { renameTo: "A Bot 签到" });
+  assert.equal(primary.target?.title, "A Bot");
+  assert.equal(primary.targets?.[0].title, "A Bot");
+  assert.equal(primary.name, "A Bot 签到");
+});
+
+test("审计：指纹包含附加目标（不同附加目标不算重复）", () => {
+  const a = { ...patchBase, target: { kind: "user" as const, id: "a", username: "a" }, targets: [
+    { kind: "user" as const, id: "a", username: "a" },
+    { kind: "user" as const, id: "b", username: "b" },
+  ], steps: [{ type: "text" as const, text: "签到" }] };
+  const b = { ...a, targets: [
+    { kind: "user" as const, id: "a", username: "a" },
+    { kind: "user" as const, id: "c", username: "c" },
+  ] };
+  assert.notEqual(taskFingerprint(a), taskFingerprint(b));
+});
+
+test("审计：非数组入参不炸", () => {
+  const normalized = normalizeTaskInput({
+    name: "坏数据",
+    target: { kind: "user", id: "x", username: "x" },
+    targets: "abc",
+    steps: "oops",
+    successKeywords: "nope",
+    schedule: { kind: "daily", time: "09:30" },
+  } as unknown as TaskInput);
+  assert.deepEqual(normalized.steps, [{ type: "text", text: "" }].slice(0, 0));
+  assert.deepEqual(normalized.successKeywords, []);
+  assert.equal(normalized.targets, undefined);
+});
+
+test("审计：文本步骤带 say 前缀后仍可读", () => {
+  const task = normalizeTaskInput({
+    ...patchBase, name: "s", target: { kind: "user", id: "a", username: "a" },
+    steps: [{ type: "text", text: "签到" }, { type: "text", text: "btn:不是按钮" }],
+  });
+  const cmd = taskToCommand(task, "tg");
+  assert.match(cmd, /签到/);
+  assert.match(cmd, /say:btn:不是按钮/);
 });

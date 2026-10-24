@@ -28,7 +28,7 @@ import {
 import { messageTargetHint, usernameFromLink, type MessageLike, type MessageTargetHint } from "./telegram/targets";
 import type { Env } from "./env";
 import { bucketDaily } from "./events";
-import { normalizeTaskInput, taskFingerprint, taskToExport } from "./task";
+import { applyTargetPatch, normalizeTaskInput, taskFingerprint, taskToExport } from "./task";
 import { redactSettings, shouldAutoFillAdminId } from "./settings";
 
 interface Credentials {
@@ -280,6 +280,11 @@ export class TgAgent implements DurableObject {
       }
 
       if (path === "/auth/turnstile" && method === "GET") {
+        // 这个接口会回传 Turnstile 的 secret，只给 Worker 内部用：
+        // proxyToAgent 会重建请求头（只带 content-type / x-cf-colo），外部请求塞不进这个标记
+        if (request.headers.get("x-internal-call") !== "turnstile") {
+          return jsonError("仅限内部调用", 403);
+        }
         const settings = this.store.getSettings();
         const siteKey = (this.env.TURNSTILE_SITE_KEY ?? "").trim() || settings.turnstileSiteKey;
         const secretKey = (this.env.TURNSTILE_SECRET_KEY ?? "").trim() || settings.turnstileSecretKey;
@@ -1544,11 +1549,14 @@ export class TgAgent implements DurableObject {
   private async ensureTarget(
     client: TelegramClient,
     task: Task,
-  ): Promise<{ entity: Awaited<ReturnType<typeof resolveEntity>>; task: Task }> {
-    const entity = await resolveEntity(client, task.target);
+    index = 0,
+  ): Promise<{ entity: Awaited<ReturnType<typeof resolveEntity>>; task: Task; target: Target }> {
+    const targets = task.targets && task.targets.length > 1 ? task.targets : null;
+    const current: Target = (targets ? targets[index] : undefined) ?? task.target;
+    const entity = await resolveEntity(client, current);
 
     // 目标里缺 username / accessHash / 显示名时补一次，之后每次解析都能直接命中
-    if (!task.target.username || !task.target.accessHash || !task.target.title) {
+    if (!current.username || !current.accessHash || !current.title) {
       const peerId = await client.getPeerId(entity as never).catch(() => null);
       const anyEntity = entity as unknown as {
         username?: string;
@@ -1562,26 +1570,25 @@ export class TgAgent implements DurableObject {
         [anyEntity.firstName, anyEntity.lastName].filter(Boolean).join(" ").trim() ||
         undefined;
       const patch: Target = {
-        ...task.target,
-        id: peerId ? String(peerId) : task.target.id,
-        username: task.target.username ?? anyEntity.username,
-        title: task.target.title ?? displayName,
-        ...(task.target.accessHash
-          ? { accessHash: task.target.accessHash }
+        ...current,
+        id: peerId ? String(peerId) : current.id,
+        username: current.username ?? anyEntity.username,
+        title: current.title ?? displayName,
+        ...(current.accessHash
+          ? { accessHash: current.accessHash }
           : anyEntity.accessHash !== undefined && anyEntity.accessHash !== null
             ? { accessHash: String(anyEntity.accessHash) }
             : {}),
       };
-      if (JSON.stringify(patch) !== JSON.stringify(task.target)) {
-        // 任务名如果是当初按「@username + 动作」自动生成的，跟着换成显示名
-        const renamed = renameForTarget(task.name, task.target, patch);
-        const renameTo = renamed !== task.name ? renamed : null;
 
-        const updated = this.store.updateTask(
-          task.id,
-          renameTo ? { target: patch, name: renameTo } : { target: patch },
-          Date.now(),
-        );
+      if (JSON.stringify(patch) !== JSON.stringify(current)) {
+        // 只有主目标能改任务名；附加目标只回写自己那一格（否则会顶掉主目标）
+        const renamed = applyTargetPatch(task, index, patch, {
+          renameTo: renameForTarget(task.name, current, patch) || null,
+        });
+        const renameTo = renamed.name ?? null;
+
+        const updated = this.store.updateTask(task.id, renamed, Date.now());
         this.store.addLog({
           taskId: task.id,
           taskName: renameTo ?? task.name,
@@ -1589,14 +1596,14 @@ export class TgAgent implements DurableObject {
           ok: true,
           level: "info",
           message: `目标已自动补全：${patch.title || (patch.username ? `@${patch.username}` : patch.id)}`,
-          source: "system",
           detail: renameTo ? `任务名同步更新为「${renameTo}」` : null,
+          source: "system",
         });
-        return { entity, task: updated ?? { ...task, target: patch, ...(renameTo ? { name: renameTo } : {}) } };
+        return { entity, task: updated ?? task, target: patch };
       }
     }
 
-    return { entity, task };
+    return { entity, task, target: current };
   }
 
   private async runSingleTask(
@@ -1614,13 +1621,14 @@ export class TgAgent implements DurableObject {
     try {
       const settings = this.store.getSettings();
       const targets = task.targets && task.targets.length > 1 ? task.targets : [task.target];
-      const outcomes: Array<{ target: import("./types").Target; outcome: Awaited<ReturnType<typeof executeTask>> }> = [];
+      const outcomes: Array<{ target: Target; outcome: Awaited<ReturnType<typeof executeTask>> }> = [];
 
-      for (const target of targets) {
-        const targetKey = (target.username || target.id || "").toLowerCase();
-        const prepared = await this.ensureTarget(client, { ...task, target });
+      for (const [index, target] of targets.entries()) {
+        const prepared = await this.ensureTarget(client, task, index);
+        const effective = prepared.target;
+        const targetKey = (effective.username || effective.id || target.username || target.id || "").toLowerCase();
         const previousForTarget = this.store.getJson<number[]>(`${sentKey}:${targetKey}`, []);
-        const outcome = await executeTask(client, { ...prepared.task, target }, {
+        const outcome = await executeTask(client, { ...prepared.task, target: effective }, {
           previousSent: previousForTarget,
           hooks,
           entity: prepared.entity,
@@ -1630,16 +1638,16 @@ export class TgAgent implements DurableObject {
         this.store.setJson(`${sentKey}:${targetKey}`, outcome.sent);
         if (task.deleteAfterSeconds > 0 && outcome.sent.length) {
           this.store.addDeletion(
-            outcome.chatId ?? target.id,
+            outcome.chatId ?? effective.id,
             outcome.sent,
             Date.now() + task.deleteAfterSeconds * 1000,
           );
         }
-        outcomes.push({ target, outcome });
+        outcomes.push({ target: effective, outcome });
 
         // 多目标时每个目标单独记一条日志，便于看出是哪个群失败
         if (targets.length > 1) {
-          const label = target.username ? `@${target.username}` : target.title || target.id;
+          const label = effective.username ? `@${effective.username}` : effective.title || effective.id;
           this.store.addLog({
             taskId: task.id,
             taskName: `${task.name} → ${label}`,

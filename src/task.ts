@@ -55,7 +55,7 @@ export function normalizeTaskInput(input: TaskInput | Task): TaskInput {
   if (schedule.kind === "interval") schedule.intervalMinutes = Math.max(1, Number(schedule.intervalMinutes ?? 60));
   schedule.jitterSeconds = Math.max(0, Math.min(3600, Number(schedule.jitterSeconds ?? 0)));
 
-  const steps = (input.steps ?? [])
+  const steps = (Array.isArray(input.steps) ? input.steps : [])
     .slice(0, 20)
     .map((step) => {
       if (step.type === "wait") {
@@ -64,7 +64,7 @@ export function normalizeTaskInput(input: TaskInput | Task): TaskInput {
       if (step.type === "random") {
         return {
           type: "random" as const,
-          options: (step.options ?? []).slice(0, 10).map((item) => clampText(item, MAX_STEP_TEXT)).filter(Boolean),
+          options: (Array.isArray(step.options) ? step.options : []).slice(0, 10).map((item) => clampText(item, MAX_STEP_TEXT)).filter(Boolean),
         };
       }
       if (step.type === "click") {
@@ -89,7 +89,9 @@ export function normalizeTaskInput(input: TaskInput | Task): TaskInput {
 
   const targets = dedupeTargets([
     normalizeTarget(input),
-    ...((input.targets ?? []).map((target) => normalizeTarget({ ...input, target } as TaskInput))),
+    ...((Array.isArray(input.targets) ? input.targets : []).map((target) =>
+      normalizeTarget({ ...input, target } as TaskInput),
+    )),
   ]);
 
   return {
@@ -100,7 +102,7 @@ export function normalizeTaskInput(input: TaskInput | Task): TaskInput {
     threadId: Number.isFinite(threadId) && threadId > 0 ? threadId : null,
     schedule,
     steps,
-    successKeywords: (input.successKeywords ?? [])
+    successKeywords: (Array.isArray(input.successKeywords) ? input.successKeywords : [])
       .slice(0, MAX_KEYWORDS)
       .map((keyword) => clampText(keyword, 60).trim())
       .filter(Boolean),
@@ -114,6 +116,35 @@ export function normalizeTaskInput(input: TaskInput | Task): TaskInput {
     lastResult: input.lastResult ?? null,
     lastMessage: input.lastMessage ?? null,
   };
+}
+
+/**
+ * 把「补全后的目标」写回任务的正确位置（纯函数）。
+ *
+ * 多目标任务里每个目标都会在运行时补 username / title / accessHash，
+ * 但**只有主目标能写 target 字段**，其余必须写回 targets[i]，
+ * 否则第 2 个目标会被当成主目标覆盖掉（还会按它改任务名）。
+ */
+export function applyTargetPatch(
+  task: Task,
+  index: number,
+  patch: Target,
+  options: { renameTo?: string | null } = {},
+): Partial<TaskInput> {
+  const targets = task.targets && task.targets.length > 1 ? task.targets : null;
+  const isPrimary = !targets || index <= 0;
+
+  if (isPrimary) {
+    return {
+      target: patch,
+      ...(targets ? { targets: [patch, ...targets.slice(1)] } : {}),
+      ...(options.renameTo ? { name: options.renameTo } : {}),
+    };
+  }
+
+  const nextTargets = targets.slice();
+  nextTargets[index] = patch;
+  return { targets: nextTargets };
 }
 
 /** 导出的任务：去掉运行态字段，只保留可重建的配置 */
@@ -138,13 +169,18 @@ export function taskToExport(task: Task): TaskInput {
 /** 判定"是不是同一个任务"用的指纹（不含 name，name 单独比较） */
 export function taskFingerprint(input: {
   target?: Target | null;
+  targets?: Target[] | null;
   schedule?: Schedule | null;
   steps?: Step[] | null;
   threadId?: number | null;
 }): string {
-  const targetKey = (input.target?.username || input.target?.id || "").toString().toLowerCase();
+  const keyOf = (target: Target | null | undefined) =>
+    `${(target?.username || target?.id || "").toString().toLowerCase()}#${target?.threadId ?? ""}`;
+  // 多目标任务要连附加目标一起算，否则「主目标相同、附加目标不同」会被误判成重复
+  const targetsKey = (input.targets ?? []).map(keyOf).join(",");
   return [
-    targetKey,
+    keyOf(input.target),
+    targetsKey,
     JSON.stringify(input.schedule ?? {}),
     JSON.stringify(input.steps ?? []),
     String(input.threadId ?? ""),
