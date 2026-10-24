@@ -49,7 +49,10 @@ export interface Task {
   id: number;
   name: string;
   enabled: boolean;
+  /** 主目标（兼容老字段） */
   target: Target;
+  /** 多目标：第一个与 target 相同；为空表示只有一个目标 */
+  targets?: Target[];
   threadId: number | null;
   schedule: Schedule;
   steps: Step[];
@@ -150,6 +153,13 @@ export interface AgentState {
     lastRunAt: number | null;
   };
   now: number;
+  /** 最小埋点计数（只统计次数与时间，不采集内容） */
+  events?: {
+    firstLoginAt: number | null;
+    tasksCreated: { ui: number; trigger: number };
+    runs: { ok: number; fail: number };
+    failureHandled: number;
+  };
   /** 运行时信息：最近一次请求来自哪个 colo、DO 创建区域提示 */
   runtime?: {
     colo: string | null;

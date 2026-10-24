@@ -120,6 +120,11 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
     stepDelaySeconds: task?.stepDelaySeconds ?? 3,
     deleteAfterSeconds: task?.deleteAfterSeconds ?? 0,
     cleanupPrevious: task ? Boolean(task.cleanupPrevious) : true,
+    // 多目标：第一个是主目标，其余放在这里（`|` 分隔）
+    extraTargets: (task?.targets ?? [])
+      .slice(1)
+      .map((target) => (target.username ? `@${target.username}` : String(target.id)))
+      .join(" | "),
   };
 
   /* ---------------- 基础字段 ---------------- */
@@ -691,6 +696,29 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
   const body = el(
     "div",
     { class: "editor" },
+    // 新建任务时给个「从模板开始」的入口（模板会覆盖当前表单内容）
+    !isEdit && typeof window.__openEditorTemplate === "function"
+      ? el(
+          "div",
+          { class: "template-chips" },
+          el("span", { class: "template-label" }, "套用模板"),
+          ...window.__openEditorTemplates().map((template) =>
+            el(
+              "button",
+              {
+                class: "chip chip-button",
+                type: "button",
+                title: template.desc,
+                onclick: () => {
+                  modal?.close();
+                  void window.__openEditorTemplate(template);
+                },
+              },
+              template.name,
+            ),
+          ),
+        )
+      : null,
     el(
       "div",
       { class: "editor-top" },
@@ -714,6 +742,22 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
         el("label", { class: "field-label", for: id("target") }, "目标会话"),
         el("div", { class: "input-row" }, targetInput, resolveButton),
         targetResult,
+        field({
+          id: id("extraTargets"),
+          label: "其他目标（可选）",
+          control: el("input", {
+            class: "input",
+            id: id("extraTargets"),
+            value: model.extraTargets,
+            placeholder: "@另一个群 | -1001234567890",
+            autocomplete: "off",
+            spellcheck: "false",
+            oninput: (event) => {
+              model.extraTargets = event.target.value;
+            },
+          }),
+          hint: "多个目标用 | 分隔，会依次执行同一组动作。最多 8 个，目标越多单次执行越慢。",
+        }),
       ),
     ),
     el(
@@ -929,6 +973,15 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
         }
         const target = buildTarget();
         if (!target) throw new Error("请填写任务目标，或使用设置里的默认目标");
+        const extraTargets = String(model.extraTargets || "")
+          .split("|")
+          .map((item) => item.trim())
+          .filter(Boolean)
+          .map((item) => ({
+            kind: item.startsWith("-100") ? "channel" : item.startsWith("-") ? "chat" : "user",
+            id: item.startsWith("@") ? item.slice(1) : item,
+            username: item.startsWith("@") ? item.slice(1) : undefined,
+          }));
         const schedule = buildSchedule();
         const steps = buildSteps();
         const keywords = String(model.successKeywords || "")
@@ -940,6 +993,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
           name,
           enabled: Boolean(model.enabled),
           target,
+          targets: extraTargets.length ? [target, ...extraTargets] : undefined,
           schedule,
           steps,
           successKeywords: keywords,

@@ -67,6 +67,7 @@
   "name": "xx bot 签到",
   "enabled": true,
   "target": { "kind": "user", "id": "7661096533", "title": "Jerry Bot", "username": "jerry_bot" },
+  "targets": [ /* 可选：多目标，第一项与 target 相同，最多 8 个 */ ],
                                     // title 是 Telegram 里显示的群名/机器人名，任务名优先用它
   "threadId": null,                 // 群组话题 id
   "schedule": {
@@ -137,6 +138,7 @@
 | --- | --- | --- |
 | GET | `/api/logs?page=1&pageSize=20&level=ok\|fail&taskId=<id>&q=<关键字>` | `{ logs: [LogEntry], total, page, pageSize, pages }` |
 | POST | `/api/logs/clear` | `{ ok: true }` |
+| POST | `/api/events` | `{ name: "failure_handled" \| "template_used" \| "command_copied" }` → `{ ok: true }`（白名单） |
 
 日志用**页码分页**：`page`（从 1 开始，越界会自动收敛到最后一页）+ `pageSize`（1–100，默认 20），
 响应带 `total` / `pages` 供前端渲染翻页条（`第 3 / 6 页 · 共 115 条`）。

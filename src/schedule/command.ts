@@ -10,6 +10,7 @@ import { defaultName } from "./dsl";
 export interface CommandSource {
   name?: string;
   target: Target;
+  targets?: Target[];
   schedule: Task["schedule"];
   steps: Step[];
   successKeywords?: string[];
@@ -89,7 +90,12 @@ export function taskToCommand(task: CommandSource, prefix = "tg"): string {
   if (trimmedPrefix) parts.push(trimmedPrefix);
 
   parts.push(scheduleToCommand(task.schedule));
-  parts.push(targetToCommand(task.target));
+  const targets = (task.targets ?? []).filter(Boolean);
+  if (targets.length > 1) {
+    parts.push(`到:${targets.map((item) => (item.username ? `@${item.username.replace(/^@/, "")}` : item.id)).join("|")}`);
+  } else {
+    parts.push(targetToCommand(task.target));
+  }
   parts.push(...stepsToCommand(task.steps ?? []));
 
   const keywords = (task.successKeywords ?? []).filter(Boolean);
