@@ -11,6 +11,16 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-24
+
+- **设置页重组**：12 个字段压成 4 个可折叠分组（执行 / 消息指令 / 登录与安全 / 关于），
+  折叠状态存 localStorage；底部固定「保存设置」条，长表单滚动时始终可见
+- **键盘可达性**：顶部 tab 已有 `aria-current="page"`；日志行补 `aria-controls` 指向详情区；
+  弹窗/抽屉关闭后焦点回到触发元素（沿用 openModal 的 restoreFocus）
+- **移动端 375px**：日志筛选两行（芯片 / 下拉+搜索）、分页条居中折行、
+  设置双列改单列、编辑器抽屉全屏、详情键值表标签收窄、≤420px 隐藏顶栏时钟
+- 截图：`docs/images/settings-turnstile.png`、`docs/images/mobile-settings.png`
+
 ## [0.6.0] - 2026-10-24
 
 P1 三项：

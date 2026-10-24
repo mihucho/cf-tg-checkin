@@ -1552,10 +1552,11 @@ function logItem(log) {
       )
     : null;
 
+  const detailId = `log-detail-${id}`;
   const detail = hasDetail || fixButton
     ? el(
         "div",
-        { class: "log-detail-wrap", hidden: !expanded },
+        { class: "log-detail-wrap", id: detailId, hidden: !expanded },
         hasDetail ? el("pre", { class: "log-detail" }, String(log.detail)) : null,
         fixButton ? el("div", { class: "log-actions" }, fixButton) : null,
       )
@@ -1568,6 +1569,7 @@ function logItem(log) {
       class: `log-head${expandable ? " is-expandable" : ""}`,
       type: expandable ? "button" : undefined,
       "aria-expanded": expandable ? String(expanded) : undefined,
+      "aria-controls": expandable ? detailId : undefined,
       onclick: expandable
         ? (event) => {
             const next = !state.expandedLogs.has(id);
@@ -2042,8 +2044,52 @@ async function logoutAccount() {
 
 /* --------------------------------------------------------------- 设置 */
 
+/** 设置页的分组容器（可折叠，状态记在 localStorage） */
+function settingsGroup(id, title, fields, { collapsed = false } = {}) {
+  const storageKey = `cf-tg.settings.group.${id}`;
+  let open = !collapsed;
+  try {
+    const saved = localStorage.getItem(storageKey);
+    if (saved === "0") open = false;
+    if (saved === "1") open = true;
+  } catch {
+    /* 隐私模式忽略 */
+  }
+
+  const body = el("div", { class: "settings-group-body" }, ...fields.filter(Boolean));
+  const chevron = el("span", { class: "settings-group-chevron" }, icon("chevron", { size: 14 }));
+  const toggle = el(
+    "button",
+    {
+      class: "settings-group-head",
+      type: "button",
+      "aria-expanded": String(open),
+      onclick: () => {
+        const next = body.hidden;
+        body.hidden = !next;
+        toggle.setAttribute("aria-expanded", String(next));
+        chevron.classList.toggle("is-open", next);
+        try {
+          localStorage.setItem(storageKey, next ? "1" : "0");
+        } catch {
+          /* ignore */
+        }
+      },
+    },
+    el("span", { class: "settings-group-title" }, title),
+    chevron,
+  );
+
+  body.hidden = !open;
+  chevron.classList.toggle("is-open", open);
+  return el("section", { class: "settings-group" }, toggle, body);
+}
+
 function renderSettings() {
   const settings = (state.data && state.data.settings) || {};
+  const account = (state.data && state.data.account) || {};
+  const runtime = (state.data && state.data.runtime) || {};
+
   const form = el("form", {
     class: "form-grid",
     id: "settings-form",
@@ -2056,7 +2102,9 @@ function renderSettings() {
     },
   });
 
-  form.append(
+  const meId = account.me && account.me.id ? String(account.me.id) : "";
+
+  const groupSchedule = settingsGroup("schedule", "执行", [
     el(
       "div",
       { class: "form-row" },
@@ -2067,88 +2115,75 @@ function renderSettings() {
         hint: "按小时计的 UTC 偏移。北京时间填 8，支持小数（如 5.5）。",
       }),
       field({
+        id: "settings-stepPollSeconds",
+        label: "按钮检测间隔（秒）",
+        control: numberControl("stepPollSeconds", settings.stepPollSeconds ?? 3, { step: "1", min: "1", max: "30" }),
+        hint: "机器人回复后，按此间隔检查下一步按钮是否出现。",
+      }),
+    ),
+    field({
+      id: "settings-stepWaitSeconds",
+      label: "按钮等待上限（秒）",
+      control: numberControl("stepWaitSeconds", settings.stepWaitSeconds ?? 30, { step: "5", min: "5", max: "300" }),
+      hint: "超过该时长仍无下一步按钮，则判定这一步失败。",
+    }),
+  ]);
+
+  const groupTrigger = settingsGroup("trigger", "消息指令", [
+    el(
+      "div",
+      { class: "field" },
+      el("span", { class: "field-label" }, "启用消息指令"),
+      el(
+        "label",
+        { class: "switch" },
+        el("input", { type: "checkbox", name: "triggerEnabled", checked: Boolean(settings.triggerEnabled) }),
+        el("span", { class: "switch-track", "aria-hidden": "true" }),
+        el("span", { class: "switch-text" }, "允许用 Telegram 消息管理任务"),
+      ),
+      el("p", { class: "field-hint" }, "关闭后不再读取新消息；已有任务的定时不受影响。"),
+    ),
+    el(
+      "div",
+      { class: "form-row" },
+      field({
+        id: "settings-controlChat",
+        label: "指令来源",
+        control: textControl("controlChat", settings.controlChat ?? "self", "self"),
+        hint: "默认 self（收藏夹）。也可填群组 @用户名 或数字 ID。",
+      }),
+      field({
         id: "settings-pollSeconds",
         label: "检查间隔（秒）",
         control: numberControl("pollSeconds", settings.pollSeconds ?? 60, { step: "5", min: "15", max: "3600" }),
         hint: "读取新消息的频率。越短越及时，但请求量也越大。",
       }),
     ),
-    el("div", { class: "form-section-title" }, "按钮等待"),
     el(
       "div",
       { class: "form-row" },
       field({
-        id: "settings-stepPollSeconds",
-        label: "检测间隔（秒）",
-        control: numberControl("stepPollSeconds", settings.stepPollSeconds ?? 3, {
-          step: "1",
-          min: "1",
-          max: "30",
-        }),
-        hint: "机器人回复后，按此间隔检查下一步按钮是否出现。",
+        id: "settings-triggerPrefix",
+        label: "指令前缀",
+        control: textControl("triggerPrefix", settings.triggerPrefix ?? "", "默认 tg；留空 = 解析全部"),
+        hint: "仅以该前缀开头的消息会被解析为指令。留空表示解析全部消息。",
       }),
       field({
-        id: "settings-stepWaitSeconds",
-        label: "等待上限（秒）",
-        control: numberControl("stepWaitSeconds", settings.stepWaitSeconds ?? 30, {
-          step: "5",
-          min: "5",
-          max: "300",
-        }),
-        hint: "超过该时长仍无下一步按钮，则判定这一步失败。",
+        id: "settings-adminUserId",
+        label: "管理员 ID",
+        control: textControl("adminUserId", settings.adminUserId ?? "", meId || "登录后自动填入", "numeric"),
+        hint: meId ? `仅该 Telegram 账号发出的指令有效（当前账号 ${meId}）。` : "登录后自动填入当前账号。",
       }),
     ),
-    el(
-      "div",
-      { class: "field" },
-      el("span", { class: "field-label" }, "消息指令"),
-      el(
-        "label",
-        { class: "switch" },
-        el("input", {
-          type: "checkbox",
-          name: "triggerEnabled",
-          checked: Boolean(settings.triggerEnabled),
-        }),
-        el("span", { class: "switch-track", "aria-hidden": "true" }),
-        el("span", { class: "switch-text" }, "允许用 Telegram 消息管理任务"),
-      ),
-      el("p", { class: "field-hint" }, "关闭后不再读取新消息；已有任务的定时不受影响。"),
-    ),
-    field({
-      id: "settings-controlChat",
-      label: "指令来源",
-      control: textControl("controlChat", settings.controlChat ?? "self", "self"),
-      hint: "默认 self（收藏夹）。也可填群组 @用户名 或数字 ID。",
-    }),
-    field({
-      id: "settings-triggerPrefix",
-      label: "指令前缀",
-      control: textControl("triggerPrefix", settings.triggerPrefix ?? "", "默认 tg；留空 = 所有消息都解析"),
-      hint: "仅以该前缀开头的消息会被解析为指令（如「tg 9.30 签到」）。留空表示解析全部消息。",
-    }),
-    field({
-      id: "settings-adminUserId",
-      label: "管理员 ID",
-      control: textControl(
-        "adminUserId",
-        settings.adminUserId ?? "",
-        (state.data && state.data.account && state.data.account.me && state.data.account.me.id) || "登录后自动填入",
-        "numeric",
-      ),
-      hint: `仅该 Telegram 账号发出的指令有效。默认填当前登录账号${
-        state.data && state.data.account && state.data.account.me
-          ? `（${state.data.account.me.id}）`
-          : "，登录后自动填入"
-      }。`,
-    }),
     field({
       id: "settings-defaultTarget",
       label: "默认目标",
       control: textControl("defaultTarget", settings.defaultTarget ?? "", "@username 或数字 id"),
       hint: "指令中未能识别目标时使用，例如 @jerry_bot。",
     }),
-    el("div", { class: "form-section-title" }, "失败提醒"),
+  ]);
+
+  const groupSecurity = settingsGroup("security", "登录与安全", [
     el(
       "div",
       { class: "check-row" },
@@ -2162,20 +2197,19 @@ function renderSettings() {
     ),
     field({
       id: "settings-notifyWebhook",
-      label: "Webhook（可选）",
+      label: "失败通知 Webhook（可选）",
       control: textControl("notifyWebhook", settings.notifyWebhook ?? "", "https://…"),
       hint: "失败时额外 POST 一个 JSON 到这个地址。同一任务 1 小时内最多提醒一次。",
     }),
-    el("div", { class: "form-section-title" }, "登录验证（Cloudflare Turnstile）"),
     field({
       id: "settings-turnstileSiteKey",
-      label: "站点密钥（Site Key）",
+      label: "Turnstile 站点密钥（Site Key）",
       control: textControl("turnstileSiteKey", settings.turnstileSiteKey ?? "", "例如 0x4AAAAAAA…"),
       hint: "Cloudflare 控制台 → Turnstile → Add site 里获取。填了才会在登录页出现验证框。",
     }),
     field({
       id: "settings-turnstileSecret",
-      label: "私钥（Secret Key）",
+      label: "Turnstile 私钥（Secret Key）",
       control: el("input", {
         class: "input",
         id: "settings-turnstileSecret",
@@ -2185,17 +2219,49 @@ function renderSettings() {
         spellcheck: "false",
         placeholder: settings.turnstileSecretConfigured ? "已配置（留空表示不修改）" : "例如 0x4AAAAAAA…",
       }),
-      hint: "只存在服务端，接口不会回传。留空保存 = 保持不变；要关闭验证请点下面的「清除」。",
+      hint: "只存在服务端，接口不会回传。留空保存 = 保持不变。",
     }),
     el(
       "div",
       { class: "check-row" },
       el("input", { type: "checkbox", id: "settings-clearTurnstile", name: "clearTurnstileSecret" }),
-      el("label", { for: "settings-clearTurnstile" }, "清除已保存的密钥（关闭人机验证）"),
+      el("label", { for: "settings-clearTurnstile" }, "清除已保存的私钥（关闭人机验证）"),
     ),
+  ]);
+
+  const groupAbout = settingsGroup(
+    "about",
+    "关于",
+    [
+      el(
+        "div",
+        { class: "stack-sm" },
+        el("div", { class: "about-build", id: "about-build" }, state.build ? "" : "读取中…"),
+        el(
+          "div",
+          { class: "about-build" },
+          `出口机房 ${runtime.colo || "未记录"}` + (runtime.locationHint ? ` · DO 区域 ${runtime.locationHint}` : ""),
+        ),
+        el(
+          "p",
+          { class: "hint" },
+          "管理界面是纯静态资源，版本号来自构建时注入的 git commit，可用 ",
+          el("code", {}, "/api/version"),
+          " 查看。",
+        ),
+      ),
+    ],
+    { collapsed: true },
+  );
+
+  form.append(
+    groupSchedule,
+    groupTrigger,
+    groupSecurity,
+    groupAbout,
     el(
       "div",
-      { class: "form-actions" },
+      { class: "form-actions form-actions-sticky" },
       el(
         "button",
         {
@@ -2214,34 +2280,10 @@ function renderSettings() {
   );
 
   return frag(
-    pageHead({ title: "设置", description: "执行时间、消息指令和默认目标。" }),
-    card({ title: "执行与消息指令", description: "保存后立即生效。", body: form }),
+    pageHead({ title: "设置", description: "执行时间、消息指令与登录安全。" }),
+    card({ title: "偏好设置", description: "保存后立即生效。", body: form }),
     testerCard(),
     triggerHelp(),
-    card({
-      title: "关于",
-      description: "出问题时把这一行发出来，最快定位。",
-      body: el(
-        "div",
-        { class: "stack-sm" },
-        el("div", { class: "about-build", id: "about-build" }, state.build ? "" : "读取中…"),
-        el(
-          "div",
-          { class: "about-build" },
-          `出口机房 ${(state.data && state.data.runtime && state.data.runtime.colo) || "未记录"}` +
-            (state.data && state.data.runtime && state.data.runtime.locationHint
-              ? ` · DO 区域 ${state.data.runtime.locationHint}`
-              : ""),
-        ),
-        el(
-          "p",
-          { class: "hint" },
-          "管理界面是纯静态资源；版本号来自构建时注入的 git commit，可用 ",
-          el("code", {}, "/api/version"),
-          " 直接查看。",
-        ),
-      ),
-    }),
   );
 }
 
