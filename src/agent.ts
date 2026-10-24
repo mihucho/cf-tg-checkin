@@ -111,6 +111,8 @@ export class TgAgent implements DurableObject {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   /** 当前是否真的有活跃的 MTProto 连接（内存态，驱逐后自然为 false） */
   private connected = false;
+  /** 正在进行的 withClient 操作数：空闲计时器不能在这时候掐连接 */
+  private activeOps = 0;
 
   constructor(
     private readonly ctx: DurableObjectState,
@@ -379,19 +381,44 @@ export class TgAgent implements DurableObject {
         }
         if (shouldPoll) {
           this.store.setKv("trigger:lastPoll", String(now));
+          const controlChat = settings.controlChat || "self";
           try {
             await this.pollTriggers(client, logs);
           } catch (error) {
-            logs.push(`触发器轮询失败：${errorMessage(error)}`);
-            this.store.addLog({
-              taskId: null,
-              taskName: null,
-              at: Date.now(),
-              ok: false,
-              level: "warn",
-              message: `触发器轮询失败：${errorMessage(error)}`,
-              detail: null,
-            });
+            const message = errorMessage(error);
+            logs.push(`触发器轮询失败（控制会话 ${controlChat}）：${message}`);
+            // 连接类错误：换一条新连接重试一次（复用的 socket 可能已经半死）
+            const transient = /disconnect|not connected|socket|timeout|network|closed/i.test(message);
+            let recovered = false;
+            if (transient) {
+              try {
+                await this.dropClient();
+                await this.withClient((fresh) => this.pollTriggers(fresh, logs));
+                recovered = true;
+                this.store.addLog({
+                  taskId: null,
+                  taskName: null,
+                  at: Date.now(),
+                  ok: true,
+                  level: "info",
+                  message: "触发器轮询：重连后成功",
+                  detail: `控制会话 ${controlChat}`,
+                });
+              } catch (retryError) {
+                logs.push(`重试仍失败：${errorMessage(retryError)}`);
+              }
+            }
+            if (!recovered) {
+              this.store.addLog({
+                taskId: null,
+                taskName: null,
+                at: Date.now(),
+                ok: false,
+                level: "warn",
+                message: `触发器轮询失败（控制会话 ${controlChat}）：${message}`,
+                detail: transient ? "已自动重连重试一次，仍失败" : null,
+              });
+            }
           }
         }
         if (due.length) {
@@ -499,21 +526,26 @@ export class TgAgent implements DurableObject {
     const creds = this.requireCredentials();
     if (!creds.session) throw new Error("还没登录 Telegram");
 
-    const reusable = this.reusableClient(creds);
-    if (reusable) {
-      try {
-        const result = await fn(reusable);
-        this.afterUse(reusable);
-        return result;
-      } catch (error) {
-        // 复用的连接可能已经半死：丢掉它，重连一次再试
-        this.store.setKv(KV_LAST_ERROR, errorMessage(error));
-        await this.dropClient();
-        return this.runWithFreshClient(creds, fn);
+    this.activeOps += 1;
+    try {
+      const reusable = this.reusableClient(creds);
+      if (reusable) {
+        try {
+          const result = await fn(reusable);
+          this.afterUse(reusable);
+          return result;
+        } catch (error) {
+          // 复用的连接可能已经半死：丢掉它，重连一次再试
+          this.store.setKv(KV_LAST_ERROR, errorMessage(error));
+          await this.dropClient();
+          return await this.runWithFreshClient(creds, fn);
+        }
       }
-    }
 
-    return this.runWithFreshClient(creds, fn);
+      return await this.runWithFreshClient(creds, fn);
+    } finally {
+      this.activeOps -= 1;
+    }
   }
 
   private async runWithFreshClient<T>(
@@ -566,6 +598,8 @@ export class TgAgent implements DurableObject {
     if (this.idleTimer !== null) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null;
+      // 还有操作在跑：绝对不能断开，等它结束后 afterUse() 会重新排计时器
+      if (this.activeOps > 0) return;
       const idleFor = Date.now() - this.cachedClientTouchedAt;
       if (idleFor >= CLIENT_IDLE_REUSE_MS) void this.dropClient();
       else this.keepWarm(this.cachedClient as TelegramClient);
