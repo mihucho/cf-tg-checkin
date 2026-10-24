@@ -135,7 +135,7 @@ if (test) {
     },
   };
   await esbuild.build({
-    entryPoints: ["tests/schedule.test.ts"],
+    entryPoints: ["tests/index.test.ts"],
     outfile: "dist/test.cjs",
     bundle: true,
     format: "cjs",
