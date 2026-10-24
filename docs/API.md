@@ -132,12 +132,14 @@
 
 | 方法 | 路径 | 响应 |
 | --- | --- | --- |
-| GET | `/api/logs?limit=30&before=<id>&level=ok\|fail&taskId=<id>&q=<关键字>` | `{ logs: [LogEntry], nextBefore: number \| null, total: number }` |
+| GET | `/api/logs?page=1&pageSize=20&level=ok\|fail&taskId=<id>&q=<关键字>` | `{ logs: [LogEntry], total, page, pageSize, pages }` |
 | POST | `/api/logs/clear` | `{ ok: true }` |
 
-日志用**游标分页**（`before` = 上一页最后一条的 id，不是页码）：
-新日志插入不会导致翻页跳行；`nextBefore` 为 `null` 表示没有更早的了。
-`total` 是**当前筛选条件下**的总条数（前端显示「已加载 x / 共 y」）。
+日志用**页码分页**：`page`（从 1 开始，越界会自动收敛到最后一页）+ `pageSize`（1–100，默认 20），
+响应带 `total` / `pages` 供前端渲染翻页条（`第 3 / 6 页 · 共 115 条`）。
+也仍支持旧的游标参数 `before`（配合 `pageSize` 取更早的一页），返回 `nextBefore`。
+
+`total` 是**当前筛选条件下**的总条数。
 
 筛选参数：`level`（ok / fail / info…）、`taskId`（某个任务）、`q`（在 message / task_name 里模糊搜索，
 LIKE 通配符已转义）。服务端只保留最近 2000 条。

@@ -205,18 +205,26 @@ export class TgAgent implements DurableObject {
       }
 
       if (path === "/logs" && method === "GET") {
-        const limit = intParam(url.searchParams.get("limit"), 30, 1, 200);
-        const beforeId = intParam(url.searchParams.get("before"), 0, 0, Number.MAX_SAFE_INTEGER) || null;
+        const pageSize = intParam(url.searchParams.get("pageSize") ?? url.searchParams.get("limit"), 20, 1, 100);
         const level = url.searchParams.get("level");
         const taskIdParam = intParam(url.searchParams.get("taskId"), 0, 0, Number.MAX_SAFE_INTEGER) || null;
         const query = url.searchParams.get("q");
-        const filter = { limit, beforeId, level, taskId: taskIdParam, query };
-        const logs = this.store.listLogs(filter);
-        // 只有"这一页满了"才可能有更早的；否则前端会一直显示「加载更多」
+        const beforeId = intParam(url.searchParams.get("before"), 0, 0, Number.MAX_SAFE_INTEGER) || null;
+
+        const filter = { limit: pageSize, beforeId, level, taskId: taskIdParam, query };
+        const total = this.store.countLogs(filter);
+        const pages = Math.max(1, Math.ceil(total / pageSize));
+        const page = Math.min(pages, intParam(url.searchParams.get("page"), 1, 1, 100_000));
+
+        const logs = this.store.listLogs({ ...filter, offset: (page - 1) * pageSize });
         return json({
           logs,
-          nextBefore: logs.length === limit ? logs[logs.length - 1].id : null,
-          total: this.store.countLogs(filter),
+          total,
+          page,
+          pageSize,
+          pages,
+          // 游标模式下仍然返回（兼容旧调用）
+          nextBefore: beforeId && logs.length === pageSize ? logs[logs.length - 1].id : null,
         });
       }
       if (path === "/logs/clear" && method === "POST") {
