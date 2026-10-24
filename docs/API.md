@@ -152,6 +152,7 @@
 | --- | --- | --- |
 | GET | `/api/logs?page=1&pageSize=20&level=ok\|fail&taskId=<id>&q=<关键字>` | `{ logs: [LogEntry], total, page, pageSize, pages }` |
 | POST | `/api/logs/clear` | `{ ok: true }` |
+| POST | `/api/notify/test` | `{ notifyWebhook?, notifyWebhookKind?, notifyWebhookSecret?, notifyEvents? }`（可选 overlay，用于测未保存的表单值） → `{ ok, result: { telegram, webhook } }` |
 | POST | `/api/events` | `{ name: "failure_handled" \| "template_used" \| "command_copied" }` → `{ ok: true }`（白名单） |
 
 日志用**页码分页**：`page`（从 1 开始，越界会自动收敛到最后一页）+ `pageSize`（1–100，默认 20），

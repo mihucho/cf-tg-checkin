@@ -32,6 +32,29 @@ export interface WebhookPayload {
 }
 
 /**
+ * 把人填的地址补成完整 URL。
+ *
+ * 实际最常见的错填是「只粘了 access_token」或者「少了 https://」——
+ * 钉钉/企微/飞书的机器人配置页上，token 是单独一行，很容易只复制到那一串。
+ * 这里按已选渠道把裸 token 拼回完整地址，省得用户自己去翻文档。
+ */
+export function normalizeWebhookUrl(rawValue: string, kind: WebhookKind): string {
+  const value = String(rawValue ?? "").trim();
+  if (!value) return "";
+  // 已经是完整地址
+  if (/^https?:\/\//i.test(value)) return value;
+  // 少了协议头（oapi.dingtalk.com/robot/send?access_token=…）
+  if (/^[a-z0-9.-]+\.[a-z]{2,}\//i.test(value)) return `https://${value}`;
+  // 看起来就是裸 token（32 位以上的字母数字）
+  if (/^[A-Za-z0-9_-]{16,}$/.test(value)) {
+    if (kind === "dingtalk") return `https://oapi.dingtalk.com/robot/send?access_token=${value}`;
+    if (kind === "wecom") return `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=${value}`;
+    if (kind === "feishu") return `https://open.feishu.cn/open-apis/bot/v2/hook/${value}`;
+  }
+  return value;
+}
+
+/**
  * 老配置没有 `notifyWebhookKind` 时用来兜底猜一次（之后以设置里的手动选择为准）。
  */
 export function detectWebhookKind(rawUrl: string): WebhookKind {
