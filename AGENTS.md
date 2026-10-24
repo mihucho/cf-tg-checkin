@@ -22,12 +22,13 @@ MTProto 走 `cloudflare:sockets`（`src/telegram/`），调度靠 DO alarm，数
 | 命令 | 作用 |
 | --- | --- |
 | `npm run typecheck` | `tsc --noEmit`（覆盖 `src/**` + `build.mjs`，`strict: true`） |
-| `npm test` | `build.mjs --test` 打包 `tests/index.test.ts` → 在 Node 里跑（当前 93 例，几秒） |
+| `npm test` | `build.mjs --test` 打包 `tests/index.test.ts` → 在 Node 里跑（当前 140 例，几秒） |
 | `npm run check` | typecheck → test → build → 检查产物导出（提 PR 前跑这个） |
 | `npm run dev` | `wrangler dev`（`build.command` 会先跑一遍 esbuild） |
-| `npm run test:integration` | 真起 `wrangler dev`（随机端口 + 临时目录），HTTP 打通 Worker→DO→SQLite，30 项；约 1~2 分钟，带 180 秒看门狗 |
+| `npm run test:integration` | 真起 `wrangler dev`（随机端口 + 临时目录），HTTP 打通 Worker→DO→SQLite，48 项；约 45 秒，带 180 秒看门狗 |
 | `npm run smoke` | 用 `wrangler.smoke.jsonc` 起一个不连 Telegram 的最小 Worker（排查部署问题用） |
 | `npm run deploy` | build → `check-bundle` → `wrangler deploy` |
+| `node scripts/release.mjs --dry-run` | 预览「改发布文档」会做哪些改动（不落盘） |
 | `node build.mjs --watch` | 只跑打包 watch |
 
 ## 版本号约定
@@ -43,12 +44,49 @@ MTProto 走 `cloudflare:sockets`（`src/telegram/`），调度靠 DO alarm，数
 | `major` | 不兼容变更：删 API/字段、改数据语义、配置或部署方式不兼容、需手动迁移 | — |
 
 - 还在 `0.x` 时，不兼容变更允许只 bump `minor`（semver 如此），但 CHANGELOG 该版本第一行必须写 **`BREAKING`** 并说明怎么迁移。
-- 同一天多个修复合并进**一个** `patch`；不跳号、不回改已发布版本；平时改动先写 `[Unreleased]`，发版时整体挪到新号下。
+- 同一天多个修复合并进**一个** `patch`；不跳号、不回改已发布版本。
+- 平时改动写进 `CHANGELOG.md` 的 `[Unreleased]`（开发向，可以很细）；发版时把**面向使用者**的部分整理进
+  `releases/unreleased.md`，脚本插入新版本段时会自动清空 `[Unreleased]`，并把清掉的内容打印在 Actions 日志里
+  —— 看到那段提示就确认一下细节没漏进发布说明。
 - `1.0.0` 只留给「接口 / 数据 / 部署方式稳定、愿意承诺兼容」的那天，不是攒够功能就发。
 - 拿不准先按 `patch`；等真的需要用户「知道」时再 `minor`。
 - （历史遗留：0.11.0 是纯修复却发了 `minor`，属早期误判，不回改；新版本按上表走。）
 
-版本号**只在 `package.json` 改一处**（用 `npm version`，它会同时改文件、打 commit 和 tag），别手改 `src/version.ts` —— `build.mjs` 会把 version / git commit / 构建时间注入产物，`GET /api/version` 和页面底部可查。
+版本号**只有一个来源：`package.json`**。别手改 `src/version.ts` —— `build.mjs` 会把 version / git commit /
+构建时间注入产物，`GET /api/version` 和页面底部可查。
+
+但**发版不要手跑 `npm version`**：版本号由发布文档驱动（见下一节），`npm version` 会绕过 CHANGELOG 插入与归档。
+
+---
+
+## 发版（改文档即发布）
+
+发布说明本身就是 `releases/unreleased.md`，push 到 `main` 后由 `.github/workflows/release.yml` 自动执行：
+
+```markdown
+---
+version: 0.18.0
+title: v0.18.0 — 一句话标题
+---
+
+正文就是 GitHub Release 的说明（Markdown），同时作为 annotated tag 的注释。
+```
+
+| 文档里的 `version` | 行为 |
+| --- | --- |
+| **大于** `package.json` | 跑 typecheck + 单测 + 打包自检 → 写 `package.json`/`package-lock.json` → 把正文插进 `CHANGELOG.md`（`[Unreleased]` 之后）→ 归档到 `releases/archive/vX.Y.Z.md` 并重置模板 → 提交 → 打 annotated tag → 建/更新 GitHub Release → 触发 `deploy.yml` |
+| **等于**当前版本 | 只补 tag / GitHub Release（代码已发、说明写晚了；重复执行安全） |
+| **`0.0.0`**（模板） | 跳过 |
+
+规矩：
+
+- **只有 `releases/unreleased.md` 的变化会触发发布**，别的改动走普通 CI；不要在别处手动 bump 版本号
+- 版本号判断口径见上一节（修 bug = `patch`），文档里写错会被脚本拒掉（必须严格递增，非 `x.y.z` 直接报错）
+- 正文要有内容（只写 front matter 会报错）；写完先 `node scripts/release.mjs --dry-run` 预览
+- 发完别手动改 `releases/unreleased.md` 的历史内容 —— 归档副本在 `releases/archive/`
+- `GITHUB_TOKEN` push 出去的 commit **不会**触发其它工作流，所以 workflow 里显式 `gh workflow run deploy.yml`；
+  想让它像普通 push 一样级联，在仓库 Secrets 配 `RELEASE_TOKEN`（带 `repo` 的 PAT）
+- 历史遗留：v0.17.1 及之前的版本是手工 `git tag` 打的，没有 release 文档；从下一个版本起走上面这套
 
 ---
 
@@ -155,6 +193,8 @@ MTProto 走 `cloudflare:sockets`（`src/telegram/`），调度靠 DO alarm，数
 | `tests/*` | 零依赖测试；`harness.ts` 注册 → `index.test.ts` 汇总 | **新测试文件必须 import 进 `tests/index.test.ts`**，否则不跑 |
 | `scripts/integration.mjs` | 端到端测试（进程组启动/整组 kill） | 动路由或 DO 行为时跑一遍 |
 | `docs/API.md` / `docs/DEPLOY.md` / `docs/UI_COPY.md` | 接口契约 / 部署与排查 / 文案规范 | 改契约同步 API.md |
+| `releases/unreleased.md` | 下一次发布的说明（改它即发版） | 格式与三种模式见「发版」一节 |
+| `scripts/release.mjs` | 解析发布文档、校验版本递增、写 CHANGELOG、归档 | 只管文件改动，git/gh 在 workflow 里 |
 | `deliverables/` | 审计报告与产品评审（历史决策依据） | 不是运行时产物 |
 
 ---
@@ -174,12 +214,13 @@ MTProto 走 `cloudflare:sockets`（`src/telegram/`），调度靠 DO alarm，数
 
 ## 提交前检查清单
 
-- [ ] `npm run check` 通过（typecheck + 93 例单测 + build + 产物导出检查）
+- [ ] `npm run check` 通过（typecheck + 140 例单测 + build + 产物导出检查）
 - [ ] 改了路由 / DO 行为 / 数据读写 → `npm run test:integration` 通过
 - [ ] 改了 `dsl.ts` 或 `command.ts` → 往返用例已补
 - [ ] 改了 schema → 老数据能升级（`ALTER TABLE` 幂等）
 - [ ] 新 API 响应有 `no-store`；敏感字段未回传
 - [ ] 前端在 375px / 1280px 都看过，弹窗不是抽屉
-- [ ] `CHANGELOG.md` 的 `[Unreleased]` 写了「改了什么 + 为什么」（中文，面向使用者）
-- [ ] bump 类型对得上：修 bug 只 `patch`，新增用户可见能力才 `minor`（见上方「版本号约定」）；版本号只在 `package.json`
+- [ ] 面向使用者的改动写进了 `CHANGELOG.md` 的 `[Unreleased]`（中文，写「改了什么 + 为什么」）
+- [ ] 要发版时：改 `releases/unreleased.md`（version 按「版本号约定」定档，正文写本次发布说明），
+      先 `node scripts/release.mjs --dry-run` 预览；**不要**手动改 `package.json` 的版本号或手打 tag
 - [ ] `dist/` 没被提交

@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "./harness.ts";
 import {
+  applyChangelog,
   buildArchiveAndTemplate,
   buildChangelogEntry,
   insertChangelogEntry,
@@ -42,6 +43,16 @@ test("insertChangelogEntry：插到 Unreleased 之后、旧版本之前", () => 
   assert.match(next, /## \[0\.17\.1\] - 2026-10-24/);
   assert.ok(next.indexOf("0.18.0") < next.indexOf("0.17.1"), "新版本要在旧版本前面");
   assert.throws(() => insertChangelogEntry("# 没有 unreleased", entry), /找不到/);
+});
+
+test("applyChangelog：插新版本的同时清空 Unreleased，并回报被清掉的内容", () => {
+  const changelog = "# 更新日志\n\n## [Unreleased]\n\n- 还没发的小改动\n- 再去一条\n\n## [0.17.1] - 2026-10-24\n\n- 旧内容\n";
+  const entry = buildChangelogEntry({ version: "0.18.0", body: "- 新内容", date: "2026-10-25" });
+  const { changelog: next, leftover } = applyChangelog(changelog, entry);
+  assert.match(leftover, /还没发的小改动/);
+  assert.match(next, /## \[Unreleased\]\n\n## \[0\.18\.0\] - 2026-10-25/);
+  assert.doesNotMatch(next.slice(next.indexOf("## [Unreleased]"), next.indexOf("## [0.18.0]")), /还没发的小改动/);
+  assert.match(next, /## \[0\.17\.1\] - 2026-10-24/);
 });
 
 test("buildArchiveAndTemplate：归档保留标题，模板回落到 0.0.0 并保留说明注释", () => {

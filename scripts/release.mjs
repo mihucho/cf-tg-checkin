@@ -65,17 +65,32 @@ export function isNewerVersion(a, b) {
   return aPatch > bPatch;
 }
 
-/** 把新版本段插到 `## [Unreleased]` 之后（保持现有结构） */
-export function insertChangelogEntry(changelog, entry) {
+/**
+ * 把新版本段插到 `## [Unreleased]` 之后，并清空 Unreleased 区。
+ *
+ * 返回被清掉的内容（leftover）——workflow 会打印出来，
+ * 这样"忘了把 [Unreleased] 里的细节搬进发布说明"这件事能被看见。
+ */
+export function applyChangelog(changelog, entry) {
   const text = String(changelog ?? "");
   const heading = "## [Unreleased]";
   const index = text.indexOf(heading);
   if (index < 0) throw new Error("CHANGELOG.md 里找不到 `## [Unreleased]`，无法插入新版本段");
+
   const afterHeading = index + heading.length;
   const rest = text.slice(afterHeading);
   const next = rest.search(/\n## \[/);
-  const tail = next >= 0 ? rest.slice(next) : "\n";
-  return `${text.slice(0, afterHeading)}\n\n${entry.trim()}\n${tail.replace(/^\n+/, "\n")}`;
+  const beforeNext = next >= 0 ? rest.slice(0, next) : rest;
+  const tail = next >= 0 ? rest.slice(next).replace(/^\n+/, "") : "";
+
+  const leftover = beforeNext.trim();
+  const head = `${text.slice(0, afterHeading)}\n\n${String(entry).trim()}\n\n`;
+  return { changelog: tail ? `${head}${tail}` : head, leftover };
+}
+
+/** 只要结果、不要 leftover 时的简写 */
+export function insertChangelogEntry(changelog, entry) {
+  return applyChangelog(changelog, entry).changelog;
 }
 
 export function buildChangelogEntry({ version, body, date }) {
@@ -153,7 +168,12 @@ function main() {
   if (mode === "bump") {
     const changelog = fs.readFileSync(CHANGELOG_PATH, "utf8");
     const entry = buildChangelogEntry({ version: doc.version, body: doc.body, date });
-    fs.writeFileSync(CHANGELOG_PATH, insertChangelogEntry(changelog, entry));
+    const applied = applyChangelog(changelog, entry);
+    fs.writeFileSync(CHANGELOG_PATH, applied.changelog);
+    if (applied.leftover) {
+      console.log("提示：[Unreleased] 里原有内容已清空（确认这些细节都进了发布说明）：");
+      console.log(applied.leftover.split("\n").slice(0, 20).join("\n"));
+    }
 
     pkg.version = doc.version;
     fs.writeFileSync(PACKAGE_PATH, `${JSON.stringify(pkg, null, 2)}\n`);
