@@ -47,7 +47,7 @@
     "stepWaitSeconds": 30,       // 单次最多等多久（5–300）
     "notifyOnFailure": true,     // 任务失败时给自己发一条 Telegram 消息
     "notifyWebhook": "",         // 可选：失败提醒推送到这个地址
-    "notifyWebhookKind": "generic", // 推送渠道：generic | dingtalk | wecom | feishu（手动选择）
+    "notifyWebhookKind": "generic", // 推送渠道：dingtalk | wecom | feishu | generic（自定义渠道）
                                     // 日报/周报：dingtalk+wecom 用 markdown 包体，feishu 用交互卡片
     "notifyWebhookSecret": "",   // 钉钉加签密钥：永远不回传，用 notifyWebhookSecretConfigured 表示是否已配
     "notifyWebhookSecretConfigured": false,
@@ -152,7 +152,7 @@
 | --- | --- | --- |
 | GET | `/api/logs?page=1&pageSize=20&level=ok\|fail&taskId=<id>&q=<关键字>` | `{ logs: [LogEntry], total, page, pageSize, pages }` |
 | POST | `/api/logs/clear` | `{ ok: true }` |
-| POST | `/api/notify/test` | `{ notifyWebhook?, notifyWebhookKind?, notifyWebhookSecret?, notifyEvents? }`（可选 overlay，用于测未保存的表单值） → `{ ok, result: { telegram, webhook } }` |
+| POST | `/api/notify/test` | `{ notifyWebhookToken?, notifyWebhook?, notifyWebhookKind?, notifyWebhookSecret?, notifyEvents? }`（可选 overlay，用于测未保存的表单值） → `{ ok, result: { telegram, webhook } }` |
 | POST | `/api/events` | `{ name: "failure_handled" \| "template_used" \| "command_copied" }` → `{ ok: true }`（白名单） |
 
 日志用**页码分页**：`page`（从 1 开始，越界会自动收敛到最后一页）+ `pageSize`（1–100，默认 20），

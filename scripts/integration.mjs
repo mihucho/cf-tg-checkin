@@ -198,6 +198,25 @@ async function main() {
     );
     const badKind = await post("/api/settings", { notifyWebhookKind: "hacker" });
     check("非法渠道被忽略（保留原值）", badKind.settings?.notifyWebhookKind === "dingtalk", `got ${badKind.settings?.notifyWebhookKind}`);
+    // ---------- 固定渠道：只填 token ----------
+    const tokenSaved = await post("/api/settings", {
+      notifyWebhookKind: "dingtalk",
+      notifyWebhookToken: "integration-token-1",
+    });
+    check(
+      "只填 token 就按渠道生成固定地址",
+      tokenSaved.settings?.notifyWebhook === "https://oapi.dingtalk.com/robot/send?access_token=integration-token-1",
+      tokenSaved.settings?.notifyWebhook,
+    );
+    const fullUrlInToken = await post("/api/settings", {
+      notifyWebhookKind: "wecom",
+      notifyWebhookToken: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc-9",
+    });
+    check(
+      "token 框里粘整条地址也能认（会重新按渠道拼）",
+      fullUrlInToken.settings?.notifyWebhook === "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc-9",
+      fullUrlInToken.settings?.notifyWebhook,
+    );
     const cleared = await post("/api/settings", { clearNotifyWebhookSecret: true });
     check("可清除加签密钥", cleared.settings?.notifyWebhookSecretConfigured === false);
 

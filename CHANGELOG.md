@@ -30,6 +30,19 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-24
+
+**Webhook 按渠道固定地址**：选了渠道就只剩「填 Token」一件事，不用自己拼 URL。
+
+- 钉钉 / 企业微信 / 飞书：输入框变成「机器人 Token（access_token / Key / Token）」，
+  地址由程序按固定模板生成（`oapi.dingtalk.com/robot/send?access_token=…` 等）；
+  token 框里粘整条地址也能认，会自动把 token 抠出来重拼
+- **只有选钉钉时才显示「加签密钥」**（企业微信/飞书/自定义渠道不显示，也不显示"清除"勾选）
+- 原来的「通用 JSON（自建服务）」改名为「**自定义渠道（自建服务）**」，只有它填完整地址
+- 切换渠道时会**清空上一家的 token**（不同平台 token 不通用，留着会一直 `300005`）
+- 保存与「发送测试通知」都支持 `notifyWebhookToken`，服务端走同一套 `webhookUrlFromToken()`
+- 单测 133（+4：模板拼地址、粘整条地址、token 回填、模板元数据）；集成 46（+2）
+
 ## [0.16.2] - 2026-10-24
 
 - **Webhook 地址可以只填 token**：钉钉/企微/飞书的机器人配置页把 token 单独列一行，
