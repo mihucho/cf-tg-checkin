@@ -21,12 +21,35 @@ export interface CommandSource {
   threadId?: number | null;
 }
 
-/** 需要加引号的片段：含空格 / 逗号 / 竖线（避免被指令语法拆开） */
+/** 需要加引号的片段：含空格 / 逗号 / 竖线 / 引号（避免被指令语法拆开） */
 function quoteIfNeeded(value: string): string {
   const text = String(value ?? "");
   if (!text) return '""';
-  if (/[\s|,]/.test(text)) return `"${text.replace(/"/g, "'")}"`;
+  if (/[\s|,"'\\]/.test(text)) return `"${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
   return text;
+}
+
+/**
+ * 这段文本直接写进指令，会不会被当成别的语法单元？
+ *
+ * 会的话必须加 `say:` 前缀，否则「复制指令 → 重建任务」会得到一个不一样的��务
+ * （例如文本 `#kw:签到` 会被当成关键词、`btn:签到` 会被当成按钮步骤）。
+ */
+function needsSayPrefix(text: string): boolean {
+  const value = text.trim();
+  if (!value) return true;
+  if (/^[#＃]/.test(value)) return true; // 修饰符
+  if (/^(?:btn|num|rand|say|text|wait|kw|to|at|到|说|文本|按钮|数字|等待|关键词|每)\s*[:：]/i.test(value)) return true;
+  if (/^[\d０-９]/.test(value)) return true; // 时间 / 数字：09:30、9点半、0930、每30分
+  if (/^(?:每|once|每日|每天)$/i.test(value)) return true;
+  if (/^(?:帮助|列表|help|list|删除|删除全部|禁用|启用|暂停|resume|pause)$/i.test(value)) return true;
+  if (/^(?:https?:\/\/|t\.me\/|telegram\.me\/|@)/i.test(value)) return true; // 会被当成目标
+  return false;
+}
+
+function textToCommand(text: string): string {
+  const value = String(text ?? "");
+  return needsSayPrefix(value) ? `say:${quoteIfNeeded(value)}` : quoteIfNeeded(value);
 }
 
 function scheduleToCommand(schedule: Task["schedule"]): string {
@@ -57,11 +80,15 @@ function stepsToCommand(steps: Step[]): string[] {
   for (const step of steps) {
     switch (step.type) {
       case "text":
-        parts.push(quoteIfNeeded(step.text ?? ""));
+        parts.push(textToCommand(step.text ?? ""));
         break;
       case "random":
-        // 选项里若出现 `|` 会破坏语法，只能降级成空格
-        parts.push(`rand:${(step.options ?? []).map((item) => String(item).replace(/\|/g, " ")).join("|")}`);
+        // 选项里的 `|` 是分隔符，语法上无法表达 —— 降级成空格；含空格的要加引号
+        parts.push(
+          `rand:${(step.options ?? [])
+            .map((item) => quoteIfNeeded(String(item).replace(/\|/g, " ")))
+            .join("|")}`,
+        );
         break;
       case "click":
         parts.push(
@@ -103,7 +130,7 @@ export function taskToCommand(task: CommandSource, prefix = "tg"): string {
   parts.push(...stepsToCommand(task.steps ?? []));
 
   const keywords = (task.successKeywords ?? []).filter(Boolean);
-  if (keywords.length) parts.push(`#kw:${keywords.join("|")}`);
+  if (keywords.length) parts.push(`#kw:${keywords.map((item) => quoteIfNeeded(String(item))).join("|")}`);
 
   const jitter = Math.max(0, Math.min(3600, Number(task.schedule.jitterSeconds ?? 0)));
   if (jitter > 0) parts.push(`#jitter:${jitter}`);

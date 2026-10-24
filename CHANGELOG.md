@@ -11,6 +11,22 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-24
+
+审计（v0.10.0）修复，完整报告见 `deliverables/audits/audit-0.10.0.md`。
+
+- **修 P0**：多目标任务首次执行会把主目标换成第二个目标 —— 新增纯函数
+  `applyTargetPatch(task, index, patch)`，只有主目标能写 `target` 与改名，其余写回 `targets[i]`
+- **修 P0**：任务指纹漏掉附加目标，导致「主目标相同、附加目标不同」被判重复建不出来
+- **修 P1**：`taskToCommand` 对 9 类内容不可往返（文本以 `#`/`btn:`/时间/链接/命令词开头、
+  `rand:` 选项与 `#kw:` 关键词含空格、名称含引号）。现在会用 `say:` 显式声明文本、
+  统一加引号并对 `"` `\` 做转义；`tokenize()` 支持反斜杠转义
+- **修 P1**：`/auth/turnstile` 会把 Turnstile secret 回给任何已登录请求 —— 改为要求
+  `x-internal-call` 头（Worker 代理会重建请求头，外部无法注入）
+- **修 P1**：非数组 `steps`/`targets`/`successKeywords` 入参抛 TypeError 并泄露内部错误文本
+- **修 P1**：`db.updateTask` 漏写 `last_detail`；删除任务时清理 `task:<id>:sent:<target>` 与 `notify:<id>:at`
+- 测试：新增 `tests/roundtrip.test.ts`（19 个往返用例）+ task.test.ts 补 4 例，共 85 个
+
 ## [0.10.0] - 2026-10-24
 
 - **目标级话题**：`Target.threadId` 优先于任务 `threadId`；指令写法 `到:@group_a#12|@b_bot`（可往返），

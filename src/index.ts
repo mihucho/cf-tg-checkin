@@ -132,7 +132,10 @@ async function turnstileOf(env: Env): Promise<TurnstileConfig | null> {
 
   let value: TurnstileConfig | null = null;
   try {
-    const response = await agentStub(env).fetch("https://agent/auth/turnstile", { method: "GET" });
+    const response = await agentStub(env).fetch("https://agent/auth/turnstile", {
+      method: "GET",
+      headers: { "x-internal-call": "turnstile" },
+    });
     const data = (await response.json()) as { siteKey?: string | null; secretKey?: string | null };
     if (data.siteKey && data.secretKey) value = { siteKey: data.siteKey, secretKey: data.secretKey };
   } catch {

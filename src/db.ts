@@ -346,7 +346,7 @@ export class Store {
       `UPDATE tasks SET name = ?, enabled = ?, target = ?, targets = ?, thread_id = ?, schedule = ?, steps = ?,
          success_keywords = ?, timeout_seconds = ?, step_delay_seconds = ?, delete_after_seconds = ?,
          cleanup_previous = ?, next_run_at = ?, last_run_at = ?, last_result = ?, last_message = ?,
-         updated_at = ?
+         last_detail = ?, updated_at = ?
        WHERE id = ?`,
       merged.name,
       merged.enabled ? 1 : 0,
@@ -364,6 +364,7 @@ export class Store {
       merged.lastRunAt ?? null,
       merged.lastResult ?? null,
       merged.lastMessage ?? null,
+      merged.lastDetail ?? null,
       now,
       id,
     );
@@ -399,6 +400,9 @@ export class Store {
     this.sql.exec("DELETE FROM tasks WHERE id = ?", id);
     this.sql.exec("DELETE FROM logs WHERE task_id = ?", id);
     this.deleteKv(`task:${id}:sent`);
+    // 多目标时按目标分键存过 sent，还有失败提醒的节流时间，一并清掉
+    this.sql.exec("DELETE FROM kv WHERE key LIKE ?", `task:${id}:sent:%`);
+    this.deleteKv(`notify:${id}:at`);
   }
 
   dueTasks(now: number, limit = 5): Task[] {
