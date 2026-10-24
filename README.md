@@ -280,7 +280,8 @@ npx wrangler deploy --var DO_LOCATION_HINT:apac   # apac/enam/weur/eeur/me/afr/o
 ```bash
 cp .dev.vars.example .dev.vars   # 填 ADMIN_PASSWORD
 npm run dev                      # wrangler dev（自定义构建自动打包 + watch src/）
-npm test                         # 62 个单测（见下表）
+npm test                         # 93 个单测（纯函数层）
+npm run test:integration         # 端到端集成测试：真起 wrangler dev，打 Worker → DO → SQLite
 npm run check                    # typecheck + test + build + 产物导出自检
 ```
 
@@ -289,6 +290,9 @@ npm run check                    # typecheck + test + build + 产物导出自检
 - 动作执行器 `src/telegram/executor.ts`（发消息 / 轮询 / 点按钮 / 判定）
 - 「该不该跑」的判定 `src/schedule/guard.ts`（窗口连发那个 bug 的回归用例在 `tests/guard.test.ts`）
 - 管理界面 `public/`（纯静态、无构建、无 CDN 依赖）
+- 测试分两层：`tests/` 是纯函数单测（快、无需运行时）；`scripts/integration.mjs` 起真实
+  `wrangler dev`（独立端口 + 临时持久化目录）验证路由/登录/Origin 校验/DO 内 SQLite/去重/分页，
+  跑完自动清理进程组，约 45 秒
 - 版本号只在 `package.json`：构建时注入产物，页面底部与 `GET /api/version` 都用它；
   发版跑 `npm version patch`（详见 [CHANGELOG.md](CHANGELOG.md)）
 

@@ -149,7 +149,11 @@ HTTP 端到端复核：
 7. `/tasks/:id/logs` 不支持 `sinceHours`，与 `/logs` 不一致。
 8. `#kw:` / `rand:` 里的 `|` 是语法分隔符，无法表达（当前降级为空格）——已在 `command.ts` 注释说明。
 9. 指令导出会丢失 `accessHash` / `kind`（只剩 `@username` / 数字 id）——文档里应写明"指令是便携表示，不是完整备份，完整备份用导出 JSON"。
-10. 测试覆盖：`agent.ts`（1976 行）、`db.ts`、`executor.ts`、`socket.ts` 零测试。建议补 3 类：Miniflare 跑 DO + 内嵌 SQLite 的集成测试、executor 的按钮/等待状态机（用假 client）、socket 的字节队列单测。
+10. 测试覆盖（v0.11.x 已部分补齐）：`scripts/integration.mjs` 端到端 30 项（真实 wrangler dev +
+    DO 内 SQLite：路由 / 登录 Cookie / Origin 校验 / 建任务去重 / 多目标指纹 / 导出导入 /
+    指令往返 / 设置与模板 / 事件白名单 / 日志分页 / run-all 分批 / 删除 / 安全头）；
+    `tests/socket.test.ts` 补字节队列；`tests/budget.test.ts` 补预算与连接错误判定。
+    仍缺：executor 的按钮/等待状态机（需要假 client）、`agent.ts` 的调度分支单测。
 11. 文档一致性：`docs/UI_COPY.md` 未收录新增的 `say:` 与 `#话题` 之外的转义规则；`API.md` 未写 `/auth/*` 是内部接口。
 
 ---

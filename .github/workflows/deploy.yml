@@ -29,6 +29,8 @@ jobs:
         run: node build.mjs
       - name: 检查产物里导出 Durable Object 类
         run: npm run check:bundle
+      - name: 端到端集成测试（wrangler dev + DO SQLite）
+        run: node scripts/integration.mjs
 
   deploy:
     name: Deploy to Cloudflare
