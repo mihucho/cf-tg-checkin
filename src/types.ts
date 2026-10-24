@@ -98,6 +98,13 @@ export interface LogEntry {
   durationMs?: number | null;
 }
 
+/** 用户自定义模板（存在服务端设置里，跨设备同步） */
+export interface TaskTemplate {
+  id: string;
+  name: string;
+  command: string;
+}
+
 export interface Settings {
   /** 时区偏移小时，可为小数（Asia/Shanghai = 8） */
   timezone: number;
@@ -118,6 +125,8 @@ export interface Settings {
   notifyOnFailure: boolean;
   /** 可选：额外 POST 到这个 Webhook（JSON） */
   notifyWebhook: string;
+  /** 自定义模板（最多 20 个） */
+  templates: TaskTemplate[];
   /** Turnstile 站点 key（公开，会下发前端） */
   turnstileSiteKey: string;
   /** Turnstile 密钥：只在服务端用，接口永远不回传（用 turnstileSecretConfigured 表示有没有） */
@@ -155,6 +164,7 @@ export interface AgentState {
   now: number;
   /** 最小埋点计数（只统计次数与时间，不采集内容） */
   events?: {
+    trend?: Array<{ date: string; ok: number; fail: number }>;
     firstLoginAt: number | null;
     tasksCreated: { ui: number; trigger: number };
     runs: { ok: number; fail: number };
@@ -188,4 +198,5 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyWebhook: "",
   turnstileSiteKey: "",
   turnstileSecretKey: "",
+  templates: [],
 };

@@ -312,6 +312,7 @@ async function enterApp() {
   state.view = viewFromHash();
   paint({ force: true });
   tick();
+  void migrateLocalTemplates();
 }
 
 async function onLoginSubmit(event) {
@@ -391,6 +392,9 @@ async function refreshState({ silent = false } = {}) {
   try {
     const data = await api("/api/state");
     state.data = data || {};
+    serverTemplates = Array.isArray(data?.settings?.templates)
+      ? data.settings.templates.filter((item) => item && item.command)
+      : serverTemplates;
     setServerNow(data && data.now);
     updateChrome();
     paint();
@@ -563,14 +567,7 @@ function quickStartCard() {
                 {
                   class: "btn btn-sm",
                   type: "button",
-                  onclick: async () => {
-                    try {
-                      await navigator.clipboard.writeText(step.action.copy);
-                      toast("已复制，去收藏夹粘贴发送即可", { kind: "ok" });
-                    } catch {
-                      toast(`复制失败，可手动输入：${step.action.copy}`, { kind: "error" });
-                    }
-                  },
+                  onclick: () => copyText(step.action.copy, "已复制，去收藏夹粘贴发送即可"),
                 },
                 step.action.label,
               ),
@@ -1178,7 +1175,11 @@ const TASK_TEMPLATES = [
 
 // editor.js 里要展示同一份模板，这里挂到 window 上避免循环 import
 window.__openEditorTemplate = (template) => void openTemplate(template);
-window.__openEditorTemplates = () => [...TASK_TEMPLATES, ...loadCustomTemplates()];
+window.__openEditorTemplates = () => [
+  ...TASK_TEMPLATES,
+  ...loadCustomTemplates().map((item) => ({ ...item, custom: true })),
+];
+window.__removeTemplate = removeTemplate;
 window.__saveTemplateFromCommand = saveTemplateFromCommand;
 
 async function openTemplate(template) {
@@ -1213,36 +1214,78 @@ async function openTemplate(template) {
 
 const CUSTOM_TEMPLATES_KEY = "cf-tg.customTemplates";
 
+/** 自定义模板存服务端设置里（跨设备同步）；localStorage 只用于首次迁移旧数据 */
+let serverTemplates = null;
+
 function loadCustomTemplates() {
+  if (serverTemplates) return serverTemplates;
+  const fromServer = state.data && state.data.settings && state.data.settings.templates;
+  if (Array.isArray(fromServer)) {
+    serverTemplates = fromServer.filter((item) => item && item.command);
+    return serverTemplates;
+  }
+  return [];
+}
+
+/** 老版本把模板存在浏览器里，登录后一次性搬到服务端 */
+async function migrateLocalTemplates() {
+  if (serverTemplates && serverTemplates.length) return;
+  let legacy = [];
   try {
-    const raw = localStorage.getItem(CUSTOM_TEMPLATES_KEY);
-    const list = raw ? JSON.parse(raw) : [];
-    return Array.isArray(list) ? list.filter((item) => item && item.command) : [];
+    legacy = JSON.parse(localStorage.getItem(CUSTOM_TEMPLATES_KEY) || "[]");
   } catch {
-    return [];
+    legacy = [];
+  }
+  if (!Array.isArray(legacy) || !legacy.length) return;
+  try {
+    await api("/api/settings", {
+      method: "POST",
+      body: { templates: legacy.filter((item) => item && item.command) },
+    });
+    localStorage.removeItem(CUSTOM_TEMPLATES_KEY);
+    serverTemplates = null;
+    await refreshState({ silent: true });
+  } catch {
+    /* 迁移失败不影响使用 */
   }
 }
 
-function saveCustomTemplates(list) {
-  try {
-    localStorage.setItem(CUSTOM_TEMPLATES_KEY, JSON.stringify(list.slice(0, 20)));
-  } catch {
-    /* 隐私模式忽略 */
-  }
+async function persistTemplates(list) {
+  const res = await api("/api/settings", { method: "POST", body: { templates: list.slice(0, 20) } });
+  serverTemplates = (res.settings && res.settings.templates) || list.slice(0, 20);
+  if (state.data && state.data.settings) state.data.settings.templates = serverTemplates;
 }
 
-/** 把当前编辑器里的配置存成本地模板 */
-function saveTemplateFromCommand(name, command) {
-  const list = loadCustomTemplates();
+/** 把当前编辑器里的配置存成模板（服务端，跨设备） */
+async function saveTemplateFromCommand(name, command) {
   const trimmed = String(command || "").trim();
   if (!trimmed) {
     toast("先生成一个等价指令，再存为模板", { kind: "error" });
     return;
   }
-  const id = `custom-${Date.now()}`;
-  list.unshift({ id, name: String(name || "我的模板").slice(0, 20), desc: trimmed, command: trimmed });
-  saveCustomTemplates(list);
-  toast("已存为模板（存在这台浏览器里）", { kind: "ok" });
+  const list = [...loadCustomTemplates()];
+  const label = String(name || "我的模板").trim().slice(0, 20) || "我的模板";
+  if (list.some((item) => item.command === trimmed)) {
+    toast("已经有一样的模板了", { kind: "info" });
+    return;
+  }
+  list.unshift({ id: `t${Date.now()}`, name: label, command: trimmed });
+  try {
+    await persistTemplates(list);
+    toast(`已存为模板「${label}」`, { kind: "ok" });
+    paint({ force: true });
+  } catch (error) {
+    toast(error.message || "保存模板失败", { kind: "error" });
+  }
+}
+
+async function removeTemplate(id) {
+  try {
+    await persistTemplates(loadCustomTemplates().filter((item) => item.id !== id));
+    paint({ force: true });
+  } catch (error) {
+    toast(error.message || "删除模板失败", { kind: "error" });
+  }
 }
 
 /** 模板区：内置 + 自定义（自定义可删除） */
@@ -1284,11 +1327,7 @@ function templateChips({ onSaved } = {}) {
             class: "chip-remove",
             type: "button",
             "aria-label": `删除模板 ${template.name}`,
-            onclick: () => {
-              saveCustomTemplates(loadCustomTemplates().filter((item) => item.id !== template.id));
-              onSaved?.();
-              paint({ force: true });
-            },
+            onclick: () => void removeTemplate(template.id),
           },
           "×",
         ),
@@ -1706,37 +1745,76 @@ function filterSummary() {
   return parts.length ? `（${parts.join(" · ")}）` : "";
 }
 
+/**
+ * 复制文本，三种方式依次尝试：
+ *  1. navigator.clipboard（需要 HTTPS / localhost）
+ *  2. 临时 textarea + document.execCommand("copy")（http、旧浏览器、iframe 里可用）
+ *  3. 兜底弹窗，让用户手动选中复制
+ */
 async function copyText(text, hint = "已复制") {
   const value = String(text ?? "");
   if (!value) return false;
-  try {
-    await navigator.clipboard.writeText(value);
-    toast(hint, { kind: "ok" });
-    return true;
-  } catch {
-    // 无剪贴板权限（http、无焦点等）时，给一个可手动复制的弹窗，比 toast 好用
-    const area = el("textarea", { class: "textarea code-input", rows: "4", readonly: "" });
-    area.value = value;
-    openModal({
-      title: "复制这段内容",
-      body: el(
-        "div",
-        { class: "stack-sm" },
-        el("p", { class: "hint" }, "浏览器没给剪贴板权限，选中后按 ⌘/Ctrl+C 即可。"),
-        area,
-      ),
-      footer: el(
-        "div",
-        { class: "dialog-actions" },
-        el("button", { class: "btn btn-primary", type: "button", onclick: () => closeModal() }, "关闭"),
-      ),
-    });
-    requestAnimationFrame(() => {
-      area.focus();
-      area.select();
-    });
-    return false;
+
+  if (typeof navigator !== "undefined" && navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast(hint, { kind: "ok" });
+      return true;
+    } catch {
+      /* 落到 execCommand */
+    }
   }
+
+  try {
+    const area = document.createElement("textarea");
+    area.value = value;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.top = "-1000px";
+    area.style.left = "0";
+    area.style.opacity = "0";
+    document.body.append(area);
+
+    const selection = document.getSelection();
+    const previousRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+    area.select();
+    area.setSelectionRange(0, value.length);
+    const ok = document.execCommand("copy");
+    area.remove();
+    if (previousRange && selection) {
+      selection.removeAllRanges();
+      selection.addRange(previousRange);
+    }
+    if (ok) {
+      toast(hint, { kind: "ok" });
+      return true;
+    }
+  } catch {
+    /* 落到手动弹窗 */
+  }
+
+  // 都失败：给一个可选中的弹窗，比 toast 好用
+  const area = el("textarea", { class: "textarea code-input", rows: "4", readonly: "" });
+  area.value = value;
+  openModal({
+    title: "复制这段内容",
+    body: el(
+      "div",
+      { class: "stack-sm" },
+      el("p", { class: "hint" }, "浏览器不允许自动复制，选中后按 ⌘/Ctrl+C 即可。"),
+      area,
+    ),
+    footer: el(
+      "div",
+      { class: "dialog-actions" },
+      el("button", { class: "btn btn-primary", type: "button", onclick: () => closeModal() }, "关闭"),
+    ),
+  });
+  requestAnimationFrame(() => {
+    area.focus();
+    area.select();
+  });
+  return false;
 }
 
 const LOG_SOURCE_LABEL = { auto: "自动", manual: "手动", trigger: "指令", system: "系统" };
@@ -2983,13 +3061,41 @@ function usagePanel() {
       hint ? el("div", { class: "usage-hint" }, hint) : null,
     );
 
+  const trend = Array.isArray(events.trend) ? events.trend : [];
+  const peak = Math.max(1, ...trend.map((item) => item.ok + item.fail));
+
+  const chart = trend.length
+    ? el(
+        "div",
+        { class: "usage-trend" },
+        ...trend.map((item) =>
+          el(
+            "div",
+            { class: "usage-trend-col", title: `${item.date}：成功 ${item.ok} · 失败 ${item.fail}` },
+            el(
+              "div",
+              { class: "usage-trend-bar" },
+              el("span", { class: "usage-trend-ok", style: `height:${Math.round((item.ok / peak) * 100)}%` }),
+              el("span", { class: "usage-trend-fail", style: `height:${Math.round((item.fail / peak) * 100)}%` }),
+            ),
+            el("div", { class: "usage-trend-label" }, item.date),
+          ),
+        ),
+      )
+    : null;
+
   return el(
+    "div",
+    { class: "stack-sm" },
+    chart,
+    el(
     "div",
     { class: "usage-grid" },
     item("首次登录", events.firstLoginAt ? formatDateTime(events.firstLoginAt) : "—", null),
     item("任务", String(totalCreated), totalCreated ? `指令建 ${share}%` : "还没有任务"),
     item("执行", String(runs.ok + runs.fail), `成功 ${runs.ok} · 失败 ${runs.fail}`),
     item("故障已处理", String(events.failureHandled || 0), null),
+    ),
   );
 }
 

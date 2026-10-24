@@ -702,21 +702,34 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
           "div",
           { class: "template-chips" },
           el("span", { class: "template-label" }, "套用模板"),
-          ...window.__openEditorTemplates().map((template) =>
-            el(
-              "button",
-              {
-                class: "chip chip-button",
-                type: "button",
-                title: template.desc,
-                onclick: () => {
-                  modal?.close();
-                  void window.__openEditorTemplate(template);
+          ...window.__openEditorTemplates().map((template) => {
+            const apply = () => {
+              modal?.close();
+              void window.__openEditorTemplate(template);
+            };
+            if (!template.custom) {
+              return el("button", { class: "chip chip-button", type: "button", title: template.desc, onclick: apply }, template.name);
+            }
+            return el(
+              "span",
+              { class: "chip chip-custom" },
+              el("button", { class: "chip-button", type: "button", title: template.command, onclick: apply }, template.name),
+              el(
+                "button",
+                {
+                  class: "chip-remove",
+                  type: "button",
+                  "aria-label": `删除模板 ${template.name}`,
+                  onclick: () => {
+                    if (typeof window.__removeTemplate === "function") {
+                      void window.__removeTemplate(template.id).then(() => modal?.close());
+                    }
+                  },
                 },
-              },
-              template.name,
-            ),
-          ),
+                "×",
+              ),
+            );
+          }),
         )
       : null,
     el(

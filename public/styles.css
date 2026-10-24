@@ -2839,6 +2839,52 @@ input[type="radio"] {
   color: var(--text-3, rgba(255, 255, 255, 0.35));
 }
 
+/* 用量趋势（近 7 天） */
+.usage-trend {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  align-items: end;
+  height: 68px;
+  padding: 4px 2px 0;
+}
+
+.usage-trend-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.usage-trend-bar {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  width: 100%;
+  height: 44px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.usage-trend-ok {
+  background: var(--ok, #6aa86a);
+  min-height: 0;
+}
+
+.usage-trend-fail {
+  background: var(--danger, #e06c75);
+  min-height: 0;
+}
+
+.usage-trend-label {
+  font-size: 10px;
+  color: var(--text-3, rgba(255, 255, 255, 0.35));
+  font-variant-numeric: tabular-nums;
+}
+
 /* 模板 chips */
 .template-chips {
   display: flex;
