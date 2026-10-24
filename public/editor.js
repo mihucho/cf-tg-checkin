@@ -804,6 +804,20 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
       },
       "复制",
     ),
+    typeof window.__saveTemplateFromCommand === "function"
+      ? el(
+          "button",
+          {
+            class: "btn btn-sm",
+            type: "button",
+            onclick: () => {
+              const text = commandBox.dataset.command;
+              window.__saveTemplateFromCommand(model.name.trim() || "我的模板", text);
+            },
+          },
+          "存为模板",
+        )
+      : null,
   );
 
   let commandTimer = null;

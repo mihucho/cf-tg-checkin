@@ -112,6 +112,25 @@ export function normalizeTaskInput(input: TaskInput | Task): TaskInput {
   };
 }
 
+/** 导出的任务：去掉运行态字段，只保留可重建的配置 */
+export function taskToExport(task: Task): TaskInput {
+  return {
+    name: task.name,
+    enabled: task.enabled,
+    target: task.target,
+    targets: task.targets,
+    threadId: task.threadId,
+    schedule: task.schedule,
+    steps: task.steps,
+    successKeywords: task.successKeywords,
+    timeoutSeconds: task.timeoutSeconds,
+    stepDelaySeconds: task.stepDelaySeconds,
+    deleteAfterSeconds: task.deleteAfterSeconds,
+    cleanupPrevious: task.cleanupPrevious,
+    source: task.source,
+  };
+}
+
 /** 判定"是不是同一个任务"用的指纹（不含 name，name 单独比较） */
 export function taskFingerprint(input: {
   target?: Target | null;

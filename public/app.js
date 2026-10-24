@@ -766,9 +766,16 @@ function renderTasks() {
     description: tasks.length
       ? `${tasks.length} 个任务 · ${enabled} 个启用 · ${tasks.length - enabled} 个停用 · 「立即执行」只是手动跑一次，不影响定时`
       : "还没有任务，先建一个签到任务。",
-    actions: tasks.length
-      ? [btn("运行全部", { iconName: "bolt", onClick: (event) => runAll(event.currentTarget) }), newBtn]
-      : [newBtn],
+    actions: [
+      btn("导入", { variant: "subtle", iconName: "download", onClick: () => openImportDialog() }),
+      ...(tasks.length
+        ? [
+            btn("导出", { variant: "subtle", iconName: "upload", onClick: () => withLoading(null, () => exportTasks()) }),
+            btn("运行全部", { iconName: "bolt", onClick: (event) => runAll(event.currentTarget) }),
+          ]
+        : []),
+      newBtn,
+    ],
   });
 
   if (!tasks.length) {
@@ -1171,7 +1178,8 @@ const TASK_TEMPLATES = [
 
 // editor.js 里要展示同一份模板，这里挂到 window 上避免循环 import
 window.__openEditorTemplate = (template) => void openTemplate(template);
-window.__openEditorTemplates = () => TASK_TEMPLATES;
+window.__openEditorTemplates = () => [...TASK_TEMPLATES, ...loadCustomTemplates()];
+window.__saveTemplateFromCommand = saveTemplateFromCommand;
 
 async function openTemplate(template) {
   const settings = (state.data && state.data.settings) || {};
@@ -1203,7 +1211,43 @@ async function openTemplate(template) {
   }
 }
 
-function templateChips() {
+const CUSTOM_TEMPLATES_KEY = "cf-tg.customTemplates";
+
+function loadCustomTemplates() {
+  try {
+    const raw = localStorage.getItem(CUSTOM_TEMPLATES_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list.filter((item) => item && item.command) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCustomTemplates(list) {
+  try {
+    localStorage.setItem(CUSTOM_TEMPLATES_KEY, JSON.stringify(list.slice(0, 20)));
+  } catch {
+    /* 隐私模式忽略 */
+  }
+}
+
+/** 把当前编辑器里的配置存成本地模板 */
+function saveTemplateFromCommand(name, command) {
+  const list = loadCustomTemplates();
+  const trimmed = String(command || "").trim();
+  if (!trimmed) {
+    toast("先生成一个等价指令，再存为模板", { kind: "error" });
+    return;
+  }
+  const id = `custom-${Date.now()}`;
+  list.unshift({ id, name: String(name || "我的模板").slice(0, 20), desc: trimmed, command: trimmed });
+  saveCustomTemplates(list);
+  toast("已存为模板（存在这台浏览器里）", { kind: "ok" });
+}
+
+/** 模板区：内置 + 自定义（自定义可删除） */
+function templateChips({ onSaved } = {}) {
+  const custom = loadCustomTemplates();
   return el(
     "div",
     { class: "template-chips" },
@@ -1220,7 +1264,127 @@ function templateChips() {
         template.name,
       ),
     ),
+    ...custom.map((template) =>
+      el(
+        "span",
+        { class: "chip chip-custom" },
+        el(
+          "button",
+          {
+            class: "chip-button",
+            type: "button",
+            title: template.command,
+            onclick: (event) => withLoading(event.currentTarget, () => openTemplate(template)),
+          },
+          template.name,
+        ),
+        el(
+          "button",
+          {
+            class: "chip-remove",
+            type: "button",
+            "aria-label": `删除模板 ${template.name}`,
+            onclick: () => {
+              saveCustomTemplates(loadCustomTemplates().filter((item) => item.id !== template.id));
+              onSaved?.();
+              paint({ force: true });
+            },
+          },
+          "×",
+        ),
+      ),
+    ),
   );
+}
+
+/** 导出全部任务为 JSON 文件 */
+async function exportTasks() {
+  try {
+    const data = await api("/api/tasks/export");
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = el("a", { href: url, download: `cf-tg-checkin-tasks-${new Date().toISOString().slice(0, 10)}.json` });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast(`已导出 ${data.tasks.length} 个任务`, { kind: "ok" });
+  } catch (error) {
+    toast(error.message || "导出失败", { kind: "error" });
+  }
+}
+
+/** 导入任务：粘贴 JSON 或选择文件 */
+function openImportDialog() {
+  const area = el("textarea", {
+    class: "textarea code-input",
+    rows: "8",
+    placeholder: '把导出文件的内容粘进来，或点「选择文件」',
+    spellcheck: "false",
+  });
+
+  const fileInput = el("input", {
+    type: "file",
+    accept: "application/json,.json",
+    class: "hidden-file",
+    onchange: async (event) => {
+      const file = event.currentTarget.files && event.currentTarget.files[0];
+      if (!file) return;
+      area.value = await file.text();
+    },
+  });
+
+  openModal({
+    title: "导入任务",
+    body: el(
+      "div",
+      { class: "stack-sm" },
+      el("p", { class: "hint" }, "支持本工具导出的 JSON（也接受单个任务的 JSON 数组）。导入时会自动跳过完全相同的任务。"),
+      el(
+        "div",
+        { class: "input-row" },
+        el("button", { class: "btn btn-sm", type: "button", onclick: () => fileInput.click() }, "选择文件"),
+        fileInput,
+      ),
+      area,
+    ),
+    footer: el(
+      "div",
+      { class: "dialog-actions" },
+      el("button", { class: "btn", type: "button", onclick: () => closeModal() }, "取消"),
+      el(
+        "button",
+        {
+          class: "btn btn-primary",
+          type: "button",
+          onclick: async (event) => {
+            const text = area.value.trim();
+            if (!text) {
+              toast("先粘贴或选择要导入的 JSON", { kind: "error" });
+              return;
+            }
+            await withLoading(event.currentTarget, async () => {
+              try {
+                const parsed = JSON.parse(text);
+                const tasks = Array.isArray(parsed) ? parsed : parsed.tasks;
+                const res = await api("/api/tasks/import", { method: "POST", body: { tasks } });
+                toast(
+                  `导入完成：新增 ${res.created} 个${res.skipped && res.skipped.length ? `，跳过 ${res.skipped.length} 个` : ""}`,
+                  { kind: "ok" },
+                );
+                closeModal();
+                await refreshState({ silent: true });
+                paint({ force: true });
+              } catch (error) {
+                toast(error.message || "导入失败", { kind: "error" });
+              }
+            });
+          },
+        },
+        "开始导入",
+      ),
+    ),
+  });
 }
 
 function openEditor(task) {
@@ -2343,7 +2507,7 @@ function renderSettings() {
           { class: "about-build" },
           `出口机房 ${runtime.colo || "未记录"}` + (runtime.locationHint ? ` · DO 区域 ${runtime.locationHint}` : ""),
         ),
-        el("div", { class: "about-build" }, usageSummary()),
+        usagePanel(),
         el(
           "p",
           { class: "hint" },
@@ -2800,7 +2964,36 @@ function banner(kind, text) {
   );
 }
 
-/** 关于里的用量统计（只统计次数，不采集内容） */
+/** 关于里的用量面板（只统计次数，不采集内容） */
+function usagePanel() {
+  const events = (state.data && state.data.events) || null;
+  if (!events) return el("div", { class: "about-build" }, "用量统计：暂无");
+
+  const created = events.tasksCreated || { ui: 0, trigger: 0 };
+  const runs = events.runs || { ok: 0, fail: 0 };
+  const totalCreated = created.ui + created.trigger;
+  const share = totalCreated ? Math.round((created.trigger / totalCreated) * 100) : 0;
+
+  const item = (label, value, hint) =>
+    el(
+      "div",
+      { class: "usage-item" },
+      el("div", { class: "usage-value num" }, value),
+      el("div", { class: "usage-label" }, label),
+      hint ? el("div", { class: "usage-hint" }, hint) : null,
+    );
+
+  return el(
+    "div",
+    { class: "usage-grid" },
+    item("首次登录", events.firstLoginAt ? formatDateTime(events.firstLoginAt) : "—", null),
+    item("任务", String(totalCreated), totalCreated ? `指令建 ${share}%` : "还没有任务"),
+    item("执行", String(runs.ok + runs.fail), `成功 ${runs.ok} · 失败 ${runs.fail}`),
+    item("故障已处理", String(events.failureHandled || 0), null),
+  );
+}
+
+/** 关于里的用量统计（纯文本版，保留给别处用） */
 function usageSummary() {
   const events = (state.data && state.data.events) || null;
   if (!events) return "用量统计：暂无";
