@@ -10,7 +10,7 @@ import { Api } from "teleproto";
 import { password as PasswordModule } from "teleproto";
 import type { TelegramClient } from "teleproto";
 import { Store } from "./db";
-import type { AccountInfo, AgentState, LogEntry, Settings, Target, Task, TaskInput } from "./types";
+import type { AccountInfo, AgentState, LogEntry, LogSource, Settings, Target, Task, TaskInput } from "./types";
 import { createTgClient, createTgClientOnDc, errorMessage, migrateDcFromError } from "./telegram/client";
 import { executeTask, resolveEntity, type ExecHooks } from "./telegram/executor";
 import { computeNextRun, formatInTimezone } from "./schedule/time";
@@ -433,6 +433,7 @@ export class TgAgent implements DurableObject {
                   ok: true,
                   level: "info",
                   message: "触发器轮询：重连后成功",
+                  source: "system",
                   detail: `控制会话 ${controlChat}`,
                 });
               } catch (retryError) {
@@ -447,6 +448,7 @@ export class TgAgent implements DurableObject {
                 ok: false,
                 level: "warn",
                 message: `触发器轮询失败（控制会话 ${controlChat}）：${message}`,
+                source: "system",
                 detail: transient ? "已自动重连重试一次，仍失败" : null,
               });
             }
@@ -465,6 +467,7 @@ export class TgAgent implements DurableObject {
                   at: now,
                   ok: false,
                   level: "warn",
+                  source: "system",
                   message:
                     decision.reason === "already-ran-today"
                       ? "跳过：今天已经执行过（每天类型任务一天只跑一次）"
@@ -497,6 +500,7 @@ export class TgAgent implements DurableObject {
         ok: false,
         level: "error",
         message: `调度出错：${errorMessage(error)}`,
+        source: "system",
         detail: logs.join("\n") || null,
       });
     }
@@ -867,6 +871,7 @@ export class TgAgent implements DurableObject {
       ok: true,
       level: "info",
       message: `管理员 ID 已设为当前账号（${meId}）`,
+      source: "system",
       detail: "只有这个账号发出的消息指令会生效；可在设置里修改。",
     });
   }
@@ -941,6 +946,7 @@ export class TgAgent implements DurableObject {
         ok: true,
         level: "info",
         message: `触发器首次轮询：记录游标 #${highest}（之前的历史消息不处理，从现在开始监听）`,
+        source: "system",
         detail: `控制会话：${controlRef}\n如果刚刚发过配置，请再发一次。`,
       });
       const greetKey = `trigger:greeted:${controlRef}`;
@@ -963,6 +969,7 @@ export class TgAgent implements DurableObject {
         ok: true,
         level: "info",
         message: `触发器轮询：发现 ${fresh.length} 条新消息`,
+        source: "system",
         detail: fresh.map((item) => `#${item.id} ${(item.message ?? "").slice(0, 80).replace(/\n/g, " / ") || "（无文本）"}`).join("\n"),
       });
     }
@@ -978,6 +985,7 @@ export class TgAgent implements DurableObject {
           level: "error",
           message: `处理触发消息失败：${errorMessage(error)}`,
           detail: (message.message ?? "").slice(0, 500),
+          source: "trigger",
         });
       }
     }
@@ -1008,6 +1016,7 @@ export class TgAgent implements DurableObject {
         detail: trace.join("\n"),
       });
       this.store.addLog({
+        source: "trigger",
         taskId: extra?.taskId ?? null,
         taskName: extra?.taskName ?? null,
         at: Date.now(),
@@ -1401,6 +1410,7 @@ export class TgAgent implements DurableObject {
         ok: true,
         level: "warn",
         message: `跳过重复任务：#${duplicate.id} 已存在相同的目标/调度/动作`,
+        source: "system",
         detail: "同一条触发配置发多次、或反复点保存，都会产生重复任务；这里直接复用已有的。",
       });
       return { task: duplicate, created: false };
@@ -1458,6 +1468,7 @@ export class TgAgent implements DurableObject {
           level: "error",
           message,
           detail: null,
+          source: options.manual ? "manual" : "auto",
         }),
       );
     }
@@ -1523,6 +1534,7 @@ export class TgAgent implements DurableObject {
           ok: true,
           level: "info",
           message: `目标已自动补全：${patch.title || (patch.username ? `@${patch.username}` : patch.id)}`,
+          source: "system",
           detail: renameTo ? `任务名同步更新为「${renameTo}」` : null,
         });
         return { entity, task: updated ?? { ...task, target: patch, ...(renameTo ? { name: renameTo } : {}) } };
@@ -1542,6 +1554,8 @@ export class TgAgent implements DurableObject {
     const previousSent = this.store.getJson<number[]>(sentKey, []);
     const hooks: ExecHooks = { log: () => undefined };
 
+    const triggerSource: LogSource = options.manual ? "manual" : "auto";
+    const startedAt = Date.now();
     let log: LogEntry;
     try {
       const settings = this.store.getSettings();
@@ -1567,6 +1581,8 @@ export class TgAgent implements DurableObject {
         level: outcome.ok ? "info" : "warn",
         message: outcome.message,
         detail: outcome.detail || null,
+        source: triggerSource,
+        durationMs: Date.now() - startedAt,
       });
     } catch (error) {
       const message = errorMessage(error);
@@ -1579,6 +1595,8 @@ export class TgAgent implements DurableObject {
         level: "error",
         message,
         detail: null,
+        source: triggerSource,
+        durationMs: Date.now() - startedAt,
       });
     }
 

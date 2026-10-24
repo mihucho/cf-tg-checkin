@@ -2529,6 +2529,35 @@ input[type="radio"] {
   background: rgba(92, 200, 189, 0.1);
 }
 
+/* 日志行的来源徽标 / 耗时 / 修复动作 */
+.log-src {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-3, rgba(255, 255, 255, 0.5));
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.log-dur {
+  font-size: 11px;
+  color: var(--text-3, rgba(255, 255, 255, 0.42));
+}
+
+.log-detail-wrap {
+  padding: 0 0 10px 18px;
+}
+
+.log-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.log-fix {
+  font-size: 12px;
+}
+
 /* 日志分页条 */
 .pager {
   display: flex;
@@ -2591,6 +2620,10 @@ input[type="radio"] {
 }
 
 /* 最近结果单元格里的「步骤日志」入口 */
+.tasks-table tbody tr.is-clickable {
+  cursor: pointer;
+}
+
 .result-cell {
   display: grid;
   gap: 3px;
@@ -2628,6 +2661,159 @@ input[type="radio"] {
   outline: 2px solid var(--accent, #5cc8bd);
   outline-offset: 2px;
   border-radius: 3px;
+}
+
+/* 概览「快速开始」清单 */
+.quickstart {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.quickstart-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.quickstart-step.is-done {
+  opacity: 0.62;
+}
+
+.quickstart-index {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  font-size: 11.5px;
+  color: var(--text-2, rgba(255, 255, 255, 0.7));
+}
+
+.quickstart-step.is-done .quickstart-index {
+  color: var(--accent, #5cc8bd);
+  border-color: rgba(92, 200, 189, 0.5);
+  background: rgba(92, 200, 189, 0.12);
+}
+
+.quickstart-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.quickstart-title {
+  font-size: 13px;
+  color: var(--text, #fff);
+}
+
+.quickstart-desc {
+  font-size: 12px;
+  color: var(--text-3, rgba(255, 255, 255, 0.45));
+  margin-top: 2px;
+}
+
+/* 任务详情弹窗 */
+.dialog.dialog-wide {
+  width: min(720px, calc(100vw - 32px));
+  max-width: 720px;
+}
+
+/* 任务详情（弹窗内容） */
+.task-detail {
+  display: grid;
+  gap: 14px;
+}
+
+.task-detail-head {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.task-detail .kv-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.task-detail .kv {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 12px;
+  margin: 0;
+  align-items: baseline;
+}
+
+.task-detail .kv-label {
+  color: var(--text-3, rgba(255, 255, 255, 0.45));
+  font-size: 12px;
+}
+
+.task-detail .kv-value {
+  font-size: 12.5px;
+  color: var(--text-2, rgba(255, 255, 255, 0.8));
+  word-break: break-word;
+}
+
+.task-runs {
+  min-height: 40px;
+}
+
+.task-run-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task-run {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.task-run-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.task-run-msg {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-run-time {
+  font-size: 11.5px;
+  color: var(--text-3, rgba(255, 255, 255, 0.42));
+}
+
+.task-run-detail {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  max-height: 200px;
+  overflow: auto;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.28);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  color: var(--text-2, rgba(255, 255, 255, 0.7));
 }
 
 /* 最近一次运行的步骤日志（弹窗） */

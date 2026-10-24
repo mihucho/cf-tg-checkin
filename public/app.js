@@ -505,6 +505,81 @@ function renderView() {
 
 /* --------------------------------------------------------------- 概览 */
 
+/** 概览顶部的「快速开始」：三步走完自动消失 */
+function quickStartCard() {
+  const data = state.data || {};
+  const account = data.account || {};
+  const settings = data.settings || {};
+  const tasks = data.tasks || [];
+  const logs = data.logs || [];
+  const hasRun = logs.some((log) => log.ok && isExecutionLog(log));
+  const example = `${settings.triggerPrefix || "tg"} 9.30 签到`;
+
+  const steps = [
+    {
+      done: Boolean(account.signedIn),
+      title: "登录 Telegram 账号",
+      desc: "填应用 ID / 密钥和手机号，收验证码即可",
+      action: { label: "去登录", href: "#/account" },
+    },
+    {
+      done: tasks.length > 0,
+      title: "创建第一个任务",
+      desc: "在收藏夹发一条指令，或用「新建任务」表单",
+      action: { label: "去任务页", href: "#/tasks" },
+    },
+    {
+      done: hasRun,
+      title: "跑一次看看",
+      desc: `例如在收藏夹发「${example}」`,
+      action: { label: "复制示例", copy: example },
+    },
+  ];
+
+  const doneCount = steps.filter((step) => step.done).length;
+  if (doneCount === steps.length) return null;
+
+  return card({
+    title: "快速开始",
+    description: `${doneCount} / ${steps.length} 步完成，全部完成后这条会自动收起。`,
+    body: el(
+      "ol",
+      { class: "quickstart" },
+      steps.map((step, index) =>
+        el(
+          "li",
+          { class: `quickstart-step${step.done ? " is-done" : ""}` },
+          el("span", { class: "quickstart-index" }, step.done ? icon("check", { size: 12 }) : String(index + 1)),
+          el(
+            "div",
+            { class: "quickstart-body" },
+            el("div", { class: "quickstart-title" }, step.title),
+            el("div", { class: "quickstart-desc" }, step.desc),
+          ),
+          step.action.href
+            ? el("a", { class: "btn btn-sm", href: step.action.href }, step.action.label)
+            : el(
+                "button",
+                {
+                  class: "btn btn-sm",
+                  type: "button",
+                  onclick: async () => {
+                    try {
+                      await navigator.clipboard.writeText(step.action.copy);
+                      toast("已复制，去收藏夹粘贴发送即可", { kind: "ok" });
+                    } catch {
+                      toast(`复制失败，可手动输入：${step.action.copy}`, { kind: "error" });
+                    }
+                  },
+                },
+                step.action.label,
+              ),
+        ),
+      ),
+    ),
+  });
+}
+
 function renderOverview() {
   const data = state.data || {};
   const account = data.account || {};
@@ -529,22 +604,21 @@ function renderOverview() {
   });
 
   const runtime = (state.data && state.data.runtime) || {};
-  const mtproto = !account.signedIn
-    ? { dot: "fail", text: "未登录" }
-    : account.connected
-      ? { dot: "ok", text: "已连接" }
-      : { dot: "idle", text: "空闲（按需连接）" };
-
   const grid = el(
     "div",
     { class: "stat-grid" },
     statCard({
       label: "Telegram 连接",
-      dot: mtproto.dot,
-      value: mtproto.text,
+      dot: account.signedIn ? "ok" : "fail",
+      value: account.signedIn
+        ? `已登录${account.me && account.me.firstName ? ` · ${account.me.firstName}` : ""}`
+        : "未登录",
       foot: account.signedIn
-        ? el("span", {}, account.me ? targetLabel({ ...account.me, title: account.me.firstName }) : "已保存登录状态")
+        ? `上次通信 ${
+            account.lastConnectedAt ? formatRelative(account.lastConnectedAt) : "还没连过"
+          } · 定时任务照常执行`
         : el("a", { class: "link", href: "#/account" }, "现在登录 Telegram"),
+      sub: account.signedIn ? "空闲是正常状态，需要时才建立连接" : null,
     }),
     statCard({
       label: "签到任务",
@@ -617,6 +691,7 @@ function renderOverview() {
   return frag(
     header,
     account.lastError ? banner("warn", account.lastError) : null,
+    quickStartCard(),
     grid,
     el(
       "div",
@@ -758,7 +833,19 @@ function taskTable(tasks) {
         el("th", { class: "th-actions" }, "操作"),
       ),
     ),
-    el("tbody", {}, tasks.map(taskRow)),
+    el(
+      "tbody",
+      {},
+      tasks.map((task) => {
+        const row = taskRow(task);
+        row.classList.add("is-clickable");
+        row.addEventListener("click", (event) => {
+          if (event.target instanceof HTMLElement && event.target.closest("button, a, input, select")) return;
+          void openTaskDetail(task);
+        });
+        return row;
+      }),
+    ),
   );
 }
 
@@ -840,7 +927,17 @@ function taskRow(task) {
 }
 
 function resultCell(task) {
-  if (!task.lastResult) return el("span", { class: "muted" }, "—");
+  if (!task.lastResult) {
+    return el(
+      "button",
+      {
+        class: "link link-sm result-detail-btn muted",
+        type: "button",
+        onclick: () => openTaskDetail(task),
+      },
+      "详情",
+    );
+  }
   const ok = task.lastResult === "ok";
   return el(
     "div",
@@ -851,45 +948,157 @@ function resultCell(task) {
       el("span", { class: `dot ${ok ? "ok" : "fail"}` }),
       el("span", {}, ok ? "成功" : "失败"),
     ),
-    task.lastDetail
-      ? el(
-          "button",
-          {
-            class: "link link-sm result-detail-btn",
-            type: "button",
-            onclick: () => openRunDetail(task),
-          },
-          "步骤日志",
-        )
-      : null,
+    el(
+      "button",
+      {
+        class: "link link-sm result-detail-btn",
+        type: "button",
+        onclick: () => openTaskDetail(task),
+      },
+      "详情",
+    ),
   );
 }
 
-/** 最后一次运行的逐步日志：弹窗里看，避免挤在表格单元格里 */
-function openRunDetail(task) {
-  const when = task.lastRunAt ? formatDateTime(task.lastRunAt) : "未知时间";
-  const ok = task.lastResult === "ok";
-  openModal({
-    title: `最近一次运行 · ${task.name || `任务 #${task.id}`}`,
+/** 任务详情弹窗：状态 + 最近运行 + 快捷操作，替代原来分散在三处的信息 */
+async function openTaskDetail(task) {
+  const settings = (state.data && state.data.settings) || {};
+  const timezone = Number(settings.timezone ?? 8);
+  const runsBox = el("div", { class: "task-runs" }, el("div", { class: "hint" }, "正在读取最近运行…"));
+
+  const modal = openModal({
+    title: `任务详情 · ${task.name || `#${task.id}`}`,
     body: el(
       "div",
-      { class: "run-detail" },
+      { class: "task-detail" },
       el(
         "div",
-        { class: "run-detail-meta" },
-        el("span", { class: `status ${ok ? "is-ok" : "is-fail"}` }, el("span", { class: `dot ${ok ? "ok" : "fail"}` }), el("span", {}, ok ? "成功" : "失败")),
-        el("span", { class: "muted" }, `· ${when}`),
-        el("span", { class: "muted" }, `· ${task.lastMessage || "无摘要"}`),
+        { class: "task-detail-head" },
+        el(
+          "span",
+          { class: `status ${task.enabled ? "is-ok" : "is-idle"}` },
+          el("span", { class: `dot ${task.enabled ? "ok" : "idle"}` }),
+          el("span", {}, task.enabled ? "已启用" : "已停用"),
+        ),
+        task.lastResult
+          ? el(
+              "span",
+              { class: `status ${task.lastResult === "ok" ? "is-ok" : "is-fail"}` },
+              el("span", { class: `dot ${task.lastResult === "ok" ? "ok" : "fail"}` }),
+              el("span", {}, task.lastResult === "ok" ? "上次成功" : "上次失败"),
+            )
+          : null,
       ),
-      el("pre", { class: "run-detail-body" }, task.lastDetail || "（这次运行没有留下步骤记录）"),
       el(
-        "p",
-        { class: "hint" },
-        "完整历史在「日志」页，这里只看最近一次。",
+        "div",
+        { class: "kv-list" },
+        kv("目标", targetLabel(task.target)),
+        kv("执行时间", describeSchedule(task.schedule, timezone)),
+        kv("下次执行", task.nextRunAt ? formatDateTime(task.nextRunAt) : "—"),
+        kv("动作", describeSteps(task.steps)),
+        task.successKeywords && task.successKeywords.length
+          ? kv("成功关键词", task.successKeywords.join(" / "))
+          : null,
+      ),
+      el("div", { class: "form-section-title" }, "最近运行"),
+      runsBox,
+    ),
+    footer: el(
+      "div",
+      { class: "dialog-actions" },
+      el(
+        "button",
+        {
+          class: "btn",
+          type: "button",
+          onclick: () => {
+            closeModal();
+            location.hash = "#/logs";
+            state.logTaskId = String(task.id);
+            void reloadLogsFromFirstPage();
+          },
+        },
+        "查看全部日志",
+      ),
+      el(
+        "button",
+        {
+          class: "btn",
+          type: "button",
+          onclick: () => {
+            closeModal();
+            openEditor(task);
+          },
+        },
+        "编辑",
+      ),
+      el(
+        "button",
+        {
+          class: "btn btn-primary",
+          type: "button",
+          onclick: async (event) => {
+            await withLoading(event.currentTarget, async () => {
+              try {
+                const res = await api(`/api/tasks/${encodeURIComponent(task.id)}/run`, { method: "POST" });
+                toast(res.ok ? "执行成功" : "执行失败", { kind: res.ok ? "ok" : "error" });
+                await renderTaskRuns(task, runsBox);
+                await refreshState({ silent: true });
+                paint({ force: true });
+              } catch (error) {
+                toast(error.message || "执行失败", { kind: "error" });
+              }
+            });
+          },
+        },
+        "立即执行",
       ),
     ),
   });
+
+  // 详情内容偏宽（键值表 + 运行列表），给弹窗加个宽度修饰类
+  if (modal && modal.dialog) modal.dialog.classList.add("dialog-wide");
+
+  await renderTaskRuns(task, runsBox);
 }
+
+async function renderTaskRuns(task, box) {
+  box.textContent = "";
+  try {
+    const res = await api(`/api/tasks/${encodeURIComponent(task.id)}/logs?limit=12`);
+    const all = Array.isArray(res && res.logs) ? res.logs : [];
+    // 只看真正的执行记录（跳过"跳过重复任务"这类系统日志）
+    const runs = all.filter(isExecutionLog).slice(0, 5);
+    if (!runs.length) {
+      box.append(el("div", { class: "hint" }, "这个任务还没运行过。点右下角「立即执行」试一次。"));
+      return;
+    }
+    box.append(
+      el(
+        "ul",
+        { class: "task-run-list" },
+        runs.map((run) =>
+          el(
+            "li",
+            { class: "task-run" },
+            el(
+              "div",
+              { class: "task-run-head" },
+              el("span", { class: `dot ${run.ok ? "ok" : run.level === "warn" ? "warn" : "fail"}` }),
+              el("span", { class: "task-run-msg" }, run.message || "(无消息)"),
+              el("span", { class: "task-run-time num", title: formatFullTime(toMillis(run.at)) }, formatRelative(toMillis(run.at))),
+            ),
+            run.detail ? el("pre", { class: "task-run-detail" }, String(run.detail)) : null,
+          ),
+        ),
+      ),
+    );
+  } catch (error) {
+    box.append(el("div", { class: "hint" }, error.message || "读取失败"));
+  }
+}
+
+
 
 function openEditor(task) {
   openTaskEditor({
@@ -1210,6 +1419,33 @@ function filterSummary() {
   return parts.length ? `（${parts.join(" · ")}）` : "";
 }
 
+const LOG_SOURCE_LABEL = { auto: "自动", manual: "手动", trigger: "指令", system: "系统" };
+
+/** 是否是一次真正的执行（排除跳过/登记/调度报警这类系统事件；老日志没有 source 只能按文案判断） */
+const SYSTEM_LOG_HINT = /跳过|登记目标|触发器|调度出错|管理员 ID|自动补全|首次轮询/;
+function isExecutionLog(log) {
+  if (log.source) return log.source !== "system";
+  return !SYSTEM_LOG_HINT.test(log.message || "");
+}
+
+/** 常见错误 → 用户可以点的那一下 */
+function logFixAction(log) {
+  const text = `${log.message || ""} ${log.detail || ""}`;
+  if (/还没登录\s*Telegram|未登录/.test(text)) {
+    return { label: "去登录", href: "#/account" };
+  }
+  if (/无法解析目标|找不到签到目标/.test(text)) {
+    return { label: "编辑任务", taskId: log.taskId };
+  }
+  if (/未匹配到关键词/.test(text)) {
+    return { label: "调整关键词", taskId: log.taskId };
+  }
+  if (/触发器轮询失败|连接中断|Disconnected|disconnected/.test(text)) {
+    return { label: "重试一次", retry: true };
+  }
+  return null;
+}
+
 function logItem(log) {
   const id = log && log.id;
   const at = toMillis(log && log.at);
@@ -1217,18 +1453,66 @@ function logItem(log) {
   const expanded = state.expandedLogs.has(id);
   const dotClass = log.ok ? "ok" : log.level === "warn" ? "warn" : "fail";
   const levelText = log.ok ? "成功" : log.level === "warn" ? "警告" : "失败";
+  const sourceLabel = LOG_SOURCE_LABEL[log.source] || null;
+  const duration = typeof log.durationMs === "number" && log.durationMs > 0
+    ? log.durationMs >= 1000
+      ? `${(log.durationMs / 1000).toFixed(1)}s`
+      : `${log.durationMs}ms`
+    : null;
+  const fix = log.ok ? null : logFixAction(log);
 
-  const detail = hasDetail
-    ? el("pre", { class: "log-detail", hidden: !expanded }, String(log.detail))
+  const fixButton = fix
+    ? el(
+        "button",
+        {
+          class: "btn btn-sm log-fix",
+          type: "button",
+          onclick: async (event) => {
+            event.stopPropagation();
+            if (fix.href) {
+              location.hash = fix.href;
+              return;
+            }
+            if (fix.taskId) {
+              const task = (state.data && state.data.tasks || []).find((item) => item.id === fix.taskId);
+              if (task) openEditor(task);
+              else location.hash = "#/tasks";
+              return;
+            }
+            if (fix.retry) {
+              await withLoading(event.currentTarget, async () => {
+                try {
+                  await api("/api/tick", { method: "POST" });
+                  toast("已重新检查一次", { kind: "ok" });
+                  await loadLogs({ silent: true });
+                } catch (error) {
+                  toast(error.message || "重试失败", { kind: "error" });
+                }
+              });
+            }
+          },
+        },
+        fix.label,
+      )
     : null;
 
+  const detail = hasDetail || fixButton
+    ? el(
+        "div",
+        { class: "log-detail-wrap", hidden: !expanded },
+        hasDetail ? el("pre", { class: "log-detail" }, String(log.detail)) : null,
+        fixButton ? el("div", { class: "log-actions" }, fixButton) : null,
+      )
+    : null;
+
+  const expandable = Boolean(detail);
   const head = el(
-    hasDetail ? "button" : "div",
+    expandable ? "button" : "div",
     {
-      class: `log-head${hasDetail ? " is-expandable" : ""}`,
-      type: hasDetail ? "button" : undefined,
-      "aria-expanded": hasDetail ? String(expanded) : undefined,
-      onclick: hasDetail
+      class: `log-head${expandable ? " is-expandable" : ""}`,
+      type: expandable ? "button" : undefined,
+      "aria-expanded": expandable ? String(expanded) : undefined,
+      onclick: expandable
         ? (event) => {
             const next = !state.expandedLogs.has(id);
             if (next) state.expandedLogs.add(id);
@@ -1251,6 +1535,8 @@ function logItem(log) {
       "span",
       { class: "log-meta" },
       el("span", { class: "log-task" }, log.taskName || "系统"),
+      sourceLabel ? el("span", { class: "log-src" }, sourceLabel) : null,
+      duration ? el("span", { class: "log-dur num" }, duration) : null,
       el("span", { class: "log-sep", "aria-hidden": "true" }, "·"),
       el(
         "span",
@@ -1261,7 +1547,7 @@ function logItem(log) {
         },
         at ? formatRelative(at) : "—",
       ),
-      hasDetail ? icon("chevron", { size: 14, className: "log-chevron" }) : null,
+      expandable ? icon("chevron", { size: 14, className: "log-chevron" }) : null,
     ),
   );
 
