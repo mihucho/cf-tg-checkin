@@ -2481,8 +2481,10 @@ input[type="radio"] {
 /* 日志筛选芯片 + 加载更多 */
 .log-filters {
   display: flex;
+  align-items: center;
   gap: 6px;
   margin: -4px 0 12px;
+  flex-wrap: wrap;
 }
 
 .chip {
@@ -2502,6 +2504,23 @@ input[type="radio"] {
 .chip:focus-visible {
   color: var(--text, #fff);
   border-color: rgba(255, 255, 255, 0.22);
+}
+
+.log-task-select,
+.log-search {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+  border-radius: 999px;
+}
+
+.log-task-select {
+  max-width: 220px;
+}
+
+.log-search {
+  min-width: 180px;
+  color: var(--text, #fff);
 }
 
 .chip.is-active {

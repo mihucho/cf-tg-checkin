@@ -205,13 +205,19 @@ export class TgAgent implements DurableObject {
       }
 
       if (path === "/logs" && method === "GET") {
-        const limit = intParam(url.searchParams.get("limit"), 50, 1, 200);
+        const limit = intParam(url.searchParams.get("limit"), 30, 1, 200);
         const beforeId = intParam(url.searchParams.get("before"), 0, 0, Number.MAX_SAFE_INTEGER) || null;
         const level = url.searchParams.get("level");
         const taskIdParam = intParam(url.searchParams.get("taskId"), 0, 0, Number.MAX_SAFE_INTEGER) || null;
-        const logs = this.store.listLogs({ limit, beforeId, level, taskId: taskIdParam });
+        const query = url.searchParams.get("q");
+        const filter = { limit, beforeId, level, taskId: taskIdParam, query };
+        const logs = this.store.listLogs(filter);
         // 只有"这一页满了"才可能有更早的；否则前端会一直显示「加载更多」
-        return json({ logs, nextBefore: logs.length === limit ? logs[logs.length - 1].id : null });
+        return json({
+          logs,
+          nextBefore: logs.length === limit ? logs[logs.length - 1].id : null,
+          total: this.store.countLogs(filter),
+        });
       }
       if (path === "/logs/clear" && method === "POST") {
         this.store.clearLogs();

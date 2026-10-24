@@ -41,10 +41,13 @@ const state = {
   view: "overview",
   logs: null, // 日志 tab 拉取的列表；概览用 state.data.logs（最新 50）
   logsNextBefore: null, // 「加载更多」游标（比页码稳：新日志插入不会跳行）
+  logsTotal: null, // 当前筛选条件下的总条数
   turnstileToken: "", // Turnstile 通过后拿到的 token（登录时提交）
   turnstileWidget: null, // widget id，用于 reset
   turnstileSiteKey: null,
   logLevel: "", // "" | "ok" | "fail"
+  logTaskId: "", // "" = 全部任务
+  logQuery: "", // 关键字搜索
   expandedLogs: new Set(),
   refreshing: false,
   accountStep: 1,
@@ -959,13 +962,16 @@ async function runTick(button) {
 
 async function loadLogs({ silent = false, append = false } = {}) {
   try {
-    const params = new URLSearchParams({ limit: "50" });
+    const params = new URLSearchParams({ limit: "30" });
     if (state.logLevel) params.set("level", state.logLevel);
+    if (state.logTaskId) params.set("taskId", String(state.logTaskId));
+    if (state.logQuery) params.set("q", state.logQuery);
     if (append && state.logsNextBefore) params.set("before", String(state.logsNextBefore));
     const res = await api(`/api/logs?${params.toString()}`);
     const logs = Array.isArray(res && res.logs) ? res.logs : [];
     state.logs = append && Array.isArray(state.logs) ? [...state.logs, ...logs] : logs;
     state.logsNextBefore = res && res.nextBefore ? res.nextBefore : null;
+    state.logsTotal = res && typeof res.total === "number" ? res.total : null;
   } catch (error) {
     if (!silent) toast(error.message || "读取日志失败", { kind: "error" });
   }
@@ -981,9 +987,11 @@ function renderLogs() {
 
   const header = pageHead({
     title: "日志",
-    description: logs.length
-      ? `已加载 ${logs.length} 条${state.logsNextBefore ? "（还有更早的）" : ""}，点击行可展开细节。服务端只保留最近 2000 条。`
-      : "执行记录与错误细节。",
+    description: state.logsTotal !== undefined && state.logsTotal !== null
+      ? `已加载 ${logs.length} / 共 ${state.logsTotal} 条${filterSummary()}，点击行可展开细节。服务端只保留最近 2000 条。`
+      : logs.length
+        ? `已加载 ${logs.length} 条${filterSummary()}`
+        : "执行记录与错误细节。",
     actions: [
       btn("刷新", {
         iconName: "refresh",
@@ -993,6 +1001,7 @@ function renderLogs() {
     ],
   });
 
+  const tasksForFilter = Array.isArray(state.data && state.data.tasks) ? state.data.tasks : [];
   const filters = el(
     "div",
     { class: "log-filters" },
@@ -1016,6 +1025,41 @@ function renderLogs() {
         label,
       ),
     ),
+    el(
+      "select",
+      {
+        class: "input log-task-select",
+        "aria-label": "按任务筛选",
+        onchange: async (event) => {
+          state.logTaskId = event.currentTarget.value;
+          state.logs = null;
+          state.logsNextBefore = null;
+          await loadLogs({ silent: true });
+        },
+      },
+      el("option", { value: "" }, "全部任务"),
+      ...tasksForFilter.map((task) =>
+        el("option", { value: String(task.id), selected: String(state.logTaskId) === String(task.id) }, `#${task.id} ${task.name}`),
+      ),
+    ),
+    el("input", {
+      class: "input log-search",
+      type: "search",
+      placeholder: "搜索日志内容…",
+      value: state.logQuery,
+      "aria-label": "搜索日志",
+      oninput: (event) => {
+        const value = event.currentTarget.value.trim();
+        if (value === state.logQuery) return;
+        state.logQuery = value;
+        clearTimeout(renderLogs._searchTimer);
+        renderLogs._searchTimer = setTimeout(async () => {
+          state.logs = null;
+          state.logsNextBefore = null;
+          await loadLogs({ silent: true });
+        }, 350);
+      },
+    }),
   );
 
   if (!logs.length) {
@@ -1054,6 +1098,19 @@ function renderLogs() {
         )
       : null,
   );
+}
+
+/** 当前筛选条件的一句话描述 */
+function filterSummary() {
+  const parts = [];
+  if (state.logLevel === "ok") parts.push("只看成功");
+  if (state.logLevel === "fail") parts.push("只看失败");
+  if (state.logTaskId) {
+    const task = (state.data && state.data.tasks || []).find((item) => String(item.id) === String(state.logTaskId));
+    parts.push(`任务 #${state.logTaskId}${task ? ` ${task.name}` : ""}`);
+  }
+  if (state.logQuery) parts.push(`搜索「${state.logQuery}」`);
+  return parts.length ? `（${parts.join(" · ")}）` : "";
 }
 
 function logItem(log) {

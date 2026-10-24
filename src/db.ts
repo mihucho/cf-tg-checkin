@@ -82,6 +82,14 @@ interface TaskRow extends Row {
   updated_at: number;
 }
 
+export interface LogFilter {
+  limit?: number;
+  beforeId?: number | null;
+  taskId?: number | null;
+  level?: string | null;
+  query?: string | null;
+}
+
 export interface LogRow extends Row {
   id: number;
   task_id: number | null;
@@ -381,10 +389,8 @@ export class Store {
    * @param options.beforeId 只取 id 更小的（「加载更多」）—— 比 page/pageSize 稳，插入新日志不会跳行
    * @param options.level "ok"（成功）/ "fail"（失败）/ 具体 level
    */
-  listLogs(
-    options: { limit?: number; beforeId?: number | null; taskId?: number | null; level?: string | null } = {},
-  ): LogEntry[] {
-    const limit = Math.max(1, Math.min(200, options.limit ?? 100));
+  /** 日志筛选条件（分页 + 任务 + 级别 + 关键字） */
+  private logFilter(options: LogFilter): { where: string; bindings: SqlStorageValue[] } {
     const where: string[] = [];
     const bindings: SqlStorageValue[] = [];
 
@@ -402,9 +408,29 @@ export class Store {
       where.push("level = ?");
       bindings.push(options.level);
     }
+    const query = (options.query ?? "").trim();
+    if (query) {
+      // LIKE 通配符要转义，避免 `%` 一把梭
+      const escaped = query.slice(0, 60).replace(/[\\%_]/g, (char) => `\\${char}`);
+      where.push("(message LIKE ? ESCAPE '\\' OR task_name LIKE ? ESCAPE '\\')");
+      bindings.push(`%${escaped}%`, `%${escaped}%`);
+    }
 
-    const sql = `SELECT * FROM logs ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY id DESC LIMIT ?`;
+    return { where: where.length ? `WHERE ${where.join(" AND ")}` : "", bindings };
+  }
+
+  listLogs(options: LogFilter = {}): LogEntry[] {
+    const limit = Math.max(1, Math.min(200, options.limit ?? 100));
+    const { where, bindings } = this.logFilter(options);
+    const sql = `SELECT * FROM logs ${where} ORDER BY id DESC LIMIT ?`;
     return this.rows<LogRow>(sql, ...bindings, limit).map(rowToLog);
+  }
+
+  /** 当前筛选条件下的总条数（前端显示"已加载 x / 共 y"） */
+  countLogs(options: LogFilter = {}): number {
+    const { where, bindings } = this.logFilter({ ...options, beforeId: null });
+    const rows = this.rows<{ total: number | null }>(`SELECT COUNT(*) AS total FROM logs ${where}`, ...bindings);
+    return rows.length ? Number(rows[0].total ?? 0) : 0;
   }
 
   clearLogs(): void {
