@@ -1120,21 +1120,7 @@ function renderLogs() {
             el(
               "div",
               { class: "pager-info" },
-              el("span", {}, `第 ${state.logPage} / ${state.logPages} 页 · 共 ${state.logsTotal ?? logs.length} 条`),
-              el(
-                "select",
-                {
-                  class: "input pager-size",
-                  "aria-label": "每页条数",
-                  onchange: async (event) => {
-                    state.logPageSize = Number(event.currentTarget.value) || 20;
-                    await reloadLogsFromFirstPage();
-                  },
-                },
-                ...[10, 20, 50, 100].map((size) =>
-                  el("option", { value: String(size), selected: size === state.logPageSize }, `每页 ${size}`),
-                ),
-              ),
+              `第 ${state.logPage} / ${state.logPages} 页 · 共 ${state.logsTotal ?? logs.length} 条`,
             ),
             el(
               "div",
@@ -1149,7 +1135,7 @@ function renderLogs() {
                 },
                 "上一页",
               ),
-              ...pageNumbers(state.logPage, state.logPages).map((item) =>
+            ...pageNumbers(state.logPage, state.logPages).map((item) =>
                 item === "…"
                   ? el("span", { class: "pager-gap" }, "…")
                   : el(
@@ -1172,6 +1158,20 @@ function renderLogs() {
                   onclick: () => goPage(state.logPage + 1),
                 },
                 "下一页",
+              ),
+              el(
+                "select",
+                {
+                  class: "input pager-size",
+                  "aria-label": "每页条数",
+                  onchange: async (event) => {
+                    state.logPageSize = Number(event.currentTarget.value) || 20;
+                    await reloadLogsFromFirstPage();
+                  },
+                },
+                ...[10, 20, 50, 100].map((size) =>
+                  el("option", { value: String(size), selected: size === state.logPageSize }, `每页 ${size}`),
+                ),
               ),
             ),
           )
