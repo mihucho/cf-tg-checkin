@@ -62,6 +62,8 @@ export interface Task {
   nextRunAt: number | null;
   lastRunAt: number | null;
   lastResult: "ok" | "fail" | null;
+  /** 连续失败次数（成功会清零；达到阈值自动暂停任务） */
+  failStreak?: number;
   lastMessage: string | null;
   /** 最后一次运行的逐步日志（换行分隔，界面里可展开查看） */
   lastDetail?: string | null;
@@ -109,6 +111,10 @@ export interface Settings {
   stepWaitSeconds: number;
   /** 触发前缀：只有以它开头的消息才当配置解析（默认 "tg"；设成空字符串表示全部都解析） */
   triggerPrefix: string;
+  /** 任务连续失败时提醒自己（Telegram 私聊） */
+  notifyOnFailure: boolean;
+  /** 可选：额外 POST 到这个 Webhook（JSON） */
+  notifyWebhook: string;
   /** Turnstile 站点 key（公开，会下发前端） */
   turnstileSiteKey: string;
   /** Turnstile 密钥：只在服务端用，接口永远不回传（用 turnstileSecretConfigured 表示有没有） */
@@ -168,6 +174,8 @@ export const DEFAULT_SETTINGS: Settings = {
   stepPollSeconds: 3,
   stepWaitSeconds: 30,
   triggerPrefix: "tg",
+  notifyOnFailure: true,
+  notifyWebhook: "",
   turnstileSiteKey: "",
   turnstileSecretKey: "",
 };

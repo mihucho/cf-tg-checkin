@@ -742,6 +742,63 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
 
   const errorBox = el("p", { class: "form-error", role: "alert", hidden: true });
 
+  // 「等价指令」：表单改动后防抖生成，用来备份 / 在收藏夹里重建
+  const commandBox = el(
+    "div",
+    { class: "equiv-command" },
+    el("div", { class: "equiv-label" }, "等价指令"),
+    el("code", { class: "equiv-text" }, "填写目标与动作后自动生成"),
+    el(
+      "button",
+      {
+        class: "btn btn-sm",
+        type: "button",
+        onclick: async () => {
+          const text = commandBox.dataset.command;
+          if (text) await copyText(text, "指令已复制");
+        },
+      },
+      "复制",
+    ),
+  );
+
+  let commandTimer = null;
+  const refreshCommand = () => {
+    clearTimeout(commandTimer);
+    commandTimer = setTimeout(async () => {
+      try {
+        const payload = {
+          name: model.name.trim() || "任务",
+          enabled: Boolean(model.enabled),
+          target: buildTarget() || { kind: "user", id: "" },
+          schedule: buildSchedule(),
+          steps: buildSteps(),
+          successKeywords: String(model.successKeywords || "")
+            .split(/[,，、\n]+/)
+            .map((item) => item.trim())
+            .filter(Boolean),
+          timeoutSeconds: clampInt(model.timeoutSeconds, 5, 120, 30),
+          stepDelaySeconds: clampInt(model.stepDelaySeconds, 0, 60, 3),
+          deleteAfterSeconds: clampInt(model.deleteAfterSeconds, 0, 86400, 0),
+          cleanupPrevious: Boolean(model.cleanupPrevious),
+          threadId: model.threadId ?? null,
+          source: "ui",
+        };
+        const res = await api("/api/command", { method: "POST", body: payload });
+        const text = String(res.command || "");
+        commandBox.dataset.command = text;
+        const node = commandBox.querySelector(".equiv-text");
+        if (node) node.textContent = text || "（还不能生成：检查目标和动作）";
+      } catch (error) {
+        // 草稿不完整或接口报错时，把原因显示出来（总比一直显示占位文案好）
+        const node = commandBox.querySelector(".equiv-text");
+        if (node) node.textContent = `（暂时无法生成：${error.message || "草稿不完整"}）`;
+      }
+    }, 450);
+  };
+  body.addEventListener("input", refreshCommand);
+  body.addEventListener("change", refreshCommand);
+
   const cancelButton = el(
     "button",
     { class: "btn", type: "button", onclick: () => closeEditor() },
@@ -756,9 +813,12 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
   const modal = openModal({
     title: isEdit ? "编辑任务" : "新建任务",
     variant: "drawer",
-    body: el("div", {}, body, errorBox),
+    body: el("div", {}, body, errorBox, commandBox),
     footer: el("div", { class: "dialog-actions" }, cancelButton, saveButton),
   });
+
+  // 打开时先生成一次
+  refreshCommand();
 
   function closeEditor() {
     modal?.close();

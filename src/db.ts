@@ -26,6 +26,7 @@ const SCHEMA = [
       last_result TEXT,
       last_message TEXT,
       last_detail TEXT,
+      fail_streak INTEGER NOT NULL DEFAULT 0,
       source TEXT NOT NULL DEFAULT 'ui',
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
@@ -79,6 +80,7 @@ interface TaskRow extends Row {
   last_result: string | null;
   last_message: string | null;
   last_detail: string | null;
+  fail_streak: number | null;
   source: string;
   created_at: number;
   updated_at: number;
@@ -141,6 +143,7 @@ export function rowToTask(row: TaskRow): Task {
     lastResult: (row.last_result as Task["lastResult"]) ?? null,
     lastMessage: row.last_message,
     lastDetail: row.last_detail,
+    failStreak: row.fail_streak ?? 0,
     source: (row.source as Task["source"]) ?? "ui",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -173,6 +176,11 @@ export class Store {
     }
     try {
       this.sql.exec("ALTER TABLE tasks ADD COLUMN last_detail TEXT");
+    } catch {
+      /* 列已存在 */
+    }
+    try {
+      this.sql.exec("ALTER TABLE tasks ADD COLUMN fail_streak INTEGER NOT NULL DEFAULT 0");
     } catch {
       /* 列已存在 */
     }
@@ -347,15 +355,24 @@ export class Store {
 
   recordRun(id: number, result: "ok" | "fail", message: string, detail: string | null, now: number): void {
     this.sql.exec(
-      "UPDATE tasks SET last_run_at = ?, last_result = ?, last_message = ?, last_detail = ?, updated_at = ? WHERE id = ?",
+      `UPDATE tasks SET last_run_at = ?, last_result = ?, last_message = ?, last_detail = ?,
+         fail_streak = CASE WHEN ? = 'ok' THEN 0 ELSE fail_streak + 1 END, updated_at = ?
+       WHERE id = ?`,
       now,
       result,
       message,
       detail,
+      result,
       now,
       id,
     );
   }
+
+  failStreakOf(id: number): number {
+    const rows = this.rows<{ fail_streak: number | null }>("SELECT fail_streak FROM tasks WHERE id = ?", id);
+    return rows.length ? Number(rows[0].fail_streak ?? 0) : 0;
+  }
+
 
   deleteTask(id: number): void {
     this.sql.exec("DELETE FROM tasks WHERE id = ?", id);

@@ -43,6 +43,8 @@
     "defaultTarget": "",         // 触发消息解析不到目标时的兜底目标
     "stepPollSeconds": 3,        // 等下一步按钮/回复时，每隔多少秒查一次（1–30）
     "stepWaitSeconds": 30,       // 单次最多等多久（5–300）
+    "notifyOnFailure": true,     // 任务失败时给自己发一条 Telegram 消息
+    "notifyWebhook": "",         // 可选：失败时 POST 到自定义 Webhook
     "triggerPrefix": "tg",       // 触发前缀（默认 "tg"）：只有以它开头的消息才当配置解析；空字符串=全部解析
   },
   "tasks": [ Task ],
@@ -125,6 +127,7 @@
 | PATCH | `/api/tasks/:id` | 任意 Task 字段子集 | `{ task }` |
 | DELETE | `/api/tasks/:id` | – | `{ ok: true }` |
 | POST | `/api/tasks/:id/run` | – | `{ ok: boolean, log: LogEntry }` |
+| GET | `/api/tasks/:id/command` | – | `{ command: string }`（把这个任务转成指令文本） |
 | POST | `/api/tasks/run-all` | – | `{ ok: boolean, logs: [LogEntry] }` |
 | GET | `/api/tasks/:id/logs?limit=20` | – | `{ logs: [LogEntry] }` |
 
@@ -167,7 +170,8 @@ LIKE 通配符已转义）。服务端只保留最近 2000 条。
 
 | 方法 | 路径 | 请求体 | 响应 |
 | --- | --- | --- | --- |
-| POST | `/api/trigger/parse` | `{ text: "9.30 签到 btn:立即签到 #kw:签到成功" }` | `{ ok: true, task: Task, explanation: string }` 或 `{ ok: false, error: string }` |
+| POST | `/api/trigger/parse` | `{ text: "tg 9.30 签到 btn:立即签到 #kw:签到成功" }` | `{ ok: true, task: Task, explanation: string, autoName?: boolean }` 或 `{ ok: false, error: string }` |
+| POST | `/api/command` | `TaskInput` 草稿 | `{ command: string }`（编辑器「等价指令」实时预览用） |
 
 ## 手动触发一次调度
 
