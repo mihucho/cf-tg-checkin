@@ -101,6 +101,8 @@ export interface LogFilter {
   taskId?: number | null;
   level?: string | null;
   query?: string | null;
+  /** 只看这个时间点之后的日志（ms） */
+  since?: number | null;
 }
 
 export interface LogRow extends Row {
@@ -456,6 +458,10 @@ export class Store {
     if (options.beforeId) {
       where.push("id < ?");
       bindings.push(options.beforeId);
+    }
+    if (options.since) {
+      where.push("at >= ?");
+      bindings.push(options.since);
     }
     if (options.level === "ok") where.push("ok = 1");
     else if (options.level === "fail") where.push("ok = 0");

@@ -21,7 +21,7 @@ function dedupeTargets(targets: Target[]): Target[] {
   const result: Target[] = [];
   for (const target of targets) {
     if (!target || (!target.id && !target.username)) continue;
-    const key = (target.username || target.id).toLowerCase();
+    const key = `${(target.username || target.id).toLowerCase()}#${target.threadId ?? ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(target);
@@ -39,6 +39,10 @@ function normalizeTarget(input: TaskInput | Task): Target {
     title: input.target?.title ? clampText(input.target.title, MAX_HANDLE) : undefined,
     username: input.target?.username ? clampText(input.target.username, MAX_HANDLE) : undefined,
     accessHash: input.target?.accessHash ? clampText(input.target.accessHash, 32) : undefined,
+    threadId:
+      Number.isFinite(Number(input.target?.threadId)) && Number(input.target?.threadId) > 0
+        ? Math.floor(Number(input.target?.threadId))
+        : undefined,
   };
 }
 

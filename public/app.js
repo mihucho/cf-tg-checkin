@@ -1524,6 +1524,7 @@ async function loadLogs({ silent = false } = {}) {
     if (state.logLevel) params.set("level", state.logLevel);
     if (state.logTaskId) params.set("taskId", String(state.logTaskId));
     if (state.logQuery) params.set("q", state.logQuery);
+    if (state.logSinceHours) params.set("sinceHours", String(state.logSinceHours));
     const res = await api(`/api/logs?${params.toString()}`);
     state.logs = Array.isArray(res && res.logs) ? res.logs : [];
     state.logsTotal = res && typeof res.total === "number" ? res.total : null;
@@ -1600,6 +1601,23 @@ function renderLogs() {
       ...tasksForFilter.map((task) =>
         el("option", { value: String(task.id), selected: String(state.logTaskId) === String(task.id) }, `#${task.id} ${task.name}`),
       ),
+    ),
+    el(
+      "select",
+      {
+        class: "input log-time-select",
+        "aria-label": "按时间范围筛选",
+        onchange: async (event) => {
+          state.logSinceHours = event.currentTarget.value;
+          await reloadLogsFromFirstPage();
+        },
+      },
+      ...[
+        ["", "全部时间"],
+        ["1", "近 1 小时"],
+        ["24", "近 24 小时"],
+        ["168", "近 7 天"],
+      ].map(([value, label]) => el("option", { value, selected: String(state.logSinceHours) === value }, label)),
     ),
     el("input", {
       class: "input log-search",
@@ -1740,6 +1758,10 @@ function filterSummary() {
   if (state.logTaskId) {
     const task = (state.data && state.data.tasks || []).find((item) => String(item.id) === String(state.logTaskId));
     parts.push(`任务 #${state.logTaskId}${task ? ` ${task.name}` : ""}`);
+  }
+  if (state.logSinceHours) {
+    const labels = { 1: "近 1 小时", 24: "近 24 小时", 168: "近 7 天" };
+    parts.push(labels[state.logSinceHours] || `近 ${state.logSinceHours} 小时`);
   }
   if (state.logQuery) parts.push(`搜索「${state.logQuery}」`);
   return parts.length ? `（${parts.join(" · ")}）` : "";

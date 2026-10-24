@@ -519,7 +519,7 @@ export async function executeTask(
           const sentMessage = (await client.sendMessage(entity as never, {
             message: text,
             parseMode: false,
-            replyTo: task.threadId ?? undefined,
+            replyTo: task.target.threadId ?? task.threadId ?? undefined,
           })) as Api.Message;
           if (sentMessage?.id) {
             sent.push(sentMessage.id);

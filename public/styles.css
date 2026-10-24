@@ -2507,6 +2507,7 @@ input[type="radio"] {
 }
 
 .log-task-select,
+.log-time-select,
 .log-search {
   height: 30px;
   padding: 0 10px;
@@ -2516,6 +2517,10 @@ input[type="radio"] {
 
 .log-task-select {
   max-width: 220px;
+}
+
+.log-time-select {
+  max-width: 130px;
 }
 
 .log-search {
@@ -3082,8 +3087,9 @@ input[type="radio"] {
     gap: 8px;
   }
 
-  /* 下拉保持 1 格、搜索占剩余 2 格：与芯片同一行流里只多一行 */
-  .log-filters .log-task-select {
+  /* 两个下拉各 1 格、搜索占剩余：与芯片同一行流里只多一行 */
+  .log-filters .log-task-select,
+  .log-filters .log-time-select {
     grid-column: span 1;
     max-width: none;
     width: 100%;
@@ -3091,7 +3097,7 @@ input[type="radio"] {
   }
 
   .log-filters .log-search {
-    grid-column: span 2;
+    grid-column: span 1;
     max-width: none;
     width: 100%;
     min-width: 0;

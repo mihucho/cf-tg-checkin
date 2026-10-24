@@ -158,6 +158,20 @@ test("多目标：到:a|b 与 @a|b", () => {
   assert.equal(parse("9.30 签到 @a_bot", {}).task!.targets, undefined);
 });
 
+test("目标话题：#12 后缀只作用于该目标", () => {
+  const single = parse("9.30 签到 @group#12", {}).task!;
+  assert.equal(single.target.threadId, 12);
+  assert.equal(single.threadId, null);
+
+  const multi = parse("9.30 签到 到:@a#12|@b", {}).task!;
+  assert.equal(multi.targets?.[0].threadId, 12);
+  assert.equal(multi.targets?.[1].threadId, undefined);
+
+  // 全角/无数字都要安全退化
+  assert.equal(parse("9.30 签到 @group#", {}).task!.target.threadId, undefined);
+  assert.equal(parse("9.30 签到 @group#0", {}).task!.target.threadId, undefined);
+});
+
 test("目标反例：@here 没有当前会话时要明确报错", () => {
   assert.match(parseError("9.30 打卡 @here", {}), /@here/);
 });

@@ -91,8 +91,12 @@ export function taskToCommand(task: CommandSource, prefix = "tg"): string {
 
   parts.push(scheduleToCommand(task.schedule));
   const targets = (task.targets ?? []).filter(Boolean);
+  const withThread = (item: Target) =>
+    `${item.username ? `@${item.username.replace(/^@/, "")}` : item.id}${item.threadId ? `#${item.threadId}` : ""}`;
   if (targets.length > 1) {
-    parts.push(`到:${targets.map((item) => (item.username ? `@${item.username.replace(/^@/, "")}` : item.id)).join("|")}`);
+    parts.push(`到:${targets.map(withThread).join("|")}`);
+  } else if (task.target.threadId) {
+    parts.push(`到:${withThread(task.target)}`);
   } else {
     parts.push(targetToCommand(task.target));
   }

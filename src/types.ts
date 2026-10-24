@@ -27,6 +27,8 @@ export interface Target {
   username?: string;
   /** 目标实体的 access_hash（有它就不必"见过"对方也能解析） */
   accessHash?: string;
+  /** 话题 id：只对这个目标生效，优先于任务的 threadId */
+  threadId?: number;
 }
 
 export type ScheduleKind = "daily" | "window" | "interval" | "once";
