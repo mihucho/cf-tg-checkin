@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#0b0d10" />
-    <meta name="description" content="Telegram 定时签到任务控制台" />
+    <meta name="description" content="Telegram 自动签到控制台" />
     <meta name="robots" content="noindex, nofollow" />
     <title>TG 签到台</title>
     <link
@@ -50,7 +50,7 @@
         </div>
 
         <h1 class="login-title" id="login-title">管理员登录</h1>
-        <p class="login-desc">输入 Cloudflare 里配置的 ADMIN_PASSWORD 进入控制台。</p>
+        <p class="login-desc">输入管理密码，进入签到控制台。</p>
 
         <form id="login-form" class="login-form" novalidate>
           <div class="field">
@@ -79,13 +79,11 @@
             <path d="M12 17.3v.01" />
           </svg>
           <div class="banner-text">
-            <strong>服务端还没有配置管理员密码。</strong>
+            <strong>还没有设置管理密码。</strong>
             <p>
-              在 Cloudflare 控制台把
+              在 Cloudflare 控制台给这个 Worker 添加一个名为
               <code class="code">ADMIN_PASSWORD</code>
-              设为 Worker 的 secret（或写进
-              <code class="code">.dev.vars</code>
-              用于本地开发），然后刷新页面。
+              的密钥（Settings → Variables and Secrets），保存后刷新本页即可。
             </p>
           </div>
         </div>
