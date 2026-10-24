@@ -16,11 +16,13 @@ export function shouldAutoFillAdminId(options: {
   return true;
 }
 
-/** Turnstile 的 Secret 永远不回传，只给一个"已配置"的布尔标记 */
+/** 敏感值（Turnstile Secret、Webhook 加签密钥）永远不回传，只给"已配置"的布尔标记 */
 export function redactSettings(settings: Settings): Settings {
   return {
     ...settings,
     turnstileSecretKey: "",
     turnstileSecretConfigured: Boolean(settings.turnstileSecretKey),
+    notifyWebhookSecret: "",
+    notifyWebhookSecretConfigured: Boolean(settings.notifyWebhookSecret),
   };
 }

@@ -11,6 +11,7 @@ import { password as PasswordModule } from "teleproto";
 import type { TelegramClient } from "teleproto";
 import { Store } from "./db";
 import type { AccountInfo, AgentState, LogEntry, LogSource, Settings, Target, Task, TaskInput } from "./types";
+import { buildWebhookPayload, detectWebhookKind, parseWebhookResult } from "./notify/webhook";
 import { createTgClient, createTgClientOnDc, errorMessage, isConnectionError, migrateDcFromError } from "./telegram/client";
 import { executeTask, resolveEntity, type ExecHooks } from "./telegram/executor";
 import { computeNextRun, formatInTimezone } from "./schedule/time";
@@ -158,13 +159,17 @@ export class TgAgent implements DurableObject {
       if (colo && this.store.getKv("runtime:colo") !== colo) this.store.setKv("runtime:colo", colo);
       if (path === "/state" && method === "GET") return json(this.buildState());
       if (path === "/settings" && method === "POST") {
-        const body = (await request.json()) as Partial<Settings> & { clearTurnstileSecret?: boolean };
-        const { clearTurnstileSecret, ...rest } = body;
+        const body = (await request.json()) as Partial<Settings> & {
+          clearTurnstileSecret?: boolean;
+          clearNotifyWebhookSecret?: boolean;
+        };
+        const { clearTurnstileSecret, clearNotifyWebhookSecret, ...rest } = body;
         const patch: Partial<Settings> = { ...rest };
         if (clearTurnstileSecret) patch.turnstileSecretKey = "";
         const before = this.store.getSettings();
         const saved = this.store.saveSettings(sanitizeSettings(patch));
         if (clearTurnstileSecret) this.store.saveSettings({ turnstileSecretKey: "" });
+        if (clearNotifyWebhookSecret) this.store.saveSettings({ notifyWebhookSecret: "" });
         if (before.controlChat !== saved.controlChat) this.resetTriggerCursor();
         if (before.triggerEnabled !== saved.triggerEnabled) await this.scheduleNextAlarm();
         return json({ settings: redactSettings(this.store.getSettings()) });
@@ -578,6 +583,8 @@ export class TgAgent implements DurableObject {
         source: "system",
         detail: logs.join("\n") || null,
       });
+      // 连不上 Telegram / 凭证失效会导致整批任务都跑不了，值得单独推一条（30 分钟节流）
+      await this.notifyConnectionProblem(errorMessage(error));
     }
 
     await this.scheduleNextAlarm();
@@ -1811,23 +1818,90 @@ export class TgAgent implements DurableObject {
       /* 自己给自己发也可能失败（比如被限流），不影响主流程 */
     }
 
+    await this.sendWebhook(settings, {
+      taskId: task.id,
+      taskName: task.name,
+      title: `⚠️ 任务「${task.name}」执行失败`,
+      text: reason,
+    });
+  }
+
+  /** 整批跑不动（连不上 / 凭证失效）时的提醒：不走按任务的 1 小时节流，单独 30 分钟一次 */
+  private async notifyConnectionProblem(reason: string): Promise<void> {
+    const settings = this.store.getSettings();
+    if (!settings.notifyOnFailure) return;
+    const key = "notify:connection:at";
+    const last = Number(this.store.getKv(key) ?? 0);
+    if (Date.now() - last < 30 * 60_000) return;
+    this.store.setKv(key, String(Date.now()));
+
+    await this.sendWebhook(settings, {
+      title: "⚠️ 签到台连不上 Telegram",
+      text: `${reason}\n所有到期任务都没能执行，请检查登录状态（设置 → 账号）或网络。`,
+    });
+  }
+
+  /**
+   * 推送一条 Webhook 消息。
+   *
+   * 渠道由设置里手动选择（钉钉 / 企业微信 / 飞书 / 通用 JSON）；
+   * 这些平台**出错也返回 HTTP 200**，所以必须解析 body 里的 errcode/code，
+   * 失败要落日志，否则「消息没到」会被当成推送成功。
+   */
+  private async sendWebhook(
+    settings: Settings,
+    message: { taskId?: number | null; taskName?: string | null; title: string; text: string },
+  ): Promise<boolean> {
     const webhook = (settings.notifyWebhook ?? "").trim();
-    if (webhook && /^https?:\/\//i.test(webhook)) {
-      try {
-        await fetch(webhook, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            taskId: task.id,
-            taskName: task.name,
-            ok: false,
-            message: reason,
-            at: Date.now(),
-          }),
+    if (!webhook || !/^https?:\/\//i.test(webhook)) return false;
+
+    // 老配置没有渠道字段时按域名兜底猜一次
+    const kind = settings.notifyWebhookKind ?? detectWebhookKind(webhook);
+    const now = Date.now();
+    try {
+      const payload = await buildWebhookPayload(
+        webhook,
+        settings.notifyWebhookSecret ?? "",
+        {
+          ...message,
+          text: `${message.text}\n时间：${formatInTimezone(now, settings.timezone)}`,
+          at: now,
+        },
+        { kind, now },
+      );
+      const response = await fetch(payload.url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: payload.body,
+        signal: AbortSignal.timeout(8000),
+      });
+      const body = await response.text().catch(() => "");
+      const result = parseWebhookResult(payload.kind, response.status, body);
+      if (!result.ok) {
+        this.store.addLog({
+          taskId: message.taskId ?? null,
+          taskName: message.taskName ?? null,
+          at: now,
+          ok: false,
+          level: "warn",
+          message: `Webhook 推送失败（${payload.kind}）：${result.error}`,
+          detail: "检查地址、加签密钥是否正确；钉钉的加签密钥只存服务端，留空保存表示不修改。",
+          source: "system",
         });
-      } catch {
-        /* 忽略 */
       }
+      return result.ok;
+    } catch (error) {
+      this.store.addLog({
+        taskId: message.taskId ?? null,
+        taskName: message.taskName ?? null,
+        at: now,
+        ok: false,
+        level: "warn",
+        message: `Webhook 推送失败（${kind}）：${errorMessage(error)}`,
+        detail: null,
+        source: "system",
+      });
+      return false;
     }
   }
 
@@ -1979,6 +2053,17 @@ function sanitizeSettings(patch: Partial<Settings>): Partial<Settings> {
   if (patch.notifyOnFailure !== undefined) clean.notifyOnFailure = !!patch.notifyOnFailure;
   if (patch.notifyWebhook !== undefined) {
     clean.notifyWebhook = String(patch.notifyWebhook).trim().slice(0, 300);
+  }
+  if (patch.notifyWebhookKind !== undefined) {
+    const kinds = ["generic", "dingtalk", "wecom", "feishu"];
+    if (kinds.includes(String(patch.notifyWebhookKind))) {
+      clean.notifyWebhookKind = patch.notifyWebhookKind;
+    }
+  }
+  if (patch.notifyWebhookSecret !== undefined) {
+    const secret = String(patch.notifyWebhookSecret).trim().slice(0, 200);
+    // 空字符串表示"保持不变"，要清除请用 clearNotifyWebhookSecret
+    if (secret) clean.notifyWebhookSecret = secret;
   }
   if (patch.triggerPrefix !== undefined) {
     clean.triggerPrefix = String(patch.triggerPrefix).trim().slice(0, 20);

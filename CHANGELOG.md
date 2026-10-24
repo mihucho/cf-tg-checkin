@@ -30,6 +30,21 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-24
+
+**失败提醒支持钉钉 / 企业微信 / 飞书**（原来只能发通用 JSON，钉钉会直接丢弃，而且照样记成功）。
+
+- 设置里**手动选择渠道**：通用 JSON / 钉钉自定义机器人 / 企业微信群机器人 / 飞书自定义机器人
+  （不靠域名猜；老配置没有这个字段时才用域名兜底猜一次）
+- 各平台包体：钉钉 `{msgtype,text,at}`、企业微信 `{msgtype,text}`、飞书 `{msg_type,content}`
+- **钉钉加签**：填「加签密钥」后自动算 `timestamp` + `sign`（`base64(HMAC-SHA256(secret, "ts\nsecret"))`）
+  并拼到 URL；密钥只存服务端、接口不回传（`notifyWebhookSecretConfigured` 表示是否已配，可清除）
+- **必须解析响应**：这三家出错也返回 HTTP 200，现在读 `errcode` / `code`，
+  失败落一条「Webhook 推送失败（渠道）：原因」日志（原来静默当成功）
+- 新增提醒触发点：整批任务跑不动（连不上 Telegram / 凭证失效）也会推一条，30 分钟节流
+- 新模块 `src/notify/webhook.ts` + `tests/webhook.test.ts`（6 例，含与 node:crypto 独立实现逐字节比对）
+- 集成测试补 4 项（渠道持久化、密钥不回传、非法渠道忽略、可清除），共 34 项
+
 ## [0.12.1] - 2026-10-24
 
 - **修：点任务行的操作图标也会弹出任务详情**。行点击的守卫用的是

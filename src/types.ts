@@ -107,6 +107,8 @@ export interface TaskTemplate {
   command: string;
 }
 
+export type WebhookKind = "generic" | "dingtalk" | "wecom" | "feishu";
+
 export interface Settings {
   /** 时区偏移小时，可为小数（Asia/Shanghai = 8） */
   timezone: number;
@@ -125,8 +127,14 @@ export interface Settings {
   triggerPrefix: string;
   /** 任务连续失败时提醒自己（Telegram 私聊） */
   notifyOnFailure: boolean;
-  /** 可选：额外 POST 到这个 Webhook（JSON） */
+  /** 可选：失败提醒推送到这个 Webhook */
   notifyWebhook: string;
+  /** 推送渠道（手动选择）：钉钉 / 企业微信 / 飞书 / 通用 JSON */
+  notifyWebhookKind: WebhookKind;
+  /** 钉钉「加签」密钥：只存服务端，接口不回传（用 notifyWebhookSecretConfigured 表示有没有） */
+  notifyWebhookSecret: string;
+  /** 只读标记：接口返回时告知前端"加签密钥已配置" */
+  notifyWebhookSecretConfigured?: boolean;
   /** 自定义模板（最多 20 个） */
   templates: TaskTemplate[];
   /** Turnstile 站点 key（公开，会下发前端） */
@@ -198,6 +206,8 @@ export const DEFAULT_SETTINGS: Settings = {
   triggerPrefix: "tg",
   notifyOnFailure: true,
   notifyWebhook: "",
+  notifyWebhookKind: "generic",
+  notifyWebhookSecret: "",
   turnstileSiteKey: "",
   turnstileSecretKey: "",
   templates: [],
