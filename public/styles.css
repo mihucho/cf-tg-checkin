@@ -2663,6 +2663,65 @@ input[type="radio"] {
   border-radius: 3px;
 }
 
+/* 设置页分组 */
+.settings-group {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.settings-group + .settings-group {
+  margin-top: 10px;
+}
+
+.settings-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  background: none;
+  color: var(--text, #fff);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  text-align: left;
+}
+
+.settings-group-head:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.settings-group-chevron {
+  display: inline-flex;
+  color: var(--text-3, rgba(255, 255, 255, 0.4));
+  transform: rotate(-90deg);
+  transition: transform 140ms ease;
+}
+
+.settings-group-chevron.is-open {
+  transform: none;
+}
+
+.settings-group-body {
+  display: grid;
+  gap: 14px;
+  padding: 4px 14px 16px;
+}
+
+.form-actions-sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-top: 4px;
+  padding: 12px 0 4px;
+  background: linear-gradient(to top, var(--bg, #0b0d10) 60%, transparent);
+}
+
 /* 概览「快速开始」清单 */
 .quickstart {
   display: grid;
@@ -2878,4 +2937,100 @@ input[type="radio"] {
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--text-2, rgba(255, 255, 255, 0.78));
+}
+
+/* ---------------------------------------------------------------- 移动端（≤560px / ≤420px） */
+@media (max-width: 560px) {
+  /* 设置：双列改单列，分组内边距收紧 */
+  #settings-form .form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-group-body {
+    padding: 4px 12px 14px;
+  }
+
+  /* 日志：芯片一行，下拉 + 搜索一行 */
+  .log-filters {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  /* 下拉保持 1 格、搜索占剩余 2 格：与芯片同一行流里只多一行 */
+  .log-filters .log-task-select {
+    grid-column: span 1;
+    max-width: none;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .log-filters .log-search {
+    grid-column: span 2;
+    max-width: none;
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* 分页：信息 / 按钮 / 每页 依次折行 */
+  .pager {
+    justify-content: center;
+  }
+
+  .pager-actions {
+    width: 100%;
+    justify-content: center;
+    order: 2;
+  }
+
+  .pager-info {
+    order: 1;
+    justify-content: center;
+  }
+
+  .pager-size {
+    order: 3;
+    margin-left: 2px;
+  }
+
+  /* 任务详情：键值表标签收窄 */
+  .task-detail .kv {
+    grid-template-columns: 72px 1fr;
+    gap: 8px;
+  }
+
+  /* 编辑器：抽屉全屏 */
+  .dialog.drawer {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+  }
+
+  .dialog.drawer .dialog-foot {
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  .dialog.drawer .dialog-foot .btn {
+    flex: 1 1 0;
+  }
+
+  /* 概览：统计卡单列 */
+  .stat-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 420px) {
+  /* 顶栏：时钟让位 */
+  .clock {
+    display: none;
+  }
+
+  .quickstart-step {
+    flex-wrap: wrap;
+  }
 }
