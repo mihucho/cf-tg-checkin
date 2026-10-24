@@ -40,8 +40,10 @@ const state = {
   data: null,
   view: "overview",
   logs: null, // 日志 tab 拉取的列表；概览用 state.data.logs（最新 50）
-  logsNextBefore: null, // 「加载更多」游标（比页码稳：新日志插入不会跳行）
   logsTotal: null, // 当前筛选条件下的总条数
+  logPage: 1,
+  logPageSize: 20,
+  logPages: 1,
   turnstileToken: "", // Turnstile 通过后拿到的 token（登录时提交）
   turnstileWidget: null, // widget id，用于 reset
   turnstileSiteKey: null,
@@ -981,22 +983,28 @@ async function runTick(button) {
 
 /* --------------------------------------------------------------- 日志 */
 
-async function loadLogs({ silent = false, append = false } = {}) {
+async function loadLogs({ silent = false } = {}) {
   try {
-    const params = new URLSearchParams({ limit: "30" });
+    const params = new URLSearchParams({ pageSize: String(state.logPageSize), page: String(state.logPage) });
     if (state.logLevel) params.set("level", state.logLevel);
     if (state.logTaskId) params.set("taskId", String(state.logTaskId));
     if (state.logQuery) params.set("q", state.logQuery);
-    if (append && state.logsNextBefore) params.set("before", String(state.logsNextBefore));
     const res = await api(`/api/logs?${params.toString()}`);
-    const logs = Array.isArray(res && res.logs) ? res.logs : [];
-    state.logs = append && Array.isArray(state.logs) ? [...state.logs, ...logs] : logs;
-    state.logsNextBefore = res && res.nextBefore ? res.nextBefore : null;
+    state.logs = Array.isArray(res && res.logs) ? res.logs : [];
     state.logsTotal = res && typeof res.total === "number" ? res.total : null;
+    state.logPages = res && typeof res.pages === "number" ? res.pages : 1;
+    state.logPage = res && typeof res.page === "number" ? res.page : 1;
   } catch (error) {
     if (!silent) toast(error.message || "读取日志失败", { kind: "error" });
   }
   if (state.view === "logs") paint({ force: true });
+}
+
+/** 换筛选条件时回到第 1 页 */
+async function reloadLogsFromFirstPage() {
+  state.logPage = 1;
+  state.logs = null;
+  await loadLogs({ silent: true });
 }
 
 function renderLogs() {
@@ -1008,10 +1016,9 @@ function renderLogs() {
 
   const header = pageHead({
     title: "日志",
-    description: state.logsTotal !== undefined && state.logsTotal !== null
-      ? `已加载 ${logs.length} / 共 ${state.logsTotal} 条${filterSummary()}，点击行可展开细节。服务端只保留最近 2000 条。`
-      : logs.length
-        ? `已加载 ${logs.length} 条${filterSummary()}`
+    description:
+      state.logsTotal !== undefined && state.logsTotal !== null && state.logsTotal > 0
+        ? `共 ${state.logsTotal} 条${filterSummary()}，点击行可展开细节。服务端只保留最近 2000 条。`
         : "执行记录与错误细节。",
     actions: [
       btn("刷新", {
@@ -1038,9 +1045,7 @@ function renderLogs() {
           type: "button",
           onclick: async (event) => {
             state.logLevel = value;
-            state.logs = null;
-            state.logsNextBefore = null;
-            await withLoading(event.currentTarget, () => loadLogs(), { silent: true });
+            await withLoading(event.currentTarget, () => reloadLogsFromFirstPage());
           },
         },
         label,
@@ -1053,9 +1058,7 @@ function renderLogs() {
         "aria-label": "按任务筛选",
         onchange: async (event) => {
           state.logTaskId = event.currentTarget.value;
-          state.logs = null;
-          state.logsNextBefore = null;
-          await loadLogs({ silent: true });
+          await reloadLogsFromFirstPage();
         },
       },
       el("option", { value: "" }, "全部任务"),
@@ -1075,9 +1078,7 @@ function renderLogs() {
         state.logQuery = value;
         clearTimeout(renderLogs._searchTimer);
         renderLogs._searchTimer = setTimeout(async () => {
-          state.logs = null;
-          state.logsNextBefore = null;
-          await loadLogs({ silent: true });
+          await reloadLogsFromFirstPage();
         }, 350);
       },
     }),
@@ -1099,26 +1100,101 @@ function renderLogs() {
     );
   }
 
+  const goPage = (page) => {
+    if (page === state.logPage) return;
+    state.logPage = page;
+    void loadLogs();
+  };
+
   return frag(
     header,
     filters,
-    el("div", { class: "card log-card" }, el("ul", { class: "log-list" }, logs.map(logItem))),
-    state.logsNextBefore
-      ? el(
-          "div",
-          { class: "log-more" },
-          el(
-            "button",
-            {
-              class: "btn",
-              type: "button",
-              onclick: (event) => withLoading(event.currentTarget, () => loadLogs({ append: true })),
-            },
-            "加载更早的日志",
-          ),
-        )
-      : null,
+    el(
+      "div",
+      { class: "card log-card" },
+      el("ul", { class: "log-list" }, logs.map(logItem)),
+      state.logPages > 1
+        ? el(
+            "div",
+            { class: "pager" },
+            el(
+              "div",
+              { class: "pager-info" },
+              el("span", {}, `第 ${state.logPage} / ${state.logPages} 页 · 共 ${state.logsTotal ?? logs.length} 条`),
+              el(
+                "select",
+                {
+                  class: "input pager-size",
+                  "aria-label": "每页条数",
+                  onchange: async (event) => {
+                    state.logPageSize = Number(event.currentTarget.value) || 20;
+                    await reloadLogsFromFirstPage();
+                  },
+                },
+                ...[10, 20, 50, 100].map((size) =>
+                  el("option", { value: String(size), selected: size === state.logPageSize }, `每页 ${size}`),
+                ),
+              ),
+            ),
+            el(
+              "div",
+              { class: "pager-actions" },
+              el(
+                "button",
+                {
+                  class: "btn btn-sm",
+                  type: "button",
+                  disabled: state.logPage <= 1,
+                  onclick: () => goPage(state.logPage - 1),
+                },
+                "上一页",
+              ),
+              ...pageNumbers(state.logPage, state.logPages).map((item) =>
+                item === "…"
+                  ? el("span", { class: "pager-gap" }, "…")
+                  : el(
+                      "button",
+                      {
+                        class: `btn btn-sm pager-num${item === state.logPage ? " is-current" : ""}`,
+                        type: "button",
+                        "aria-current": item === state.logPage ? "page" : undefined,
+                        onclick: () => goPage(item),
+                      },
+                      String(item),
+                    ),
+              ),
+              el(
+                "button",
+                {
+                  class: "btn btn-sm",
+                  type: "button",
+                  disabled: state.logPage >= state.logPages,
+                  onclick: () => goPage(state.logPage + 1),
+                },
+                "下一页",
+              ),
+            ),
+          )
+        : state.logsTotal && state.logsTotal > 0
+          ? el("div", { class: "pager pager-single" }, el("div", { class: "pager-info" }, `共 ${state.logsTotal} 条`))
+          : null,
+    ),
   );
+}
+
+/** 生成页码序列：1 … 4 5 [6] 7 8 … 20 */
+function pageNumbers(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages = new Set([1, total, current, current - 1, current + 1, current - 2, current + 2]);
+  const sorted = [...pages].filter((page) => page >= 1 && page <= total).sort((a, b) => a - b);
+  const result = [];
+  let previous = 0;
+  for (const page of sorted) {
+    if (previous && page - previous > 1) result.push("…");
+    result.push(page);
+    previous = page;
+  }
+  return result;
 }
 
 /** 当前筛选条件的一句话描述 */

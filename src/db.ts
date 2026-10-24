@@ -84,6 +84,7 @@ interface TaskRow extends Row {
 
 export interface LogFilter {
   limit?: number;
+  offset?: number;
   beforeId?: number | null;
   taskId?: number | null;
   level?: string | null;
@@ -421,9 +422,10 @@ export class Store {
 
   listLogs(options: LogFilter = {}): LogEntry[] {
     const limit = Math.max(1, Math.min(200, options.limit ?? 100));
+    const offset = Math.max(0, Math.min(1_000_000, options.offset ?? 0));
     const { where, bindings } = this.logFilter(options);
-    const sql = `SELECT * FROM logs ${where} ORDER BY id DESC LIMIT ?`;
-    return this.rows<LogRow>(sql, ...bindings, limit).map(rowToLog);
+    const sql = `SELECT * FROM logs ${where} ORDER BY id DESC LIMIT ? OFFSET ?`;
+    return this.rows<LogRow>(sql, ...bindings, limit, offset).map(rowToLog);
   }
 
   /** 当前筛选条件下的总条数（前端显示"已加载 x / 共 y"） */
