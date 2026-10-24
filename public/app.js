@@ -1712,8 +1712,17 @@ function renderSettings() {
     field({
       id: "settings-adminUserId",
       label: "管理员 ID",
-      control: textControl("adminUserId", settings.adminUserId ?? "", "", "numeric"),
-      hint: "仅该 Telegram 账号发出的指令有效。指令来源改为群组时建议填写。",
+      control: textControl(
+        "adminUserId",
+        settings.adminUserId ?? "",
+        (state.data && state.data.account && state.data.account.me && state.data.account.me.id) || "登录后自动填入",
+        "numeric",
+      ),
+      hint: `仅该 Telegram 账号发出的指令有效。默认填当前登录账号${
+        state.data && state.data.account && state.data.account.me
+          ? `（${state.data.account.me.id}）`
+          : "，登录后自动填入"
+      }。`,
     }),
     field({
       id: "settings-defaultTarget",
