@@ -13,6 +13,7 @@ const SCHEMA = [
       name TEXT NOT NULL,
       enabled INTEGER NOT NULL DEFAULT 1,
       target TEXT NOT NULL,
+      targets TEXT,
       thread_id INTEGER,
       schedule TEXT NOT NULL,
       steps TEXT NOT NULL,
@@ -45,6 +46,12 @@ const SCHEMA = [
       duration_ms INTEGER
     )`,
   `CREATE INDEX IF NOT EXISTS idx_logs_at ON logs(at DESC)`,
+  `CREATE TABLE IF NOT EXISTS events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      at INTEGER NOT NULL
+    )`,
+  `CREATE INDEX IF NOT EXISTS idx_events_name ON events(name, at)`,
   `CREATE TABLE IF NOT EXISTS auth_attempts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       ip TEXT NOT NULL,
@@ -67,6 +74,7 @@ interface TaskRow extends Row {
   name: string;
   enabled: number;
   target: string;
+  targets: string | null;
   thread_id: number | null;
   schedule: string;
   steps: string;
@@ -130,6 +138,10 @@ export function rowToTask(row: TaskRow): Task {
     name: row.name,
     enabled: !!row.enabled,
     target: normalizeTarget(parseJson<Target>(row.target, { kind: "user", id: "" })),
+    targets: (() => {
+      const parsed = parseJson<Target[]>(row.targets ?? "[]", []);
+      return Array.isArray(parsed) && parsed.length > 1 ? parsed : undefined;
+    })(),
     threadId: row.thread_id,
     schedule: parseJson<Schedule>(row.schedule, { kind: "daily", time: "09:00" }),
     steps: parseJson<Step[]>(row.steps, []),
@@ -176,6 +188,11 @@ export class Store {
     }
     try {
       this.sql.exec("ALTER TABLE tasks ADD COLUMN last_detail TEXT");
+    } catch {
+      /* 列已存在 */
+    }
+    try {
+      this.sql.exec("ALTER TABLE tasks ADD COLUMN targets TEXT");
     } catch {
       /* 列已存在 */
     }
@@ -284,13 +301,14 @@ export class Store {
 
   createTask(input: TaskInput, now: number, nextRunAt: number | null): Task {
     this.sql.exec(
-      `INSERT INTO tasks (name, enabled, target, thread_id, schedule, steps, success_keywords,
+      `INSERT INTO tasks (name, enabled, target, targets, thread_id, schedule, steps, success_keywords,
          timeout_seconds, step_delay_seconds, delete_after_seconds, cleanup_previous, next_run_at,
          last_run_at, last_result, last_message, source, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       input.name,
       input.enabled ? 1 : 0,
       JSON.stringify(input.target),
+      input.targets && input.targets.length > 1 ? JSON.stringify(input.targets) : null,
       input.threadId ?? null,
       JSON.stringify(input.schedule),
       JSON.stringify(input.steps),
@@ -323,7 +341,7 @@ export class Store {
     } as Task;
 
     this.sql.exec(
-      `UPDATE tasks SET name = ?, enabled = ?, target = ?, thread_id = ?, schedule = ?, steps = ?,
+      `UPDATE tasks SET name = ?, enabled = ?, target = ?, targets = ?, thread_id = ?, schedule = ?, steps = ?,
          success_keywords = ?, timeout_seconds = ?, step_delay_seconds = ?, delete_after_seconds = ?,
          cleanup_previous = ?, next_run_at = ?, last_run_at = ?, last_result = ?, last_message = ?,
          updated_at = ?
@@ -331,6 +349,7 @@ export class Store {
       merged.name,
       merged.enabled ? 1 : 0,
       JSON.stringify(merged.target),
+      merged.targets && merged.targets.length > 1 ? JSON.stringify(merged.targets) : null,
       merged.threadId ?? null,
       JSON.stringify(merged.schedule),
       JSON.stringify(merged.steps),
@@ -472,6 +491,29 @@ export class Store {
 
   clearLogs(): void {
     this.sql.exec("DELETE FROM logs");
+  }
+
+  // ---------- 事件计数（只记事件名 + 时间，不记内容） ----------
+  recordEvent(name: string): void {
+    const at = Date.now();
+    const key = name.slice(0, 40);
+    this.sql.exec("INSERT INTO events (name, at) VALUES (?, ?)", key, at);
+    // 每类事件只留最近 5000 条，避免无限增长
+    this.sql.exec(
+      "DELETE FROM events WHERE name = ? AND id <= (SELECT MAX(id) - 5000 FROM events WHERE name = ?)",
+      key,
+      key,
+    );
+  }
+
+  countEvent(name: string): number {
+    const rows = this.rows<{ total: number | null }>("SELECT COUNT(*) AS total FROM events WHERE name = ?", name);
+    return rows.length ? Number(rows[0].total ?? 0) : 0;
+  }
+
+  firstEventAt(name: string): number | null {
+    const rows = this.rows<{ at: number | null }>("SELECT MIN(at) AS at FROM events WHERE name = ?", name);
+    return rows.length ? rows[0].at : null;
   }
 
   // ---------- 登录尝试（限速） ----------

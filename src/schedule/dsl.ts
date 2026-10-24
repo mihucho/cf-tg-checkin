@@ -246,6 +246,15 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
   const steps: Step[] = [];
   const successKeywords: string[] = [];
   let target: Target | null = null;
+  const extraTargets: Target[] = [];
+
+  /** `到:a|b` / `@a|b` → 多个目标 */
+  const parseTargetList = (value: string): Target[] =>
+    value
+      .split("|")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => targetFromId(item));
   let threadId: number | null = null;
   let jitterSeconds = 0;
   let timeoutSeconds = 30;
@@ -301,7 +310,9 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
     // 裸链接 / @handle 先当目标处理。
     // 注意要放在 split(":") 之前：否则 "https://t.me/x" 会被当成键值对（key=https）
     if (/^(?:https?:\/\/|t\.me\/|telegram\.me\/|@)/i.test(token)) {
-      target = targetFromId(token);
+      const parsed = parseTargetList(token);
+      target = parsed[0] ?? target;
+      extraTargets.push(...parsed.slice(1));
       continue;
     }
 
@@ -402,7 +413,9 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
       case "at":
       case "到": {
         flushText();
-        target = targetFromId(value);
+        const parsed = parseTargetList(value);
+        target = parsed[0] ?? target;
+        extraTargets.push(...parsed.slice(1));
         break;
       }
       case "clean": {
@@ -448,10 +461,19 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
 
   const label = nameOverride || defaultName(resolvedTarget, scheduleLabel, steps);
 
+  const allTargets = [resolvedTarget, ...extraTargets].filter(
+    (item, index, list) =>
+      item &&
+      list.findIndex(
+        (other) => other && (other.username || other.id).toLowerCase() === (item.username || item.id).toLowerCase(),
+      ) === index,
+  );
+
   const task: TaskInput = {
     name: label,
     enabled: true,
     target: resolvedTarget,
+    targets: allTargets.length > 1 ? allTargets : undefined,
     threadId,
     schedule,
     steps,

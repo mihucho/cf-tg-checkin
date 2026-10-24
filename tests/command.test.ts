@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "./harness.ts";
 import { taskToCommand } from "../src/schedule/command.ts";
 import { parseTrigger, stripTriggerPrefix } from "../src/schedule/dsl.ts";
+import { normalizeTaskInput } from "../src/task.ts";
 import { makeTask } from "./fixtures.ts";
 import type { Task } from "../src/types.ts";
 
@@ -104,6 +105,43 @@ test("taskToCommand：随机选项里含逗号也能原样往返", () => {
   });
   const { task } = roundTrip(source);
   assert.deepEqual(task.steps, source.steps);
+});
+
+test("taskToCommand：多目标输出 到:a|b 并可往返", () => {
+  const source = makeTask({
+    target: { kind: "user", id: "1", username: "a_bot" },
+    targets: [
+      { kind: "user", id: "1", username: "a_bot" },
+      { kind: "channel", id: "-1001234567890", username: "group_b" },
+    ],
+  });
+  const { command, task } = roundTrip(source);
+  assert.match(command, /到:@a_bot\|@group_b/);
+  assert.equal(task.targets?.length, 2);
+  assert.equal(task.targets?.[1].username, "group_b");
+});
+
+test("normalizeTaskInput：多目标去重并限制 8 个", () => {
+  const many = normalizeTaskInput({
+    name: "x",
+    enabled: true,
+    target: { kind: "user", id: "1", username: "a" },
+    targets: [
+      { kind: "user", id: "1", username: "a" },
+      { kind: "user", id: "2", username: "b" },
+      ...Array.from({ length: 10 }, (_, i) => ({ kind: "user" as const, id: String(100 + i), username: `u${i}` })),
+    ],
+    schedule: { kind: "daily", time: "09:00" },
+    steps: [{ type: "text", text: "hi" }],
+    successKeywords: [],
+    timeoutSeconds: 30,
+    stepDelaySeconds: 3,
+    deleteAfterSeconds: 0,
+    cleanupPrevious: true,
+    source: "ui",
+  } as never);
+  assert.equal(many.targets?.length, 8);
+  assert.equal(new Set(many.targets?.map((t) => t.username)).size, 8);
 });
 
 test("taskToCommand：无前缀时不加前缀", () => {

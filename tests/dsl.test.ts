@@ -145,6 +145,19 @@ test("目标优先级：显式 > @here > 转发 > 默认", () => {
   assert.equal(parse("9.30 打卡", { defaultTarget: "-100999" }).task!.target.id, "-100999");
 });
 
+test("多目标：到:a|b 与 @a|b", () => {
+  const byIds = parse("9.30 签到 到:-1001|@group_b", {}).task!;
+  assert.equal(byIds.target.id, "-1001");
+  assert.equal(byIds.targets?.length, 2);
+  assert.equal(byIds.targets?.[1].username, "group_b");
+
+  const byHandles = parse("9.30 签到 @a_bot|@b_bot", {}).task!;
+  assert.deepEqual(byHandles.targets?.map((t) => t.username), ["a_bot", "b_bot"]);
+
+  // 单目标不产生 targets 字段
+  assert.equal(parse("9.30 签到 @a_bot", {}).task!.targets, undefined);
+});
+
 test("目标反例：@here 没有当前会话时要明确报错", () => {
   assert.match(parseError("9.30 打卡 @here", {}), /@here/);
 });

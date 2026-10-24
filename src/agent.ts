@@ -232,6 +232,15 @@ export class TgAgent implements DurableObject {
           nextBefore: beforeId && logs.length === pageSize ? logs[logs.length - 1].id : null,
         });
       }
+      if (path === "/events" && method === "POST") {
+        const body = (await request.json()) as { name?: string };
+        const allowed = new Set(["failure_handled", "template_used", "command_copied"]);
+        const name = String(body.name ?? "");
+        if (!allowed.has(name)) return jsonError("未知事件", 400);
+        this.store.recordEvent(name);
+        return json({ ok: true });
+      }
+
       if (path === "/logs/clear" && method === "POST") {
         this.store.clearLogs();
         return json({ ok: true });
@@ -1429,6 +1438,7 @@ export class TgAgent implements DurableObject {
     }
 
     const nextRunAt = normalized.enabled ? computeNextRun(normalized.schedule, now, settings.timezone) : null;
+    this.store.recordEvent(`task_created:${normalized.source ?? "ui"}`);
     return { task: this.store.createTask(normalized, now, nextRunAt), created: true };
   }
 
@@ -1563,7 +1573,6 @@ export class TgAgent implements DurableObject {
   ): Promise<LogEntry> {
     const settings = this.store.getSettings();
     const sentKey = `task:${task.id}:sent`;
-    const previousSent = this.store.getJson<number[]>(sentKey, []);
     const hooks: ExecHooks = { log: () => undefined };
 
     const triggerSource: LogSource = options.manual ? "manual" : "auto";
@@ -1571,19 +1580,63 @@ export class TgAgent implements DurableObject {
     let log: LogEntry;
     try {
       const settings = this.store.getSettings();
-      const prepared = await this.ensureTarget(client, task);
-      task = prepared.task;
-      const outcome = await executeTask(client, task, {
-        previousSent,
-        hooks,
-        entity: prepared.entity,
-        pollIntervalMs: (settings.stepPollSeconds ?? 3) * 1000,
-        stepWaitMs: (settings.stepWaitSeconds ?? 30) * 1000,
-      });
-      this.store.setJson(sentKey, outcome.sent);
-      if (task.deleteAfterSeconds > 0 && outcome.sent.length) {
-        this.store.addDeletion(outcome.chatId ?? task.target.id, outcome.sent, Date.now() + task.deleteAfterSeconds * 1000);
+      const targets = task.targets && task.targets.length > 1 ? task.targets : [task.target];
+      const outcomes: Array<{ target: import("./types").Target; outcome: Awaited<ReturnType<typeof executeTask>> }> = [];
+
+      for (const target of targets) {
+        const targetKey = (target.username || target.id || "").toLowerCase();
+        const prepared = await this.ensureTarget(client, { ...task, target });
+        const previousForTarget = this.store.getJson<number[]>(`${sentKey}:${targetKey}`, []);
+        const outcome = await executeTask(client, { ...prepared.task, target }, {
+          previousSent: previousForTarget,
+          hooks,
+          entity: prepared.entity,
+          pollIntervalMs: (settings.stepPollSeconds ?? 3) * 1000,
+          stepWaitMs: (settings.stepWaitSeconds ?? 30) * 1000,
+        });
+        this.store.setJson(`${sentKey}:${targetKey}`, outcome.sent);
+        if (task.deleteAfterSeconds > 0 && outcome.sent.length) {
+          this.store.addDeletion(
+            outcome.chatId ?? target.id,
+            outcome.sent,
+            Date.now() + task.deleteAfterSeconds * 1000,
+          );
+        }
+        outcomes.push({ target, outcome });
+
+        // 多目标时每个目标单独记一条日志，便于看出是哪个群失败
+        if (targets.length > 1) {
+          const label = target.username ? `@${target.username}` : target.title || target.id;
+          this.store.addLog({
+            taskId: task.id,
+            taskName: `${task.name} → ${label}`,
+            at: Date.now(),
+            ok: outcome.ok,
+            level: outcome.ok ? "info" : "warn",
+            message: outcome.message,
+            detail: outcome.detail || null,
+            source: triggerSource,
+            durationMs: Date.now() - startedAt,
+          });
+        }
       }
+
+      const passed = outcomes.filter((item) => item.outcome.ok).length;
+      const firstOk = outcomes.find((item) => item.outcome.ok);
+      const outcome = {
+        ok: passed > 0,
+        message:
+          targets.length > 1
+            ? `${passed}/${targets.length} 个目标成功` + (firstOk ? `（例：${firstOk.outcome.message}）` : "")
+            : outcomes[0].outcome.message,
+        detail: outcomes
+          .map((item) => `▶ ${item.target.username || item.target.id}\n${item.outcome.detail}`)
+          .join("\n\n"),
+        sent: outcomes.flatMap((item) => item.outcome.sent),
+        chatId: outcomes[0].outcome.chatId,
+      };
+
+      this.store.setJson(sentKey, outcome.sent);
       this.store.recordRun(task.id, outcome.ok ? "ok" : "fail", outcome.message, outcome.detail || null, Date.now());
       log = this.store.addLog({
         taskId: task.id,
@@ -1611,6 +1664,8 @@ export class TgAgent implements DurableObject {
         durationMs: Date.now() - startedAt,
       });
     }
+
+    if (log) this.store.recordEvent(`run_finished:${log.ok ? "ok" : "fail"}`);
 
     // 连续失败到阈值 → 自动暂停（避免天天失败还一直跑）
     const streak = this.store.failStreakOf(task.id);
@@ -1754,6 +1809,18 @@ export class TgAgent implements DurableObject {
         lastRunAt,
       },
       now: Date.now(),
+      events: {
+        firstLoginAt: this.store.firstEventAt("first_login"),
+        tasksCreated: {
+          ui: this.store.countEvent("task_created:ui"),
+          trigger: this.store.countEvent("task_created:trigger"),
+        },
+        runs: {
+          ok: this.store.countEvent("run_finished:ok"),
+          fail: this.store.countEvent("run_finished:fail"),
+        },
+        failureHandled: this.store.countEvent("failure_handled"),
+      },
       runtime: {
         colo: this.store.getKv("runtime:colo"),
         locationHint: this.env.DO_LOCATION_HINT ?? null,

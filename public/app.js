@@ -780,12 +780,13 @@ function renderTasks() {
         emptyState({
           iconName: "list",
           title: "还没有签到任务",
-          text: "可以手动新建，也可以直接在收藏夹发一条「tg 9.30 签到」，让它自己建。",
+          text: "可以从模板开始，也可以手动新建，或直接在收藏夹发一条指令让它自己建。",
           actions: [
             newTaskBtn("ghost", "新建任务"),
             el("a", { class: "btn btn-subtle", href: "#/settings" }, "看看指令怎么写"),
           ],
         }),
+        templateChips(),
       ),
     );
   }
@@ -889,7 +890,12 @@ function taskRow(task) {
     el(
       "td",
       { dataset: { label: "目标" } },
-      el("div", { class: "cell-main cell-trunc", title: targetLabel(target) }, targetLabel(target)),
+      el(
+        "div",
+        { class: "cell-main cell-trunc", title: targetLabel(target) },
+        targetLabel(target),
+        task.targets && task.targets.length > 1 ? el("span", { class: "tag" }, `+${task.targets.length - 1}`) : null,
+      ),
       el(
         "div",
         { class: "cell-sub" },
@@ -997,7 +1003,16 @@ async function openTaskDetail(task) {
       el(
         "div",
         { class: "kv-list" },
-        kv("目标", targetLabel(task.target)),
+        kv(
+          "目标",
+          task.targets && task.targets.length > 1
+            ? el(
+                "span",
+                {},
+                task.targets.map((item) => (item.username ? `@${item.username}` : item.title || item.id)).join(" · "),
+              )
+            : targetLabel(task.target),
+        ),
         kv("执行时间", describeSchedule(task.schedule, timezone)),
         kv("下次执行", task.nextRunAt ? formatDateTime(task.nextRunAt) : "—"),
         kv("动作", describeSteps(task.steps)),
@@ -1122,6 +1137,91 @@ async function renderTaskRuns(task, box) {
 }
 
 
+
+/**
+ * 常用模板：直接写成指令文本，由 /api/trigger/parse 解析后填进编辑器。
+ * 这样模板和指令语法永远一致（改了语法模板自动跟着变）。
+ */
+const TASK_TEMPLATES = [
+  {
+    id: "daily",
+    name: "每日打卡",
+    desc: "每天到点发一句「签到」，用关键词判定成功",
+    command: "9.00 签到 #kw:签到成功",
+  },
+  {
+    id: "menu",
+    name: "两级菜单签到",
+    desc: "/start → 点「个人资料」→ 点「签到」",
+    command: "9.00 /start btn:个人资料 btn:签到 #kw:签到成功",
+  },
+  {
+    id: "random",
+    name: "每日随机问候",
+    desc: "在时间窗口里随机挑一句发出去",
+    command: "8.30-10.00 rand:早上好|午安|晚上好",
+  },
+  {
+    id: "reminder",
+    name: "群里定时提醒",
+    desc: "每天固定时间发一段固定内容",
+    command: "9.00 该打卡啦 #keep",
+  },
+];
+
+// editor.js 里要展示同一份模板，这里挂到 window 上避免循环 import
+window.__openEditorTemplate = (template) => void openTemplate(template);
+window.__openEditorTemplates = () => TASK_TEMPLATES;
+
+async function openTemplate(template) {
+  const settings = (state.data && state.data.settings) || {};
+  const prefix = (settings.triggerPrefix || "").trim();
+  const text = prefix ? `${prefix} ${template.command}` : template.command;
+  try {
+    const parsed = await api("/api/trigger/parse", { method: "POST", body: { text } });
+    if (!parsed || parsed.ok === false) {
+      toast(parsed?.error || "模板解析失败", { kind: "error" });
+      return;
+    }
+    void api("/api/events", { method: "POST", body: { name: "template_used" } }).catch(() => undefined);
+    const draft = {
+      ...parsed.task,
+      id: 0,
+      name: template.name,
+      target: { kind: "user", id: "" },
+    };
+    openTaskEditor({
+      task: draft,
+      defaultTarget: settings.defaultTarget || "",
+      onSaved: async () => {
+        await refreshState({ silent: true });
+        paint({ force: true });
+      },
+    });
+  } catch (error) {
+    toast(error.message || "模板解析失败", { kind: "error" });
+  }
+}
+
+function templateChips() {
+  return el(
+    "div",
+    { class: "template-chips" },
+    el("span", { class: "template-label" }, "从模板开始"),
+    ...TASK_TEMPLATES.map((template) =>
+      el(
+        "button",
+        {
+          class: "chip chip-button",
+          type: "button",
+          title: template.desc,
+          onclick: (event) => withLoading(event.currentTarget, () => openTemplate(template)),
+        },
+        template.name,
+      ),
+    ),
+  );
+}
 
 function openEditor(task) {
   openTaskEditor({
@@ -1525,6 +1625,7 @@ function logItem(log) {
           type: "button",
           onclick: async (event) => {
             event.stopPropagation();
+            void api("/api/events", { method: "POST", body: { name: "failure_handled" } }).catch(() => undefined);
             if (fix.href) {
               location.hash = fix.href;
               return;
@@ -2242,6 +2343,7 @@ function renderSettings() {
           { class: "about-build" },
           `出口机房 ${runtime.colo || "未记录"}` + (runtime.locationHint ? ` · DO 区域 ${runtime.locationHint}` : ""),
         ),
+        el("div", { class: "about-build" }, usageSummary()),
         el(
           "p",
           { class: "hint" },
@@ -2696,6 +2798,18 @@ function banner(kind, text) {
     icon(iconName, { size: 15 }),
     el("div", { class: "banner-text" }, text),
   );
+}
+
+/** 关于里的用量统计（只统计次数，不采集内容） */
+function usageSummary() {
+  const events = (state.data && state.data.events) || null;
+  if (!events) return "用量统计：暂无";
+  const created = events.tasksCreated || { ui: 0, trigger: 0 };
+  const runs = events.runs || { ok: 0, fail: 0 };
+  const totalCreated = created.ui + created.trigger;
+  const share = totalCreated ? Math.round((created.trigger / totalCreated) * 100) : 0;
+  const firstLogin = events.firstLoginAt ? formatDateTime(events.firstLoginAt) : "未登录过";
+  return `首次登录 ${firstLogin} · 任务 ${totalCreated} 个（指令 ${share}%）· 执行 ${runs.ok + runs.fail} 次（失败 ${runs.fail}）· 故障已处理 ${events.failureHandled || 0} 次`;
 }
 
 function kv(label, value) {

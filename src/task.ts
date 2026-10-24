@@ -15,6 +15,21 @@ function clampText(value: unknown, max: number): string {
   return String(value ?? "").slice(0, max);
 }
 
+/** 目标去重（按 username / id）并限制数量 */
+function dedupeTargets(targets: Target[]): Target[] {
+  const seen = new Set<string>();
+  const result: Target[] = [];
+  for (const target of targets) {
+    if (!target || (!target.id && !target.username)) continue;
+    const key = (target.username || target.id).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(target);
+    if (result.length >= 8) break;
+  }
+  return result;
+}
+
 function normalizeTarget(input: TaskInput | Task): Target {
   const kind = input.target?.kind;
   const safeKind = kind === "channel" || kind === "chat" || kind === "user" ? kind : "user";
@@ -68,10 +83,16 @@ export function normalizeTaskInput(input: TaskInput | Task): TaskInput {
 
   const threadId = Number(input.threadId);
 
+  const targets = dedupeTargets([
+    normalizeTarget(input),
+    ...((input.targets ?? []).map((target) => normalizeTarget({ ...input, target } as TaskInput))),
+  ]);
+
   return {
     name: clampText(input.name, MAX_NAME).trim() || "未命名任务",
     enabled: input.enabled !== false,
-    target: normalizeTarget(input),
+    target: targets[0] ?? normalizeTarget(input),
+    targets: targets.length > 1 ? targets : undefined,
     threadId: Number.isFinite(threadId) && threadId > 0 ? threadId : null,
     schedule,
     steps,
