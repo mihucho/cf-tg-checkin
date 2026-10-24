@@ -41,6 +41,7 @@ import {
   WEBHOOK_TEMPLATES,
   buildWebhookPayload,
   detectWebhookKind,
+  maskWebhookUrl,
   normalizeWebhookUrl,
   parseWebhookResult,
   webhookUrlFromToken,
@@ -363,7 +364,7 @@ export class TgAgent implements DurableObject {
         const sample = buildTestMessage(settings);
         const result: {
           telegram: { ok: boolean; error?: string; skipped?: boolean };
-          webhook: { ok: boolean; kind: string; error?: string; skipped?: boolean };
+          webhook: { ok: boolean; kind: string; error?: string; skipped?: boolean; target?: string };
         } = {
           telegram: { ok: false, skipped: true },
           webhook: { ok: false, kind: settings.notifyWebhookKind ?? "generic", skipped: true },
@@ -395,7 +396,12 @@ export class TgAgent implements DurableObject {
             text: sample.text,
             card: sample.card,
           });
-          result.webhook = { ok: sent.ok, kind: sent.kind, error: sent.error };
+          result.webhook = {
+            ok: sent.ok,
+            kind: sent.kind,
+            error: sent.error,
+            target: maskWebhookUrl(settings.notifyWebhook ?? ""),
+          };
         } else {
           result.webhook = { ok: false, kind: result.webhook.kind, skipped: true, error: "还没有填 Webhook 地址" };
         }
@@ -2297,8 +2303,16 @@ export class TgAgent implements DurableObject {
   ): Promise<{ ok: boolean; kind: WebhookKind; error?: string }> {
     const webhook = (settings.notifyWebhook ?? "").trim();
     const kindHint = settings.notifyWebhookKind ?? "generic";
-    if (!webhook || !/^https?:\/\//i.test(webhook)) {
+    if (!webhook) {
       return { ok: false, kind: kindHint, error: "还没有填 Webhook 地址" };
+    }
+    if (!/^https?:\/\//i.test(webhook)) {
+      // 最常见的两种：只填了 token（旧版本没有 token 框）、漏了 https://
+      return {
+        ok: false,
+        kind: kindHint,
+        error: `地址不完整：「${webhook.slice(0, 20)}${webhook.length > 20 ? "…" : ""}」——钉钉/企微/飞书请填机器人 Token，自定义渠道请填 http(s):// 开头的完整地址`,
+      };
     }
 
     // 老配置没有渠道字段时按域名兜底猜一次

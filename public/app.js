@@ -2949,6 +2949,7 @@ async function sendTestNotification(panel, overlay = {}) {
     if (webhook.ok) lines.push(["ok", `${channel}：已发送`]);
     else if (webhook.skipped) lines.push(["muted", `${channel}：${webhook.error || "未配置"}（跳过）`]);
     else lines.push(["error", `${channel}：${webhook.error || "推送失败"}`]);
+    if (webhook.target) lines.push(["muted", `推送地址：${webhook.target}`]);
 
     panel.textContent = "";
     for (const [kind, text] of lines) {
