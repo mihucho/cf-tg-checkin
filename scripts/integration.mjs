@@ -201,6 +201,24 @@ async function main() {
     const cleared = await post("/api/settings", { clearNotifyWebhookSecret: true });
     check("可清除加签密钥", cleared.settings?.notifyWebhookSecretConfigured === false);
 
+    // ---------- 通知类型 / 日报 ----------
+    const stateNotify = await get("/api/state");
+    check(
+      "通知类型目录由服务端下发（8 种）",
+      Array.isArray(stateNotify.notifyCatalog) && stateNotify.notifyCatalog.length === 8,
+      `got ${stateNotify.notifyCatalog?.length}`,
+    );
+    const picked = await post("/api/settings", { notifyEvents: ["run_failed", "daily_digest", "hack"], digestHour: 7 });
+    check(
+      "通知类型只保留认识的（hack 被丢弃）",
+      JSON.stringify(picked.settings?.notifyEvents) === JSON.stringify(["run_failed", "daily_digest"]),
+      JSON.stringify(picked.settings?.notifyEvents),
+    );
+    check("日报时间可保存", picked.settings?.digestHour === 7, `got ${picked.settings?.digestHour}`);
+    const badHour = await post("/api/settings", { digestHour: 99 });
+    check("日报时间越界收敛到 23", badHour.settings?.digestHour === 23, `got ${badHour.settings?.digestHour}`);
+    await post("/api/settings", { digestHour: 7 });
+
     // ---------- 事件白名单 ----------
     const badEvent = await post("/api/events", { name: "hack" });
     check("未知事件被拒（400）", badEvent.status === 400, `status=${badEvent.status}`);

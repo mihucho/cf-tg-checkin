@@ -49,6 +49,8 @@
     "notifyWebhookKind": "generic", // 推送渠道：generic | dingtalk | wecom | feishu（手动选择）
     "notifyWebhookSecret": "",   // 钉钉加签密钥：永远不回传，用 notifyWebhookSecretConfigured 表示是否已配
     "notifyWebhookSecretConfigured": false,
+    "notifyEvents": ["run_failed", "auto_paused", "session_expired", "connection_error", "daily_digest"],
+    "digestHour": 22,            // 日报时间（本地时区小时，0-23）
     "triggerPrefix": "tg",       // 触发前缀（默认 "tg"）：只有以它开头的消息才当配置解析；空字符串=全部解析
   },
   "tasks": [ Task ],

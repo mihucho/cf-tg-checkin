@@ -11,10 +11,13 @@ import { password as PasswordModule } from "teleproto";
 import type { TelegramClient } from "teleproto";
 import { Store } from "./db";
 import type { AccountInfo, AgentState, LogEntry, LogSource, Settings, Target, Task, TaskInput } from "./types";
+import { buildDigest, countTasks, failedTaskNames, nextDigestAt, shouldSendDigest } from "./notify/digest";
+import { NOTIFY_EVENTS, isNotifyEventId, isThrottledEvent, normalizeNotifyEvents } from "./notify/events";
+import type { NotifyEventId } from "./notify/events";
 import { buildWebhookPayload, detectWebhookKind, parseWebhookResult } from "./notify/webhook";
 import { createTgClient, createTgClientOnDc, errorMessage, isConnectionError, migrateDcFromError } from "./telegram/client";
 import { executeTask, resolveEntity, type ExecHooks } from "./telegram/executor";
-import { computeNextRun, formatInTimezone } from "./schedule/time";
+import { computeNextRun, formatInTimezone, localDayElapsedMs } from "./schedule/time";
 import { decideRun, shouldAutoPause } from "./schedule/guard";
 import { taskToCommand } from "./schedule/command";
 import {
@@ -286,6 +289,18 @@ export class TgAgent implements DurableObject {
           nextBefore: beforeId && logs.length === pageSize ? logs[logs.length - 1].id : null,
         });
       }
+      if (path === "/notify/event" && method === "POST") {
+        // 只给 Worker 内部调用（登录失败发生在 Worker 侧，那里拿不到 Telegram client）
+        if (request.headers.get("x-internal-call") !== "notify") return jsonError("仅限内部调用", 403);
+        const body = (await request.json()) as { type?: string; detail?: string };
+        if (!isNotifyEventId(body.type)) return jsonError("未知通知类型", 400);
+        await this.notifyEvent(null, body.type, {
+          title: body.type === "login_failed" ? "🔒 管理界面登录被暂时锁定" : "通知",
+          text: String(body.detail ?? "").slice(0, 300),
+        });
+        return json({ ok: true });
+      }
+
       if (path === "/events" && method === "POST") {
         const body = (await request.json()) as { name?: string };
         const allowed = new Set(["failure_handled", "template_used", "command_copied"]);
@@ -451,6 +466,9 @@ export class TgAgent implements DurableObject {
     const nextDeletion = this.store.nextDeletionAt();
     if (nextDeletion) candidates.push(nextDeletion);
 
+    const digestAt = this.nextDigestAtMs(settings);
+    if (digestAt) candidates.push(digestAt);
+
     if (!candidates.length) {
       await this.ctx.storage.deleteAlarm();
       return;
@@ -463,9 +481,101 @@ export class TgAgent implements DurableObject {
     }
   }
 
+  /** 下一次日报时间（没开启日报就是 null） */
+  private nextDigestAtMs(settings: Settings): number | null {
+    if (!(settings.notifyEvents ?? []).includes("daily_digest")) return null;
+    const now = Date.now();
+    return nextDigestAt(settings.digestHour ?? 22, 0, now, settings.timezone ?? 8);
+  }
+
+  /**
+   * 到点就发当天日报：统计来自事件计数，失败任务名来自日志。
+   * 用 kv 里的 lastSentAt 保证一天只发一次（alarm 可能一小时内被唤醒很多次）。
+   */
+  private async maybeSendDigest(now: number): Promise<void> {
+    const settings = this.store.getSettings();
+    if (!(settings.notifyEvents ?? []).includes("daily_digest")) return;
+
+    const lastSentAt = Number(this.store.getKv("notify:digest:lastAt") ?? 0) || null;
+    const due = shouldSendDigest({
+      now,
+      hour: settings.digestHour ?? 22,
+      minute: 0,
+      timezone: settings.timezone ?? 8,
+      lastSentAt,
+    });
+    if (!due) return;
+
+    // 一个通道都没配就别假装发了（也不写 lastAt，配好后当天还能补发）
+    const hasTelegram = settings.notifyOnFailure !== false && Boolean(this.store.getKv(KV_SESSION));
+    const hasWebhook = Boolean((settings.notifyWebhook ?? "").trim());
+    if (!hasTelegram && !hasWebhook) return;
+
+    this.store.setKv("notify:digest:lastAt", String(now));
+    try {
+      const tasks = this.store.listTasks();
+      const counts = countTasks(tasks);
+      // 统计以日志为准：连接级失败不写 run_finished 事件，用事件计数会漏报
+      const dayStart = now - localDayElapsedMs(now, settings.timezone ?? 8);
+      const logs = this.store.listLogs({ limit: 500, since: dayStart });
+      const runs = logs.filter((item) => item.source === "auto" || item.source === "manual");
+      const bucket = {
+        ok: runs.filter((item) => item.ok).length,
+        fail: runs.filter((item) => !item.ok).length,
+      };
+      const content = buildDigest(
+        {
+          ok: bucket.ok,
+          fail: bucket.fail,
+          failedTasks: failedTaskNames(logs),
+          totalTasks: counts.total,
+          enabledTasks: counts.enabled,
+          nextRunAt: this.store.earliestNextRun(),
+          lastMessage: tasks.find((task) => task.lastMessage)?.lastMessage ?? null,
+        },
+        { timezone: settings.timezone ?? 8, now },
+      );
+
+      // 日报直接发给两个通道（不再走事件节流：一天本来就只发一次）
+      if (hasTelegram) {
+        try {
+          await this.withClient((client) =>
+            client.sendMessage("me" as never, { message: `${content.title}\n${content.text}`, parseMode: false }),
+          );
+        } catch {
+          /* 发不出去就只发 webhook */
+        }
+      }
+      await this.sendWebhook(settings, { title: content.title, text: content.text });
+      this.store.addLog({
+        taskId: null,
+        taskName: null,
+        at: now,
+        ok: true,
+        level: "info",
+        message: "已发送日报",
+        detail: `${content.title}\n${content.text}`,
+        source: "system",
+      });
+    } catch (error) {
+      this.store.addLog({
+        taskId: null,
+        taskName: null,
+        at: now,
+        ok: false,
+        level: "warn",
+        message: `日报发送失败：${errorMessage(error)}`,
+        detail: null,
+        source: "system",
+      });
+    }
+  }
+
   private async tick(): Promise<LogEntry[]> {
     const now = Date.now();
     const settings = this.store.getSettings();
+    // 日报不依赖 Telegram 连接，先处理掉（失败了也不影响调度）
+    void this.maybeSendDigest(now);
     const ran: LogEntry[] = [];
     const logs: string[] = [];
 
@@ -583,8 +693,8 @@ export class TgAgent implements DurableObject {
         source: "system",
         detail: logs.join("\n") || null,
       });
-      // 连不上 Telegram / 凭证失效会导致整批任务都跑不了，值得单独推一条（30 分钟节流）
-      await this.notifyConnectionProblem(errorMessage(error));
+      // 连不上 / 会话过期会导致整批任务都跑不了，单独推一条
+      await this.notifyConnectionProblem(null, errorMessage(error));
     }
 
     await this.scheduleNextAlarm();
@@ -1561,6 +1671,8 @@ export class TgAgent implements DurableObject {
     } catch (error) {
       // 连接 / 凭证级失败：也落日志，让界面看得到，而不是只回一个 500
       const message = errorMessage(error);
+      // 这时还没进到 runSingleTask，通知得在这里发，否则「手动执行失败」永远不通知
+      await this.notifyConnectionProblem(null, message);
       return tasks.map((task) =>
         this.store.addLog({
           taskId: task.id,
@@ -1671,6 +1783,8 @@ export class TgAgent implements DurableObject {
 
     const triggerSource: LogSource = options.manual ? "manual" : "auto";
     const startedAt = Date.now();
+    /** 跑之前的连续失败次数：判断这次是不是「恢复」 */
+    const streakBefore = this.store.failStreakOf(task.id);
     let log: LogEntry;
     try {
       const settings = this.store.getSettings();
@@ -1776,9 +1890,37 @@ export class TgAgent implements DurableObject {
         detail: "排查后到任务详情里重新启用；可在设置里关掉失败提醒。",
         source: "system",
       });
-      await this.notifyFailure(client, task, `连续失败 ${streak} 次，已自动暂停任务。`);
+      await this.notifyEvent(client, "auto_paused", {
+        title: `⏸ 任务「${task.name}」已自动暂停`,
+        text: `连续失败 ${streak} 次，已停用该任务。\n原因：${(log.message || "执行失败").slice(0, 200)}`,
+        task,
+      });
     } else if (log && !log.ok) {
-      await this.notifyFailure(client, task, log.message || "执行失败");
+      const reason = log.message || "执行失败";
+      const type = this.classifyRunFailure(reason);
+      // 连接/会话类错误不按「任务失败」发，避免每个任务各发一条
+      if (type === "connection_error" || type === "session_expired") {
+        await this.notifyConnectionProblem(client, reason);
+      } else {
+        await this.notifyEvent(client, "run_failed", {
+          title: `⚠️ 任务「${task.name}」执行失败`,
+          text: reason.slice(0, 300),
+          task,
+        });
+      }
+    } else if (log && log.ok) {
+      if (streakBefore >= 1) {
+        await this.notifyEvent(client, "run_recovered", {
+          title: `✅ 任务「${task.name}」恢复正常`,
+          text: `之前连续失败 ${streakBefore} 次，这次执行成功。`,
+          task,
+        });
+      }
+      await this.notifyEvent(client, "run_success", {
+        title: `✅ 任务「${task.name}」执行成功`,
+        text: log.message || "执行完成",
+        task,
+      });
     }
 
     // 计算下一次执行：手动跑一次不打乱定时
@@ -1802,42 +1944,63 @@ export class TgAgent implements DurableObject {
    * 失败提醒：默认给自己发一条 Telegram 私聊（同一任务 1 小时最多一次），
    * 另外可选 POST 到自定义 Webhook。
    */
-  private async notifyFailure(client: TelegramClient, task: Task, reason: string): Promise<void> {
+  /**
+   * 事件通知的统一入口。
+   *
+   * - 事件类型由设置里的 notifyEvents 多选决定
+   * - 两个通道：Telegram 私聊（notifyOnFailure）与 Webhook（配了地址才发）
+   * - 带 throttled 的事件按「事件 + 任务」1 小时节流，避免刷屏
+   */
+  private async notifyEvent(
+    client: TelegramClient | null,
+    type: NotifyEventId,
+    payload: { title: string; text: string; task?: Task | null },
+  ): Promise<void> {
     const settings = this.store.getSettings();
-    if (!settings.notifyOnFailure) return;
+    const selected = settings.notifyEvents ?? [];
+    if (!selected.includes(type)) return;
 
-    const throttleKey = `notify:${task.id}:at`;
-    const last = Number(this.store.getKv(throttleKey) ?? 0);
-    if (Date.now() - last < 60 * 60_000) return;
+    const throttleKey = `notify:${type}:${payload.task?.id ?? "global"}:at`;
+    if (isThrottledEvent(type)) {
+      const last = Number(this.store.getKv(throttleKey) ?? 0);
+      if (Date.now() - last < 60 * 60_000) return;
+    }
     this.store.setKv(throttleKey, String(Date.now()));
 
-    const text = `⚠️ 任务「${task.name}」执行失败\n${reason}\n时间：${formatInTimezone(Date.now(), settings.timezone)}`;
-    try {
-      await client.sendMessage("me" as never, { message: text, parseMode: false });
-    } catch {
-      /* 自己给自己发也可能失败（比如被限流），不影响主流程 */
+    const text = `${payload.title}\n${payload.text}\n时间：${formatInTimezone(Date.now(), settings.timezone)}`;
+
+    if (settings.notifyOnFailure !== false && client) {
+      try {
+        await client.sendMessage("me" as never, { message: text, parseMode: false });
+      } catch {
+        /* 自己给自己发也可能失败（被限流等），不影响主流程 */
+      }
     }
 
     await this.sendWebhook(settings, {
-      taskId: task.id,
-      taskName: task.name,
-      title: `⚠️ 任务「${task.name}」执行失败`,
-      text: reason,
+      taskId: payload.task?.id ?? null,
+      taskName: payload.task?.name ?? null,
+      title: payload.title,
+      text: payload.text,
     });
   }
 
-  /** 整批跑不动（连不上 / 凭证失效）时的提醒：不走按任务的 1 小时节流，单独 30 分钟一次 */
-  private async notifyConnectionProblem(reason: string): Promise<void> {
-    const settings = this.store.getSettings();
-    if (!settings.notifyOnFailure) return;
-    const key = "notify:connection:at";
-    const last = Number(this.store.getKv(key) ?? 0);
-    if (Date.now() - last < 30 * 60_000) return;
-    this.store.setKv(key, String(Date.now()));
+  /** 连不上 / 会话过期：这两类要区分开，处理方式不一样 */
+  private classifyRunFailure(reason: string): NotifyEventId {
+    return /AUTH_KEY|SESSION_(REVOKED|EXPIRED)|USER_DEACTIVATED|AUTH_KEY_UNREGISTERED/i.test(reason)
+      ? "session_expired"
+      : "connection_error";
+  }
 
-    await this.sendWebhook(settings, {
-      title: "⚠️ 签到台连不上 Telegram",
-      text: `${reason}\n所有到期任务都没能执行，请检查登录状态（设置 → 账号）或网络。`,
+  /** 整批跑不动时的提醒（独立于按任务的节流，见 notifyEvent 的 throttled） */
+  private async notifyConnectionProblem(client: TelegramClient | null, reason: string): Promise<void> {
+    const type = this.classifyRunFailure(reason);
+    await this.notifyEvent(client, type, {
+      title: type === "session_expired" ? "⚠️ Telegram 登录已失效" : "⚠️ 签到台连不上 Telegram",
+      text:
+        (type === "session_expired"
+          ? "会话被注销或过期，所有任务都不会执行。请到「账号」页重新登录。"
+          : "所有到期任务都没能执行，通常是网络/机房问题，稍后会自动重试。") + `\n原因：${reason.slice(0, 200)}`,
     });
   }
 
@@ -2005,6 +2168,12 @@ export class TgAgent implements DurableObject {
         failureHandled: this.store.countEvent("failure_handled"),
         trend: this.usageTrend(settings.timezone ?? 8),
       },
+      notifyCatalog: NOTIFY_EVENTS.map((item) => ({
+        id: item.id,
+        label: item.label,
+        hint: item.hint,
+        throttled: Boolean(item.throttled),
+      })),
       runtime: {
         colo: this.store.getKv("runtime:colo"),
         locationHint: this.env.DO_LOCATION_HINT ?? null,
@@ -2051,6 +2220,11 @@ function sanitizeSettings(patch: Partial<Settings>): Partial<Settings> {
     if (Number.isFinite(value)) clean.stepWaitSeconds = Math.max(5, Math.min(300, value));
   }
   if (patch.notifyOnFailure !== undefined) clean.notifyOnFailure = !!patch.notifyOnFailure;
+  if (patch.notifyEvents !== undefined) clean.notifyEvents = normalizeNotifyEvents(patch.notifyEvents);
+  if (patch.digestHour !== undefined) {
+    const hour = Number(patch.digestHour);
+    if (Number.isFinite(hour)) clean.digestHour = Math.max(0, Math.min(23, Math.round(hour)));
+  }
   if (patch.notifyWebhook !== undefined) {
     clean.notifyWebhook = String(patch.notifyWebhook).trim().slice(0, 300);
   }

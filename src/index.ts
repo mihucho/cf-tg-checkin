@@ -212,6 +212,25 @@ async function authThrottle(
   }
 }
 
+/**
+ * 口令被锁定时通知一次（DO 侧有 1 小时节流）。
+ * 只在「刚锁定」这一刻调用，避免每次失败都打扰。
+ */
+async function notifyLoginLocked(env: Env, ip: string, retryAfterSeconds: number): Promise<void> {
+  try {
+    await agentStub(env).fetch("https://agent/notify/event", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-internal-call": "notify" },
+      body: JSON.stringify({
+        type: "login_failed",
+        detail: `来源 IP ${ip} 连续输错口令，已锁定 ${Math.ceil(retryAfterSeconds / 60)} 分钟。`,
+      }),
+    });
+  } catch {
+    /* 通知失败不影响登录流程 */
+  }
+}
+
 /** 状态变更类请求：浏览器跨站发来的（Origin 与本站不一致）直接拒绝 */
 function originRejected(request: Request, url: URL): boolean {
   const origin = request.headers.get("origin");
@@ -335,6 +354,7 @@ export default {
         const after = await authThrottle(env, ip, "fail");
         await new Promise((resolve) => setTimeout(resolve, 400));
         if (!after.allowed) {
+          await notifyLoginLocked(env, ip, after.retryAfterSeconds);
           return json(
             { error: `尝试次数过多，请 ${Math.ceil(after.retryAfterSeconds / 60)} 分钟后再试` },
             429,

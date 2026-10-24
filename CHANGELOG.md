@@ -30,6 +30,24 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-24
+
+**通知体系**：从「只有失败提醒」扩成「多选事件 + 日报」。
+
+- **8 种通知类型，设置里多选**（默认开关键几项）：执行失败 / 连续失败自动暂停 / 失败后恢复 /
+  会话过期 / 连接异常 / 登录失败 / 执行成功 / 日报。类型目录由服务端下发（`state.notifyCatalog`），
+  前端不再各写一份
+- **日报**：每天 `digestHour`（默认 22:00，本地时区）汇总当天成功/失败次数、成功率、失败任务、
+  任务总数、下次执行时间；统计以**日志**为准（连接级失败不写事件表，用事件计数会漏报）
+- **会话过期 / 连接异常分开报**：按错误内容识别 `AUTH_KEY_*` / `SESSION_REVOKED` 等；
+  手动执行、run-all、定时 tick 三条路径都会通知（原来手动执行失败永远不通知）
+- **登录失败**：管理界面口令连续输错被锁定时，Worker 通过内部接口让 DO 发一条（1 小时节流，拿不到 IP 以外信息）
+- 事件级节流：`run_failed` / `session_expired` / `connection_error` / `login_failed` 同类 1 小时最多一条；
+  `run_success` / `daily_digest` 不额外节流
+- 日报时间下拉给全 24 小时（原来只列了 10 个，保存过其它值的用户会显示错位）
+- 新模块 `src/notify/digest.ts` + `tests/digest.test.ts`（9 例），共 109 个单测；集成测试 38 项
+- 实测：日报 → 钉钉 mock，URL 带 `timestamp` + `sign`，包体 `{"msgtype":"text","text":{"content":…}}`
+
 ## [0.13.0] - 2026-10-24
 
 **失败提醒支持钉钉 / 企业微信 / 飞书**（原来只能发通用 JSON，钉钉会直接丢弃，而且照样记成功）。

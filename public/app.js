@@ -2582,7 +2582,62 @@ function renderSettings() {
         name: "notifyOnFailure",
         checked: settings.notifyOnFailure !== false,
       }),
-      el("label", { for: "settings-notifyOnFailure" }, "任务失败时给自己发一条 Telegram 消息"),
+      el("label", { for: "settings-notifyOnFailure" }, "同时在 Telegram 里给自己发一条（关掉就只走 Webhook）"),
+    ),
+    el(
+      "div",
+      { class: "field" },
+      el("span", { class: "field-label" }, "通知类型"),
+      el(
+        "div",
+        { class: "notify-types" },
+        ...((state.data && state.data.notifyCatalog) || []).map((item) => {
+          const checked = (settings.notifyEvents || []).includes(item.id);
+          const hasTime = item.id === "daily_digest";
+          return el(
+            "label",
+            { class: `notify-type${checked ? " is-on" : ""}` },
+            el("input", {
+              type: "checkbox",
+              name: "notifyEvents",
+              value: item.id,
+              checked,
+              onchange: (event) => {
+                event.currentTarget.closest(".notify-type")?.classList.toggle("is-on", event.currentTarget.checked);
+              },
+            }),
+            el(
+              "span",
+              { class: "notify-type-body" },
+              el(
+                "span",
+                { class: "notify-type-head" },
+                el("span", { class: "notify-type-label" }, item.label),
+                hasTime
+                  ? el(
+                      "span",
+                      { class: "notify-type-time" },
+                      el("select", {
+                        class: "input input-tiny",
+                        name: "digestHour",
+                        "aria-label": "日报发送时间",
+                        onchange: (event) => event.stopPropagation(),
+                      }, ...Array.from({ length: 24 }, (_, hour) => hour).map((hour) =>
+                        el(
+                          "option",
+                          { value: String(hour), selected: Number(settings.digestHour ?? 22) === hour },
+                          `${String(hour).padStart(2, "0")}:00`,
+                        ),
+                      )),
+                    )
+                  : null,
+              ),
+              el("span", { class: "notify-type-hint" }, item.hint),
+            ),
+          );
+        }),
+      ),
+      el("p", { class: "field-hint" }, "勾选的事件会推到上面的 Webhook；开了「同时在 Telegram 里提醒」也会发到你的私聊。"),
     ),
     field({
       id: "settings-notifyWebhookKind",
@@ -2791,6 +2846,8 @@ async function saveSettings(event) {
     notifyOnFailure: checked("notifyOnFailure"),
     notifyWebhook: read("notifyWebhook").trim(),
     notifyWebhookKind: read("notifyWebhookKind") || "generic",
+    notifyEvents: [...form.querySelectorAll('input[name="notifyEvents"]:checked')].map((node) => node.value),
+    digestHour: Number(read("digestHour") || 22),
     turnstileSiteKey: read("turnstileSiteKey").trim(),
   };
   // 密钥留空表示"不修改"，填了才提交；勾选「清除」则显式清空

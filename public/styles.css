@@ -2782,6 +2782,76 @@ input[type="radio"] {
   color: var(--text-2, rgba(255, 255, 255, 0.75));
 }
 
+/* 通知类型多选 */
+.notify-types {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.notify-type {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 9px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.notify-type:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.notify-type.is-on {
+  border-color: rgba(92, 200, 189, 0.45);
+  background: rgba(92, 200, 189, 0.06);
+}
+
+.notify-type input {
+  margin-top: 2px;
+  accent-color: var(--accent, #5cc8bd);
+}
+
+.notify-type-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.notify-type-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.notify-type-label {
+  font-size: 12.5px;
+  color: var(--text, #fff);
+}
+
+.notify-type-hint {
+  font-size: 11.5px;
+  color: var(--text-3, rgba(255, 255, 255, 0.4));
+  line-height: 1.5;
+}
+
+.input-tiny {
+  height: 22px;
+  padding: 0 4px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+
+@media (max-width: 560px) {
+  .notify-types {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* 关于里的用量面板 */
 .usage-grid {
   display: grid;

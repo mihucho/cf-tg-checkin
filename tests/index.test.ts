@@ -12,5 +12,6 @@ import "./roundtrip.test.ts";
 import "./socket.test.ts";
 import "./budget.test.ts";
 import "./webhook.test.ts";
+import "./digest.test.ts";
 
 void runAll();
