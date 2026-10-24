@@ -101,7 +101,7 @@ export interface Settings {
   stepPollSeconds: number;
   /** 单次最多等待多少秒（默认 30） */
   stepWaitSeconds: number;
-  /** 触发前缀（可选）：设置后只有以它开头的消息才当配置解析，空表示全部都解析 */
+  /** 触发前缀：只有以它开头的消息才当配置解析（默认 "tg"；设成空字符串表示全部都解析） */
   triggerPrefix: string;
   /** Turnstile 站点 key（公开，会下发前端） */
   turnstileSiteKey: string;
@@ -161,7 +161,7 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultTarget: "",
   stepPollSeconds: 3,
   stepWaitSeconds: 30,
-  triggerPrefix: "",
+  triggerPrefix: "tg",
   turnstileSiteKey: "",
   turnstileSecretKey: "",
 };

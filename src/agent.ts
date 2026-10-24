@@ -256,7 +256,20 @@ export class TgAgent implements DurableObject {
         const body = (await request.json()) as { text?: string };
         const settings = this.store.getSettings();
         const ctx: TriggerContext = { defaultTarget: settings.defaultTarget || undefined, allowMissingTarget: true };
-        const parsed = parseTrigger(String(body.text ?? ""), ctx);
+        const rawText = String(body.text ?? "");
+        const prefix = (settings.triggerPrefix ?? "").trim();
+        let parseText = rawText;
+        if (prefix) {
+          const stripped = stripTriggerPrefix(rawText, prefix);
+          if (!stripped.matched) {
+            return json({
+              ok: false,
+              error: `消息需要以触发前缀「${prefix}」开头，例如：${prefix} ${rawText.slice(0, 60)}`,
+            });
+          }
+          parseText = stripped.rest;
+        }
+        const parsed = parseTrigger(parseText, ctx);
         if (!parsed.ok) return json({ ok: false, error: parsed.error });
         const result = parsed.result;
         if (result.kind !== "create" || !result.task) {
@@ -912,7 +925,7 @@ export class TgAgent implements DurableObject {
       if (!this.store.getKv(greetKey)) {
         this.store.setKv(greetKey, "1");
         await client
-          .sendMessage(entity as never, { message: WELCOME_TEXT, parseMode: false })
+          .sendMessage(entity as never, { message: welcomeText(settings.triggerPrefix ?? ""), parseMode: false })
           .catch(() => undefined);
       }
       return;
@@ -1035,6 +1048,17 @@ export class TgAgent implements DurableObject {
         } else if (findTimeToken(tokenize(text))) {
           trace.push(`看起来像配置但缺少前缀「${prefix}」→ 忽略`);
           record(false, `忽略：消息缺少触发前缀「${prefix}」`);
+          // 只在"看起来像配置"时提醒，且 10 分钟最多一次，避免刷屏
+          const lastHint = Number(this.store.getKv("trigger:prefixHintAt") ?? 0);
+          if (Date.now() - lastHint > 10 * 60_000) {
+            this.store.setKv("trigger:prefixHintAt", String(Date.now()));
+            await client
+              .sendMessage(entity as never, {
+                message: `⚠️ 需要在开头加触发前缀「${prefix}」，例如：\n${prefix} ${text.slice(0, 120)}`,
+                parseMode: false,
+              })
+              .catch(() => undefined);
+          }
         }
         return;
       }
@@ -1058,7 +1082,7 @@ export class TgAgent implements DurableObject {
       }
       trace.push("没有时间表达式，也没有可识别的目标 → 回帮助文本");
       record(false, "触发消息无法识别（缺时间/目标），已回帮助文本");
-      await reply(HELP_TEXT);
+      await reply(helpText(settings.triggerPrefix ?? ""));
       return;
     }
 
@@ -1087,7 +1111,7 @@ export class TgAgent implements DurableObject {
       case "help": {
         trace.push("命令：帮助");
         record(true, "触发器命令：帮助");
-        await reply(HELP_TEXT);
+        await reply(helpText(settings.triggerPrefix ?? ""));
         return;
       }
       case "list": {
@@ -1164,7 +1188,7 @@ export class TgAgent implements DurableObject {
         return;
       }
       default:
-        await reply(HELP_TEXT);
+        await reply(helpText(settings.triggerPrefix ?? ""));
     }
   }
 
@@ -1757,16 +1781,28 @@ function normalizeTaskInput(input: TaskInput | Task): TaskInput {
   };
 }
 
-const WELCOME_TEXT = `👋 签到台已就绪
+function welcomeText(prefix: string): string {
+  const p = prefix ? `${prefix} ` : "";
+  return `👋 签到台已就绪
 
-往这里转发/分享要签到的机器人，再发一条配置就能建任务，例如：
-9.30 签到
-9.30 签到 btn:立即签到 #kw:签到成功
-8.30-9.30 rand:早上好|午安
+往这里转发/分享要签到的机器人，再发一条配置就能建任务${
+    prefix ? `（每条配置都要以「${prefix}」开头）` : ""
+  }，例如：
+${p}9.30 签到
+${p}9.30 签到 btn:立即签到 #kw:签到成功
+${p}8.30-9.30 rand:早上好|午安
 
-发「列表」看任务，发「帮助」看完整语法。`;
+${p}列表 看任务，${p}帮助 看完整语法。`;
+}
 
-const HELP_TEXT = `💡 触发语法：[时间] [动作...]
+function helpText(prefix: string): string {
+  const head = prefix
+    ? `💡 每条配置都要以「${prefix}」开头，例如：${prefix} 9.30 签到\n`
+    : "";
+  return head + HELP_BODY;
+}
+
+const HELP_BODY = `💡 触发语法：[时间] [动作...]
 
 时间：9.30 / 09:30 / 0930；窗口 9.30-10.30；间隔 每30分 / 每2小时
 动作：
