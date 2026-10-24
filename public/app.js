@@ -1628,8 +1628,8 @@ function renderSettings() {
     field({
       id: "settings-triggerPrefix",
       label: "触发前缀（triggerPrefix）",
-      control: textControl("triggerPrefix", settings.triggerPrefix ?? "", "例如 tg（留空 = 所有消息都解析）"),
-      hint: "设置后只有以它开头的消息才会被当成配置（如「tg 9.30 签到」），收藏夹里的随手笔记不会被误解析。转发过来的消息仍会登记目标。",
+      control: textControl("triggerPrefix", settings.triggerPrefix ?? "", "默认 tg；留空 = 所有消息都解析"),
+      hint: "只有以它开头的消息才会被当成配置（如「tg 9.30 签到」），收藏夹里的随手笔记不会被误解析。转发过来的消息仍会自动登记目标；留空则恢复成解析全部消息。",
     }),
     field({
       id: "settings-adminUserId",
