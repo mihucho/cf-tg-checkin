@@ -410,7 +410,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
         el("option", { value: "pos", selected: step._mode === "pos" ? true : undefined }, "按行列位置"),
       );
       container.append(
-        field({ id: id(`${prefix}-mode`), label: "定位方式", control: modeSelect }),
+        field({ id: id(`${prefix}-mode`), label: "怎么找按钮", control: modeSelect }),
       );
       if (step._mode === "pos") {
         container.append(
@@ -461,7 +461,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
                 step.text = event.target.value;
               },
             }),
-            hint: "按文本模糊匹配消息里的按钮。",
+            hint: "先找文字完全一致的，再找包含这段文字的。",
           }),
         );
       }
@@ -546,7 +546,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
             model.successKeywords = event.target.value;
           },
         }),
-        hint: "逗号分隔。回复里出现任一关键词即视为成功，留空则按请求是否报错判断。",
+        hint: "用逗号分隔。机器人回复里出现任意一个词就算成功；留空则只要没报错就算成功。",
       }),
       fieldRow(
         field({
@@ -580,12 +580,12 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
               model.deleteAfterSeconds = Number(event.target.value);
             },
           }),
-          hint: "0 表示不删除自己发的消息。",
+          hint: "0 表示不删。填了就在这么多秒后删掉自己发出的消息。",
         }),
       ),
       field({
         id: id("step-delay"),
-        label: "步骤间隔（秒）",
+        label: "两步之间间隔（秒）",
         control: el("input", {
           class: "input",
           id: id("step-delay"),
@@ -598,7 +598,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
             model.stepDelaySeconds = Number(event.target.value);
           },
         }),
-        hint: "每执行完一个动作等多久再做下一个，默认 3 秒（两步按钮菜单留点时间更稳）。",
+        hint: "每执行完一步停多久再做下一步，默认 3 秒。机器人反应慢可以调大。",
       }),
       el(
         "label",
@@ -627,7 +627,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
           "p",
           { class: "field-hint" },
           defaultTarget
-            ? `留空时触发器会使用设置里的默认目标：${defaultTarget}`
+            ? `留空时，会发到设置里的默认目标：${defaultTarget}`
             : "填 @username 或数字 id；点「解析」可以确认解析到的会话。",
         ),
       );
@@ -727,7 +727,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
       "section",
       { class: "editor-section" },
       el("h3", { class: "editor-section-title" }, "动作"),
-      el("p", { class: "editor-section-desc" }, "按顺序执行；等待步骤用于给 bot 留出响应时间。"),
+      el("p", { class: "editor-section-desc" }, "按顺序执行。需要等机器人回复时，中间加一步「等待」即可。"),
       stepsList,
       addStepButtons,
     ),

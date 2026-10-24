@@ -537,7 +537,7 @@ function renderOverview() {
     "div",
     { class: "stat-grid" },
     statCard({
-      label: "MTProto 连接",
+      label: "Telegram 连接",
       dot: mtproto.dot,
       value: mtproto.text,
       foot: account.signedIn
@@ -545,7 +545,7 @@ function renderOverview() {
         : el("a", { class: "link", href: "#/account" }, "现在登录 Telegram"),
     }),
     statCard({
-      label: "任务",
+      label: "签到任务",
       value: el(
         "span",
         { class: "num" },
@@ -574,26 +574,26 @@ function renderOverview() {
         : nextRunHint,
     }),
     statCard({
-      label: "触发器",
+      label: "消息指令",
       dot: settings.triggerEnabled ? "ok" : "idle",
-      value: settings.triggerEnabled ? "监听中" : "已停止",
-      foot: `来源 ${controlChatLabel(settings)} · 每 ${Number(settings.pollSeconds) || 60} 秒轮询${
+      value: settings.triggerEnabled ? "运行中" : "已关闭",
+      foot: `在${controlChatLabel(settings)}里发指令 · 每 ${Number(settings.pollSeconds) || 60} 秒检查一次${
         runtime && runtime.nextPollAt ? `（下次 ${formatClock(runtime.nextPollAt)}）` : ""
       }`,
       sub:
         runtime && runtime.lastPollAt
-          ? `上次轮询 ${formatRelative(runtime.lastPollAt)}` +
+          ? `上次检查 ${formatRelative(runtime.lastPollAt)}` +
             (Date.now() - runtime.lastPollAt > Math.max(180_000, (Number(settings.pollSeconds) || 60) * 3000)
               ? " ⚠️ 已超时"
               : "")
-          : "还没有轮询过（登录 Telegram 后开始）",
+          : "登录 Telegram 后开始自动检查",
       sub2:
         runtime && runtime.lastTriggerEvent
           ? `最近事件：${runtime.lastTriggerEvent.ok ? "" : "⚠️ "}${runtime.lastTriggerEvent.message}（${formatRelative(
               runtime.lastTriggerEvent.at,
             )}）`
-          : "最近事件：还没有处理过触发消息",
-      sub: `步骤检测 ${Number(settings.stepPollSeconds) || 3}s / 最长 ${Number(settings.stepWaitSeconds) || 30}s`,
+          : "最近事件：还没处理过消息指令",
+      sub: `等按钮：每 ${Number(settings.stepPollSeconds) || 3}s 看一次，最多等 ${Number(settings.stepWaitSeconds) || 30}s`,
     }),
   );
 
@@ -608,7 +608,7 @@ function renderOverview() {
           { class: "empty empty-inline" },
           el("span", { class: "empty-icon" }, icon("list", { size: 18 })),
           el("p", { class: "empty-title" }, "还没有执行记录"),
-          el("p", { class: "empty-text" }, "运行一次任务，或直接在收藏夹发送触发消息。"),
+          el("p", { class: "empty-text" }, "手动运行一次，或在收藏夹里发条指令试试。"),
         ),
   });
 
@@ -627,7 +627,7 @@ function renderOverview() {
         el(
           "div",
           { class: "hint-body" },
-          el("h2", { class: "card-title" }, "触发器"),
+          el("h2", { class: "card-title" }, "消息指令"),
           el(
             "p",
             { class: "hint-line" },
@@ -639,10 +639,10 @@ function renderOverview() {
             "p",
             { class: "hint-sub" },
             settings.triggerEnabled
-              ? "监听中。支持点击按钮、随机文本、成功关键词等修饰符。"
-              : "触发器已停止，可在设置里重新开启。",
+              ? "会自动读取新消息。支持点击按钮、随机文本、成功关键词等写法。"
+              : "消息指令已关闭，可在设置里重新开启。",
           ),
-          el("a", { class: "link link-sm", href: "#/settings" }, "查看 DSL 说明与试算", icon("arrowRight", { size: 14 })),
+          el("a", { class: "link link-sm", href: "#/settings" }, "看看怎么写指令", icon("arrowRight", { size: 14 })),
         ),
       ),
     ),
@@ -687,7 +687,7 @@ function renderTasks() {
   const header = pageHead({
     title: "任务",
     description: tasks.length
-      ? `${tasks.length} 个任务 · ${enabled} 个启用 · ${tasks.length - enabled} 个停用 · 立即执行只是手动跑一次，不改动下次定时`
+      ? `${tasks.length} 个任务 · ${enabled} 个启用 · ${tasks.length - enabled} 个停用 · 「立即执行」只是手动跑一次，不影响定时`
       : "还没有任务，先建一个签到任务。",
     actions: tasks.length
       ? [btn("运行全部", { iconName: "bolt", onClick: (event) => runAll(event.currentTarget) }), newBtn]
@@ -703,17 +703,38 @@ function renderTasks() {
         emptyState({
           iconName: "list",
           title: "还没有签到任务",
-          text: "可以手动新建，也可以直接在收藏夹发一条「9.30 签到」让触发器帮你建。",
+          text: "可以手动新建，也可以直接在收藏夹发一条「tg 9.30 签到」，让它自己建。",
           actions: [
             newTaskBtn("ghost", "新建任务"),
-            el("a", { class: "btn btn-subtle", href: "#/settings" }, "看看 DSL 写法"),
+            el("a", { class: "btn btn-subtle", href: "#/settings" }, "看看指令怎么写"),
           ],
         }),
       ),
     );
   }
 
-  return frag(header, el("div", { class: "card table-card" }, el("div", { class: "table-wrap" }, taskTable(tasks))));
+  return frag(
+    header,
+    duplicates.length
+      ? el(
+          "div",
+          { class: "banner banner-warn" },
+          el(
+            "div",
+            { class: "banner-text" },
+            el("strong", {}, `有 ${duplicates.length} 组任务的设置一模一样`),
+            el(
+              "p",
+              {},
+              duplicates
+                .map((group) => `#${group.map((task) => task.id).join(" / #")}`)
+                .join("；") + " 会同时触发、重复发送，建议只保留一个。",
+            ),
+          ),
+        )
+      : null,
+    el("div", { class: "card table-card" }, el("div", { class: "table-wrap" }, taskTable(tasks))),
+  );
 }
 
 function taskTable(tasks) {
@@ -743,7 +764,7 @@ function taskRow(task) {
   const target = task.target || {};
   const enabledText = task.enabled ? "已启用" : "已停用";
   const subParts = [`#${task.id}`];
-  if (task.source === "trigger") subParts.push("触发器创建");
+  if (task.source === "trigger") subParts.push("由指令创建");
   if (task.threadId) subParts.push(`话题 ${task.threadId}`);
 
   const nextRunAt = toMillis(task.nextRunAt);
@@ -772,7 +793,7 @@ function taskRow(task) {
         { class: "cell-main" },
         el("span", { class: `dot ${task.enabled ? "ok" : "idle"}`, title: enabledText }),
         el("span", { class: "task-name" }, task.name || `任务 #${task.id}`),
-        task.source === "trigger" ? el("span", { class: "tag" }, "触发器") : null,
+        task.source === "trigger" ? el("span", { class: "tag" }, "指令创建") : null,
       ),
       el("div", { class: "cell-sub" }, subParts.join(" · ")),
     ),
@@ -858,11 +879,11 @@ function openRunDetail(task) {
         el("span", { class: "muted" }, `· ${when}`),
         el("span", { class: "muted" }, `· ${task.lastMessage || "无摘要"}`),
       ),
-      el("pre", { class: "run-detail-body" }, task.lastDetail || "（这次运行没有步骤日志）"),
+      el("pre", { class: "run-detail-body" }, task.lastDetail || "（这次运行没有留下步骤记录）"),
       el(
         "p",
         { class: "hint" },
-        "完整历史在「日志」页；这里只保留最近一次运行的步骤。",
+        "完整历史在「日志」页，这里只看最近一次。",
       ),
     ),
   });
@@ -950,7 +971,7 @@ async function runTick(button) {
     try {
       const res = await api("/api/tick", { method: "POST" });
       const ran = Array.isArray(res && res.ran) ? res.ran.length : 0;
-      toast(ran ? `触发了 ${ran} 次执行` : "检查完成，暂无到期的任务", { kind: "ok" });
+      toast(ran ? `跑完了 ${ran} 个任务` : "检查完成，暂无到期的任务", { kind: "ok" });
       await refreshState({ silent: true });
     } catch (error) {
       toast(error.message || "检查失败", { kind: "error" });
@@ -1071,7 +1092,7 @@ function renderLogs() {
         emptyState({
           iconName: "list",
           title: "还没有执行记录",
-          text: "运行任务或发送触发消息后，结果会出现在这里。",
+          text: "运行任务、或发一条消息指令之后，结果会出现在这里。",
           actions: [el("a", { class: "btn", href: "#/tasks" }, "回到任务")],
         }),
       ),
@@ -1197,7 +1218,7 @@ function renderAccount() {
   const account = (state.data && state.data.account) || {};
   const header = pageHead({
     title: "账号",
-    description: "MTProto 凭据只保存在服务端，页面不会拿到 apiHash。",
+    description: "这两个值只保存在服务端，网页不会显示完整密钥。",
   });
 
   if (account.signedIn && account.me) {
@@ -1256,13 +1277,13 @@ function wizardCard(account) {
   );
   return card({
     title: "登录 Telegram 账号",
-    description: "用 my.telegram.org 的 API 凭据登录，三步完成。",
+    description: "用你在 my.telegram.org 申请的应用登录，三步完成。",
     body,
   });
 }
 
 function stepper(step) {
-  const items = ["填写 API 凭据", "输入验证码", "两步验证密码"];
+  const items = ["填写应用信息", "输入验证码", "两步验证密码"];
   return el(
     "ol",
     { class: "stepper" },
@@ -1290,17 +1311,17 @@ function stepCredentials(account, pending) {
     el(
       "p",
       { class: "form-note" },
-      "apiId 和 apiHash 在 ",
+      "在 ",
       el(
         "a",
         { class: "link", href: "https://my.telegram.org", target: "_blank", rel: "noopener noreferrer" },
         "my.telegram.org",
       ),
-      " 的 API development tools 里申请。凭据只提交给服务端。",
+      " 的 API development tools 里创建一个应用，就能看到这两个值。它们只会发给服务端。",
     ),
     field({
       id: "account-api-id",
-      label: "apiId",
+      label: "应用 ID（apiId）",
       control: el("input", {
         class: "input",
         id: "account-api-id",
@@ -1315,7 +1336,7 @@ function stepCredentials(account, pending) {
     }),
     field({
       id: "account-api-hash",
-      label: "apiHash",
+      label: "应用密钥（apiHash）",
       control: el("input", {
         class: "input",
         id: "account-api-hash",
@@ -1449,8 +1470,8 @@ async function submitCredentials(event) {
   const apiHash = formValue(form, "apiHash").trim();
   const phone = formValue(form, "phone").trim();
 
-  if (!Number.isFinite(apiId) || apiId <= 0) return setFormError(form, "apiId 需要是数字");
-  if (!apiHash) return setFormError(form, "请填写 apiHash");
+  if (!Number.isFinite(apiId) || apiId <= 0) return setFormError(form, "应用 ID 需要是数字");
+  if (!apiHash) return setFormError(form, "请填写应用密钥（apiHash）");
   if (!/^\+?\d{6,}$/.test(phone)) return setFormError(form, "手机号需要国际格式，例如 +8613800000000");
 
   setFormError(form, "");
@@ -1557,14 +1578,14 @@ function profileCard(account) {
           metaRow(
             "连接状态",
             account.connected
-              ? "已连接（MTProto 会话活跃）"
+              ? "已连接（正在和 Telegram 通信）"
               : account.lastConnectedAt
                 ? `空闲（按需连接，上次成功连接 ${formatRelative(account.lastConnectedAt)}）`
-                : "空闲（按需连接：收到任务或下次轮询时自动连上）",
+                : "空闲（需要时自动连接，比如下次执行任务）",
           ),
           metaRow("用户 id", String(me.id ?? "—")),
           metaRow("手机号", account.phone ? maskPhone(account.phone) : "—"),
-          metaRow("apiId", account.apiId ? String(account.apiId) : "—"),
+          metaRow("应用 ID", account.apiId ? String(account.apiId) : "—"),
         ),
       ),
     ),
@@ -1584,7 +1605,7 @@ function maskPhone(phone) {
 async function logoutAccount() {
   const ok = await confirmDialog({
     title: "退出 Telegram 账号",
-    message: "会注销 MTProto 会话，定时任务在重新登录前将无法执行。",
+    message: "退出后会清除登录状态，定时任务在重新登录前不会执行。",
     confirmLabel: "退出账号",
     danger: true,
   });
@@ -1623,46 +1644,46 @@ function renderSettings() {
       { class: "form-row" },
       field({
         id: "settings-timezone",
-        label: "时区偏移（小时）",
+        label: "时区（小时）",
         control: numberControl("timezone", settings.timezone ?? 8, { step: "0.5", min: "-12", max: "14" }),
-        hint: "东八区填 8；支持小数（如 5.5）。",
+        hint: "北京时间填 8。其他时区可填小数，例如 5.5。",
       }),
       field({
         id: "settings-pollSeconds",
-        label: "触发器轮询间隔（秒）",
+        label: "多久检查一次新消息（秒）",
         control: numberControl("pollSeconds", settings.pollSeconds ?? 60, { step: "5", min: "15", max: "3600" }),
-        hint: "越小越及时，但会消耗更多请求。",
+        hint: "越短越及时，但会消耗更多额度。",
       }),
     ),
-    el("div", { class: "form-section-title" }, "步骤检测"),
+    el("div", { class: "form-section-title" }, "等按钮出现"),
     el(
       "div",
       { class: "form-row" },
       field({
         id: "settings-stepPollSeconds",
-        label: "检测间隔（秒）",
+        label: "每隔多久看一次（秒）",
         control: numberControl("stepPollSeconds", settings.stepPollSeconds ?? 3, {
           step: "1",
           min: "1",
           max: "30",
         }),
-        hint: "等下一步按钮/回复时，每隔多久查一次消息。",
+        hint: "机器人回复后，每隔多久去看一次有没有出现下一步的按钮。",
       }),
       field({
         id: "settings-stepWaitSeconds",
-        label: "最多等待（秒）",
+        label: "最多等多久（秒）",
         control: numberControl("stepWaitSeconds", settings.stepWaitSeconds ?? 30, {
           step: "5",
           min: "5",
           max: "300",
         }),
-        hint: "超过这个时间还没出现下一步，就记为失败。",
+        hint: "超过这个时间还没出现下一步，就算这一步失败。",
       }),
     ),
     el(
       "div",
       { class: "field" },
-      el("span", { class: "field-label" }, "触发器"),
+      el("span", { class: "field-label" }, "消息指令"),
       el(
         "label",
         { class: "switch" },
@@ -1674,42 +1695,42 @@ function renderSettings() {
         el("span", { class: "switch-track", "aria-hidden": "true" }),
         el("span", { class: "switch-text" }, "允许用 Telegram 消息管理任务"),
       ),
-      el("p", { class: "field-hint" }, "关闭后不再监听新消息，已有的定时任务照常执行。"),
+      el("p", { class: "field-hint" }, "关闭后不再读取新消息；已有任务的定时照常执行。"),
     ),
     field({
       id: "settings-controlChat",
-      label: "触发消息来源（controlChat）",
+      label: "去哪里读指令",
       control: textControl("controlChat", settings.controlChat ?? "self", "self"),
-      hint: "self 表示收藏夹（Saved Messages）；也可以填 @username 或数字 id。",
+      hint: "默认 self = 收藏夹。也可以填群组 @用户名 或数字 ID。",
     }),
     field({
       id: "settings-triggerPrefix",
-      label: "触发前缀（triggerPrefix）",
+      label: "指令前缀",
       control: textControl("triggerPrefix", settings.triggerPrefix ?? "", "默认 tg；留空 = 所有消息都解析"),
-      hint: "只有以它开头的消息才会被当成配置（如「tg 9.30 签到」），收藏夹里的随手笔记不会被误解析。转发过来的消息仍会自动登记目标；留空则恢复成解析全部消息。",
+      hint: "只有以它开头的消息才会被当成指令（如「tg 9.30 签到」），收藏夹里的随手笔记不会被误解析。转发过来的消息仍会自动识别目标；留空表示所有消息都解析。",
     }),
     field({
       id: "settings-adminUserId",
-      label: "管理员 Telegram id（adminUserId）",
+      label: "管理员 Telegram ID",
       control: textControl("adminUserId", settings.adminUserId ?? "", "", "numeric"),
-      hint: "只有这个 id 能通过消息命令管理任务，留空表示不校验。",
+      hint: "填了之后，只有这个账号发的消息指令才生效（换成群组时建议填）。",
     }),
     field({
       id: "settings-defaultTarget",
-      label: "默认目标（defaultTarget）",
+      label: "默认目标",
       control: textControl("defaultTarget", settings.defaultTarget ?? "", "@username 或数字 id"),
-      hint: "触发消息里识别不到目标时使用，例如 @jerry_bot。",
+      hint: "消息里认不出要发给谁时用这个，例如 @jerry_bot。",
     }),
-    el("div", { class: "form-section-title" }, "登录人机验证（Cloudflare Turnstile）"),
+    el("div", { class: "form-section-title" }, "登录验证（Cloudflare Turnstile）"),
     field({
       id: "settings-turnstileSiteKey",
-      label: "站点 key（Site Key）",
+      label: "站点密钥（Site Key）",
       control: textControl("turnstileSiteKey", settings.turnstileSiteKey ?? "", "例如 0x4AAAAAAA…"),
       hint: "Cloudflare 控制台 → Turnstile → Add site 里获取。填了才会在登录页出现验证框。",
     }),
     field({
       id: "settings-turnstileSecret",
-      label: "密钥（Secret Key）",
+      label: "私钥（Secret Key）",
       control: el("input", {
         class: "input",
         id: "settings-turnstileSecret",
@@ -1748,13 +1769,13 @@ function renderSettings() {
   );
 
   return frag(
-    pageHead({ title: "设置", description: "调度、触发器与默认目标。" }),
-    card({ title: "调度与触发器", description: "保存后立即生效。", body: form }),
+    pageHead({ title: "设置", description: "执行时间、消息指令和默认目标。" }),
+    card({ title: "执行与消息指令", description: "保存后立即生效。", body: form }),
     testerCard(),
     triggerHelp(),
     card({
       title: "关于",
-      description: "部署排查时，把这一行发给维护者最快。",
+      description: "出问题时把这一行发出来，最快定位。",
       body: el(
         "div",
         { class: "stack-sm" },
@@ -1829,15 +1850,15 @@ async function saveSettings(event) {
     return;
   }
   if (!Number.isFinite(pollSeconds) || pollSeconds < 15 || pollSeconds > 3600) {
-    toast("轮询间隔需要在 15–3600 秒之间", { kind: "error" });
+    toast("检查间隔需要在 15–3600 秒之间", { kind: "error" });
     return;
   }
   if (!Number.isFinite(stepPollSeconds) || stepPollSeconds < 1 || stepPollSeconds > 30) {
-    toast("步骤检测间隔需要在 1–30 秒之间", { kind: "error" });
+    toast("按钮检查间隔需要在 1–30 秒之间", { kind: "error" });
     return;
   }
   if (!Number.isFinite(stepWaitSeconds) || stepWaitSeconds < 5 || stepWaitSeconds > 300) {
-    toast("步骤最多等待需要在 5–300 秒之间", { kind: "error" });
+    toast("等按钮的时间需要在 5–300 秒之间", { kind: "error" });
     return;
   }
 
@@ -1896,10 +1917,10 @@ function testerCard() {
   textarea.value = state.testText || "";
 
   return card({
-    title: "试算触发器",
-    description: "把准备发送的消息贴进来，看看会解析成什么任务。",
+    title: "试试一条指令",
+    description: "把你想发的指令粘进来，看看会建出什么任务。",
     actions: [
-      btn("解析", {
+      btn("查一下", {
         variant: "primary",
         iconName: "arrowRight",
         onClick: () => runParse(),
@@ -1912,7 +1933,7 @@ function testerCard() {
       el(
         "div",
         { class: "field" },
-        el("label", { class: "field-label", for: "dsl-test" }, "触发消息"),
+        el("label", { class: "field-label", for: "dsl-test" }, "指令内容"),
         textarea,
       ),
       el(
@@ -1995,7 +2016,7 @@ function renderParseResult() {
 async function runParse() {
   const text = String(state.testText || "").trim();
   if (!text) {
-    toast("先输入一条触发消息", { kind: "error" });
+    toast("先输入一条指令", { kind: "error" });
     const node = document.getElementById("dsl-test");
     if (node) node.focus();
     return;
@@ -2027,7 +2048,7 @@ function triggerHelp() {
       el(
         "div",
         { class: "card-head-text" },
-        el("h2", { class: "card-title" }, "触发器 DSL"),
+        el("h2", { class: "card-title" }, "指令写法"),
         el(
           "p",
           { class: "card-desc" },
