@@ -185,6 +185,22 @@ async function main() {
     const state2 = await get("/api/state");
     check("模板在 /api/state 里可见", state2.settings?.templates?.length === 1);
 
+    // ---------- Webhook 渠道 ----------
+    const hookSaved = await post("/api/settings", {
+      notifyWebhook: "https://oapi.dingtalk.com/robot/send?access_token=abc",
+      notifyWebhookKind: "dingtalk",
+      notifyWebhookSecret: "SECit123456",
+    });
+    check("Webhook 渠道可保存", hookSaved.settings?.notifyWebhookKind === "dingtalk", `got ${hookSaved.settings?.notifyWebhookKind}`);
+    check(
+      "Webhook 加签密钥不回传、只给已配置标记",
+      hookSaved.settings?.notifyWebhookSecret === "" && hookSaved.settings?.notifyWebhookSecretConfigured === true,
+    );
+    const badKind = await post("/api/settings", { notifyWebhookKind: "hacker" });
+    check("非法渠道被忽略（保留原值）", badKind.settings?.notifyWebhookKind === "dingtalk", `got ${badKind.settings?.notifyWebhookKind}`);
+    const cleared = await post("/api/settings", { clearNotifyWebhookSecret: true });
+    check("可清除加签密钥", cleared.settings?.notifyWebhookSecretConfigured === false);
+
     // ---------- 事件白名单 ----------
     const badEvent = await post("/api/events", { name: "hack" });
     check("未知事件被拒（400）", badEvent.status === 400, `status=${badEvent.status}`);

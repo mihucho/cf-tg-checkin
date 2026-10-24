@@ -2585,11 +2585,42 @@ function renderSettings() {
       el("label", { for: "settings-notifyOnFailure" }, "任务失败时给自己发一条 Telegram 消息"),
     ),
     field({
-      id: "settings-notifyWebhook",
-      label: "失败通知 Webhook（可选）",
-      control: textControl("notifyWebhook", settings.notifyWebhook ?? "", "https://…"),
-      hint: "失败时额外 POST 一个 JSON 到这个地址。同一任务 1 小时内最多提醒一次。",
+      id: "settings-notifyWebhookKind",
+      label: "Webhook 渠道",
+      control: selectControl("notifyWebhookKind", settings.notifyWebhookKind || "generic", [
+        ["generic", "通用 JSON（自建服务）"],
+        ["dingtalk", "钉钉自定义机器人"],
+        ["wecom", "企业微信群机器人"],
+        ["feishu", "飞书自定义机器人"],
+      ]),
+      hint: "按你填的地址手动选；选错会推不上去（各家的包体格式不一样）。",
     }),
+    field({
+      id: "settings-notifyWebhook",
+      label: "Webhook 地址",
+      control: textControl("notifyWebhook", settings.notifyWebhook ?? "", "https://oapi.dingtalk.com/robot/send?access_token=…"),
+      hint: "失败时推一条消息过去，同一任务 1 小时内最多提醒一次。机器人若设了「关键词」安全设置，消息里需要包含该关键词（标题固定含「失败」二字）。",
+    }),
+    field({
+      id: "settings-notifyWebhookSecret",
+      label: "钉钉加签密钥（可选）",
+      control: el("input", {
+        class: "input",
+        id: "settings-notifyWebhookSecret",
+        name: "notifyWebhookSecret",
+        type: "password",
+        autocomplete: "new-password",
+        spellcheck: "false",
+        placeholder: settings.notifyWebhookSecretConfigured ? "已配置（留空表示不修改）" : "机器人安全设置里的「加签」密钥",
+      }),
+      hint: "只有钉钉需要：机器人开启「加签」时填这里，会自动算 timestamp + sign。只存服务端，不回传。",
+    }),
+    el(
+      "div",
+      { class: "check-row" },
+      el("input", { type: "checkbox", id: "settings-clearNotifyWebhookSecret", name: "clearNotifyWebhookSecret" }),
+      el("label", { for: "settings-clearNotifyWebhookSecret" }, "清除已保存的加签密钥"),
+    ),
     field({
       id: "settings-turnstileSiteKey",
       label: "Turnstile 站点密钥（Site Key）",
@@ -2691,6 +2722,14 @@ function numberControl(name, value, { step = "1", min, max } = {}) {
   });
 }
 
+function selectControl(name, value, options) {
+  const node = el("select", { class: "input", id: `settings-${name}`, name });
+  for (const [optionValue, label] of options) {
+    node.append(el("option", { value: optionValue, selected: String(value) === optionValue }, label));
+  }
+  return node;
+}
+
 function textControl(name, value, placeholder = "", inputmode) {
   return el("input", {
     class: "input",
@@ -2751,12 +2790,16 @@ async function saveSettings(event) {
     triggerPrefix: read("triggerPrefix").trim(),
     notifyOnFailure: checked("notifyOnFailure"),
     notifyWebhook: read("notifyWebhook").trim(),
+    notifyWebhookKind: read("notifyWebhookKind") || "generic",
     turnstileSiteKey: read("turnstileSiteKey").trim(),
   };
   // 密钥留空表示"不修改"，填了才提交；勾选「清除」则显式清空
   const turnstileSecret = read("turnstileSecretKey").trim();
   if (turnstileSecret) body.turnstileSecretKey = turnstileSecret;
   if (checked("clearTurnstileSecret")) body.clearTurnstileSecret = true;
+  const webhookSecret = read("notifyWebhookSecret").trim();
+  if (webhookSecret) body.notifyWebhookSecret = webhookSecret;
+  if (checked("clearNotifyWebhookSecret")) body.clearNotifyWebhookSecret = true;
 
   await withLoading(form.querySelector('[type="submit"]'), async () => {
     try {

@@ -45,7 +45,10 @@
     "stepPollSeconds": 3,        // 等下一步按钮/回复时，每隔多少秒查一次（1–30）
     "stepWaitSeconds": 30,       // 单次最多等多久（5–300）
     "notifyOnFailure": true,     // 任务失败时给自己发一条 Telegram 消息
-    "notifyWebhook": "",         // 可选：失败时 POST 到自定义 Webhook
+    "notifyWebhook": "",         // 可选：失败提醒推送到这个地址
+    "notifyWebhookKind": "generic", // 推送渠道：generic | dingtalk | wecom | feishu（手动选择）
+    "notifyWebhookSecret": "",   // 钉钉加签密钥：永远不回传，用 notifyWebhookSecretConfigured 表示是否已配
+    "notifyWebhookSecretConfigured": false,
     "triggerPrefix": "tg",       // 触发前缀（默认 "tg"）：只有以它开头的消息才当配置解析；空字符串=全部解析
   },
   "tasks": [ Task ],
