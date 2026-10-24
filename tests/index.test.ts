@@ -13,5 +13,6 @@ import "./socket.test.ts";
 import "./budget.test.ts";
 import "./webhook.test.ts";
 import "./digest.test.ts";
+import "./rate.test.ts";
 
 void runAll();

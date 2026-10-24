@@ -114,3 +114,119 @@ export function failedTaskNames(logs: LogEntry[], limit = 8): string[] {
 export function countTasks(tasks: Task[]): { total: number; enabled: number } {
   return { total: tasks.length, enabled: tasks.filter((task) => task.enabled).length };
 }
+
+/* ---------------------------------------------------------------- 周报 */
+
+export interface WeeklyStats {
+  /** 本周执行次数（成功 / 失败） */
+  ok: number;
+  fail: number;
+  /** 上周同样的数字，用来做对比 */
+  prevOk: number;
+  prevFail: number;
+  /** 失败最多的任务：名字 + 次数（降序，最多 5 个） */
+  topFailed: Array<{ name: string; count: number }>;
+  totalTasks: number;
+  enabledTasks: number;
+  nextRunAt: number | null;
+}
+
+/** 本周的起点（本地周一 00:00）在真实时间轴上的毫秒值 */
+export function weekStart(ms: number, timezone: number): number {
+  const shift = timezone * 3_600_000;
+  const dayMs = 86_400_000;
+  const dayStart = Math.floor((ms + shift) / dayMs) * dayMs - shift;
+  // getUTCDay：0=周日，挪成 0=周一
+  const weekday = (new Date(dayStart + shift).getUTCDay() + 6) % 7;
+  return dayStart - weekday * dayMs;
+}
+
+/** 下一次该发周报的时间戳 */
+export function nextWeeklyAt(weekday: number, hour: number, minute: number, now: number, timezone: number): number {
+  const target = Math.max(0, Math.min(6, Math.floor(weekday))); // 0=周一 … 6=周日
+  const start = weekStart(now, timezone);
+  let at = start + target * 86_400_000 + Math.max(0, Math.min(23, hour)) * 3_600_000 + Math.max(0, Math.min(59, minute)) * 60_000;
+  while (at <= now + 60_000) at += 7 * 86_400_000;
+  return at;
+}
+
+/** 本周这个点是否该发周报（同一周只发一次） */
+export function shouldSendWeeklyDigest(options: {
+  now: number;
+  weekday: number;
+  hour: number;
+  minute: number;
+  timezone: number;
+  lastSentAt: number | null;
+}): boolean {
+  const { now, weekday, hour, minute, timezone, lastSentAt } = options;
+  const thisWeek = weekStart(now, timezone);
+  // 本周的周报时间点
+  const scheduled = thisWeek + Math.max(0, Math.min(6, Math.floor(weekday))) * 86_400_000
+    + Math.max(0, Math.min(23, hour)) * 3_600_000
+    + Math.max(0, Math.min(59, minute)) * 60_000;
+  if (now < scheduled) return false;
+  if (!lastSentAt) return true;
+  return weekStart(lastSentAt, timezone) !== thisWeek;
+}
+
+/** 周报正文：本周 vs 上周 + 失败最多的任务 */
+export function buildWeeklyDigest(stats: WeeklyStats, options: { timezone: number; now: number }): DigestContent {
+  const start = weekStart(options.now, options.timezone);
+  const from = localParts(start, options.timezone);
+  const to = localParts(options.now, options.timezone);
+  const title = `📈 签到周报 ${from.month}/${from.day}–${to.month}/${to.day}`;
+
+  const total = stats.ok + stats.fail;
+  const prevTotal = stats.prevOk + stats.prevFail;
+  const lines: string[] = [];
+
+  if (!total && !prevTotal) {
+    lines.push("本周没有任务执行记录。");
+  } else {
+    const rate = total ? Math.round((stats.ok / total) * 100) : 0;
+    const prevRate = prevTotal ? Math.round((stats.prevOk / prevTotal) * 100) : null;
+    lines.push(`本周执行 ${total} 次：成功 ${stats.ok} · 失败 ${stats.fail}（成功率 ${rate}%）`);
+    if (prevRate === null) {
+      lines.push("上周没有执行记录，无法对比。");
+    } else {
+      const diff = rate - prevRate;
+      const arrow = diff > 0 ? "↑" : diff < 0 ? "↓" : "→";
+      lines.push(`上周 ${prevTotal} 次 · 成功率 ${prevRate}%（${arrow} ${Math.abs(diff)} 个百分点）`);
+    }
+  }
+
+  if (stats.topFailed.length) {
+    const list = stats.topFailed.slice(0, 5).map((item) => `${item.name}（${item.count} 次）`).join("、");
+    lines.push(`失败最多的任务：${list}`);
+  }
+
+  lines.push(`任务 ${stats.totalTasks} 个（启用 ${stats.enabledTasks}）`);
+  if (stats.nextRunAt) {
+    const next = localParts(stats.nextRunAt, options.timezone);
+    lines.push(
+      `下次执行：${next.month}/${next.day} ${String(next.hour).padStart(2, "0")}:${String(next.minute).padStart(2, "0")}`,
+    );
+  }
+
+  return { title, text: lines.join("\n") };
+}
+
+/** 从日志里统计「每个任务失败几次」，降序返回 */
+export function topFailingTasks(
+  logs: LogEntry[],
+  limit = 5,
+): Array<{ name: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const log of logs) {
+    if (log.ok) continue;
+    if (log.source !== "auto" && log.source !== "manual") continue;
+    const name = (log.taskName ?? "").trim();
+    if (!name) continue;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+    .slice(0, limit);
+}

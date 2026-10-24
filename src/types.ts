@@ -134,6 +134,14 @@ export interface Settings {
   notifyEvents: NotifyEventId[];
   /** 日报发送时间（本地时区的小时，0-23） */
   digestHour: number;
+  /** 周报发送日（0=周一 … 6=周日） */
+  digestWeekday: number;
+  /** 周报发送时间（本地时区小时，0-23） */
+  weeklyHour: number;
+  /** 存储告警阈值（占 DO 存储上限的百分比，0 = 关闭） */
+  storageWarnPercent: number;
+  /** 成功率告警阈值（百分比，0 = 关闭）。窗口固定最近 7 天、样本至少 3 次 */
+  successRateThreshold: number;
   /** 可选：失败提醒推送到这个 Webhook */
   notifyWebhook: string;
   /** 推送渠道（手动选择）：钉钉 / 企业微信 / 飞书 / 通用 JSON */
@@ -191,6 +199,8 @@ export interface AgentState {
   };
   /** 运行时信息：最近一次请求来自哪个 colo、DO 创建区域提示 */
   runtime?: {
+    /** 存储用量（字节 / 估算上限 / 百分比） */
+    storage?: { bytes: number; limitBytes: number; percent: number };
     colo: string | null;
     locationHint: string | null;
     /** 下一次触发器轮询时间（毫秒），没登录/关了就为 null */
@@ -216,6 +226,10 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyOnFailure: true,
   notifyEvents: ["run_failed", "auto_paused", "session_expired", "connection_error", "daily_digest"],
   digestHour: 22,
+  digestWeekday: 0,
+  weeklyHour: 22,
+  storageWarnPercent: 70,
+  successRateThreshold: 80,
   notifyWebhook: "",
   notifyWebhookKind: "generic",
   notifyWebhookSecret: "",

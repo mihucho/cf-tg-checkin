@@ -11,7 +11,19 @@ import { password as PasswordModule } from "teleproto";
 import type { TelegramClient } from "teleproto";
 import { Store } from "./db";
 import type { AccountInfo, AgentState, LogEntry, LogSource, Settings, Target, Task, TaskInput } from "./types";
-import { buildDigest, countTasks, failedTaskNames, nextDigestAt, shouldSendDigest } from "./notify/digest";
+import {
+  buildDigest,
+  buildWeeklyDigest,
+  countTasks,
+  failedTaskNames,
+  nextDigestAt,
+  nextWeeklyAt,
+  shouldSendDigest,
+  shouldSendWeeklyDigest,
+  topFailingTasks,
+  weekStart,
+} from "./notify/digest";
+import { describeLowRate, pickLowRateTasks, taskRates } from "./notify/rate";
 import { NOTIFY_EVENTS, isNotifyEventId, isThrottledEvent, normalizeNotifyEvents } from "./notify/events";
 import type { NotifyEventId } from "./notify/events";
 import { buildWebhookPayload, detectWebhookKind, parseWebhookResult } from "./notify/webhook";
@@ -105,6 +117,19 @@ function publicError(error: unknown): string {
 }
 
 /** query/body 里的数字参数：非数字一律回落到默认值，避免把 "abc" 塞进 SQL */
+/** 字节数转人话（存储告警用） */
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(value < 10 && unit > 0 ? 1 : 0)} ${units[unit]}`;
+}
+
 /** 按消息 id 去重（分批拉取时相邻批次可能重叠） */
 function dedupeById<T extends { id: number }>(items: T[]): T[] {
   const seen = new Map<number, T>();
@@ -469,6 +494,9 @@ export class TgAgent implements DurableObject {
     const digestAt = this.nextDigestAtMs(settings);
     if (digestAt) candidates.push(digestAt);
 
+    const weeklyAt = this.nextWeeklyAtMs(settings);
+    if (weeklyAt) candidates.push(weeklyAt);
+
     if (!candidates.length) {
       await this.ctx.storage.deleteAlarm();
       return;
@@ -571,11 +599,165 @@ export class TgAgent implements DurableObject {
     }
   }
 
+  private nextWeeklyAtMs(settings: Settings): number | null {
+    if (!(settings.notifyEvents ?? []).includes("weekly_digest")) return null;
+    return nextWeeklyAt(
+      settings.digestWeekday ?? 0,
+      settings.weeklyHour ?? 22,
+      0,
+      Date.now(),
+      settings.timezone ?? 8,
+    );
+  }
+
+  /** 周报：本周 vs 上周 + 失败最多的任务（同一周只发一次） */
+  private async maybeSendWeeklyDigest(now: number): Promise<void> {
+    const settings = this.store.getSettings();
+    if (!(settings.notifyEvents ?? []).includes("weekly_digest")) return;
+
+    const lastSentAt = Number(this.store.getKv("notify:weekly:lastAt") ?? 0) || null;
+    const due = shouldSendWeeklyDigest({
+      now,
+      weekday: settings.digestWeekday ?? 0,
+      hour: settings.weeklyHour ?? 22,
+      minute: 0,
+      timezone: settings.timezone ?? 8,
+      lastSentAt,
+    });
+    if (!due) return;
+
+    const hasTelegram = settings.notifyOnFailure !== false && Boolean(this.store.getKv(KV_SESSION));
+    const hasWebhook = Boolean((settings.notifyWebhook ?? "").trim());
+    if (!hasTelegram && !hasWebhook) return;
+
+    this.store.setKv("notify:weekly:lastAt", String(now));
+    try {
+      const tz = settings.timezone ?? 8;
+      const thisWeek = weekStart(now, tz);
+      const lastWeek = thisWeek - 7 * 86_400_000;
+      const logs = this.store.listLogs({ limit: 1000, since: lastWeek });
+      const runs = logs.filter((item) => item.source === "auto" || item.source === "manual");
+      const current = runs.filter((item) => item.at >= thisWeek);
+      const previous = runs.filter((item) => item.at < thisWeek);
+      const tasks = this.store.listTasks();
+      const counts = countTasks(tasks);
+
+      const content = buildWeeklyDigest(
+        {
+          ok: current.filter((item) => item.ok).length,
+          fail: current.filter((item) => !item.ok).length,
+          prevOk: previous.filter((item) => item.ok).length,
+          prevFail: previous.filter((item) => !item.ok).length,
+          topFailed: topFailingTasks(current),
+          totalTasks: counts.total,
+          enabledTasks: counts.enabled,
+          nextRunAt: this.store.earliestNextRun(),
+        },
+        { timezone: tz, now },
+      );
+
+      if (hasTelegram) {
+        try {
+          await this.withClient((client) =>
+            client.sendMessage("me" as never, { message: `${content.title}\n${content.text}`, parseMode: false }),
+          );
+        } catch {
+          /* 发不出去就只发 webhook */
+        }
+      }
+      await this.sendWebhook(settings, { title: content.title, text: content.text });
+      this.store.addLog({
+        taskId: null,
+        taskName: null,
+        at: now,
+        ok: true,
+        level: "info",
+        message: "已发送周报",
+        detail: `${content.title}\n${content.text}`,
+        source: "system",
+      });
+    } catch (error) {
+      this.store.addLog({
+        taskId: null,
+        taskName: null,
+        at: now,
+        ok: false,
+        level: "warn",
+        message: `周报发送失败：${errorMessage(error)}`,
+        detail: null,
+        source: "system",
+      });
+    }
+  }
+
+  /** 存储用量（字节）。DO 的 SQLite 存储上限按 10 GB 估算百分比。 */
+  storageUsage(): { bytes: number; limitBytes: number; percent: number } {
+    const limitBytes = 10 * 1024 * 1024 * 1024;
+    let bytes = 0;
+    try {
+      bytes = this.ctx.storage.sql.databaseSize;
+    } catch {
+      bytes = 0;
+    }
+    return { bytes, limitBytes, percent: Math.min(100, Math.round((bytes / limitBytes) * 1000) / 10) };
+  }
+
+  /** 存储告警：超过阈值时提醒（每 24 小时最多一条） */
+  private async maybeCheckStorage(now: number): Promise<void> {
+    const settings = this.store.getSettings();
+    if (!(settings.notifyEvents ?? []).includes("storage_warning")) return;
+    const threshold = settings.storageWarnPercent ?? 0;
+    if (!threshold) return;
+
+    // 每天最多检查一次，别让 alarm 每次都读体积
+    const lastCheck = Number(this.store.getKv("notify:storage:lastCheckAt") ?? 0);
+    if (now - lastCheck < 6 * 3600_000) return;
+    this.store.setKv("notify:storage:lastCheckAt", String(now));
+
+    const usage = this.storageUsage();
+    if (usage.percent < threshold) return;
+
+    await this.notifyEvent(null, "storage_warning", {
+      title: "💾 存储用量偏高",
+      text:
+        `已用 ${formatBytes(usage.bytes)}（约 ${usage.percent}%，阈值 ${threshold}%）。\n` +
+        "可以先清空日志，或减少任务数量；长期偏高说明该换更大额度了。",
+    });
+  }
+
+  /** 成功率告警：每小时最多算一次，每个任务每天最多提醒一条 */
+  private async maybeCheckSuccessRate(now: number): Promise<void> {
+    const settings = this.store.getSettings();
+    if (!(settings.notifyEvents ?? []).includes("success_rate_low")) return;
+    const threshold = settings.successRateThreshold ?? 0;
+    if (!threshold) return;
+
+    const lastCheck = Number(this.store.getKv("notify:rate:lastCheckAt") ?? 0);
+    if (now - lastCheck < 3600_000) return;
+    this.store.setKv("notify:rate:lastCheckAt", String(now));
+
+    const windowDays = 7;
+    const since = now - windowDays * 86_400_000;
+    const logs = this.store.listLogs({ limit: 1000, since });
+    const low = pickLowRateTasks(taskRates(logs, { threshold }), { threshold, minSamples: 3 });
+    for (const item of low.slice(0, 5)) {
+      const task = item.taskId ? this.store.getTask(item.taskId) : null;
+      await this.notifyEvent(null, "success_rate_low", {
+        title: `📉 任务「${item.name}」成功率偏低`,
+        text: describeLowRate(item, { threshold, windowDays }),
+        task,
+      });
+    }
+  }
+
   private async tick(): Promise<LogEntry[]> {
     const now = Date.now();
     const settings = this.store.getSettings();
-    // 日报不依赖 Telegram 连接，先处理掉（失败了也不影响调度）
-    void this.maybeSendDigest(now);
+    // 日报 / 周报 / 存储 / 成功率这些检查都不依赖 Telegram 连接，先处理掉
+    await this.maybeSendDigest(now);
+    await this.maybeSendWeeklyDigest(now);
+    await this.maybeCheckStorage(now);
+    await this.maybeCheckSuccessRate(now);
     const ran: LogEntry[] = [];
     const logs: string[] = [];
 
@@ -2175,6 +2357,7 @@ export class TgAgent implements DurableObject {
         throttled: Boolean(item.throttled),
       })),
       runtime: {
+        storage: this.storageUsage(),
         colo: this.store.getKv("runtime:colo"),
         locationHint: this.env.DO_LOCATION_HINT ?? null,
         nextPollAt: this.nextPollAt(),
@@ -2224,6 +2407,22 @@ function sanitizeSettings(patch: Partial<Settings>): Partial<Settings> {
   if (patch.digestHour !== undefined) {
     const hour = Number(patch.digestHour);
     if (Number.isFinite(hour)) clean.digestHour = Math.max(0, Math.min(23, Math.round(hour)));
+  }
+  if (patch.weeklyHour !== undefined) {
+    const hour = Number(patch.weeklyHour);
+    if (Number.isFinite(hour)) clean.weeklyHour = Math.max(0, Math.min(23, Math.round(hour)));
+  }
+  if (patch.digestWeekday !== undefined) {
+    const day = Number(patch.digestWeekday);
+    if (Number.isFinite(day)) clean.digestWeekday = Math.max(0, Math.min(6, Math.round(day)));
+  }
+  if (patch.successRateThreshold !== undefined) {
+    const value = Number(patch.successRateThreshold);
+    if (Number.isFinite(value)) clean.successRateThreshold = Math.max(0, Math.min(99, Math.round(value)));
+  }
+  if (patch.storageWarnPercent !== undefined) {
+    const percent = Number(patch.storageWarnPercent);
+    if (Number.isFinite(percent)) clean.storageWarnPercent = Math.max(0, Math.min(99, Math.round(percent)));
   }
   if (patch.notifyWebhook !== undefined) {
     clean.notifyWebhook = String(patch.notifyWebhook).trim().slice(0, 300);

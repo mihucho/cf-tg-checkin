@@ -2831,12 +2831,23 @@ input[type="radio"] {
 .notify-type-label {
   font-size: 12.5px;
   color: var(--text, #fff);
+  white-space: nowrap;
 }
 
 .notify-type-hint {
   font-size: 11.5px;
   color: var(--text-3, rgba(255, 255, 255, 0.4));
   line-height: 1.5;
+}
+
+.input-num {
+  width: 54px;
+  text-align: center;
+}
+
+.notify-type-unit {
+  font-size: 11px;
+  color: var(--text-3, rgba(255, 255, 255, 0.4));
 }
 
 .input-tiny {

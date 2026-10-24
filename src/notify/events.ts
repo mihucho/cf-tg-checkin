@@ -14,6 +14,9 @@ export const NOTIFY_EVENT_IDS = [
   "session_expired",
   "login_failed",
   "daily_digest",
+  "weekly_digest",
+  "storage_warning",
+  "success_rate_low",
 ] as const;
 
 export type NotifyEventId = (typeof NOTIFY_EVENT_IDS)[number];
@@ -77,6 +80,23 @@ export const NOTIFY_EVENTS: NotifyEventMeta[] = [
     label: "日报",
     hint: "每天固定时间汇总当天成功/失败次数与失败任务",
     defaultOn: true,
+  },
+  {
+    id: "weekly_digest",
+    label: "周报",
+    hint: "每周固定时间：本周 vs 上周对比 + 失败最多的任务",
+  },
+  {
+    id: "storage_warning",
+    label: "存储告警",
+    hint: "Durable Object 存储用量超过设定阈值时提醒（每天最多一次）",
+    throttled: true,
+  },
+  {
+    id: "success_rate_low",
+    label: "成功率告警",
+    hint: "某任务最近 7 天成功率低于阈值时提醒（每个任务每天最多一条）",
+    throttled: true,
   },
 ];
 

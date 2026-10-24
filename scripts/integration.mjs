@@ -204,8 +204,8 @@ async function main() {
     // ---------- 通知类型 / 日报 ----------
     const stateNotify = await get("/api/state");
     check(
-      "通知类型目录由服务端下发（8 种）",
-      Array.isArray(stateNotify.notifyCatalog) && stateNotify.notifyCatalog.length === 8,
+      "通知类型目录由服务端下发（11 种）",
+      Array.isArray(stateNotify.notifyCatalog) && stateNotify.notifyCatalog.length === 11,
       `got ${stateNotify.notifyCatalog?.length}`,
     );
     const picked = await post("/api/settings", { notifyEvents: ["run_failed", "daily_digest", "hack"], digestHour: 7 });
@@ -215,6 +215,12 @@ async function main() {
       JSON.stringify(picked.settings?.notifyEvents),
     );
     check("日报时间可保存", picked.settings?.digestHour === 7, `got ${picked.settings?.digestHour}`);
+    const weekly = await post("/api/settings", { digestWeekday: 5, weeklyHour: 9 });
+    check(
+      "周报的星期/时间独立保存",
+      weekly.settings?.digestWeekday === 5 && weekly.settings?.weeklyHour === 9,
+      JSON.stringify({ day: weekly.settings?.digestWeekday, hour: weekly.settings?.weeklyHour }),
+    );
     const badHour = await post("/api/settings", { digestHour: 99 });
     check("日报时间越界收敛到 23", badHour.settings?.digestHour === 23, `got ${badHour.settings?.digestHour}`);
     await post("/api/settings", { digestHour: 7 });

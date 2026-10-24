@@ -37,6 +37,7 @@
   "settings": {
     "templates": [ /* 自定义模板：{ id, name, command }，最多 20 个，存服务端 */ ],
     "timezone": 8,               // 时区偏移（小时，可带小数）
+    "storage": { "bytes": 106496, "limitBytes": 10737418240, "percent": 0 },  // DO 存储用量
     "pollSeconds": 60,           // 触发器轮询间隔
     "triggerEnabled": true,      // 是否监听触发消息
     "controlChat": "self",       // 触发消息来源会话：self=收藏夹，或 @username / 数字 id
@@ -51,6 +52,10 @@
     "notifyWebhookSecretConfigured": false,
     "notifyEvents": ["run_failed", "auto_paused", "session_expired", "connection_error", "daily_digest"],
     "digestHour": 22,            // 日报时间（本地时区小时，0-23）
+    "digestWeekday": 0,          // 周报发送日（0=周一 … 6=周日）
+    "weeklyHour": 22,            // 周报时间（本地时区小时）
+    "storageWarnPercent": 70,    // 存储告警阈值（%，0=关闭）
+    "successRateThreshold": 80,  // 成功率告警阈值（%，0=关闭；窗口 7 天、样本≥3）
     "triggerPrefix": "tg",       // 触发前缀（默认 "tg"）：只有以它开头的消息才当配置解析；空字符串=全部解析
   },
   "tasks": [ Task ],
