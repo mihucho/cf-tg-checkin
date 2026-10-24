@@ -279,13 +279,14 @@ npx wrangler deploy --var DO_LOCATION_HINT:apac   # apac/enam/weur/eeur/me/afr/o
 ```bash
 cp .dev.vars.example .dev.vars   # 填 ADMIN_PASSWORD
 npm run dev                      # wrangler dev（自定义构建自动打包 + watch src/）
-npm test                         # 调度 / 触发语法 / 按钮 / 实体解析 单测（40+ 个）
+npm test                         # 62 个单测（见下表）
 npm run check                    # typecheck + test + build + 产物导出自检
 ```
 
-- 触发语法 `src/schedule/dsl.ts`（改语法请顺手补 `tests/schedule.test.ts`）
+- 触发语法 `src/schedule/dsl.ts`（改语法请顺手补 `tests/dsl.test.ts`）
 - 调度算法 `src/schedule/time.ts`（纯函数，不依赖 Intl 时区库）
 - 动作执行器 `src/telegram/executor.ts`（发消息 / 轮询 / 点按钮 / 判定）
+- 「该不该跑」的判定 `src/schedule/guard.ts`（窗口连发那个 bug 的回归用例在 `tests/guard.test.ts`）
 - 管理界面 `public/`（纯静态、无构建、无 CDN 依赖）
 - 版本号只在 `package.json`：构建时注入产物，页面底部与 `GET /api/version` 都用它；
   发版跑 `npm version patch`（详见 [CHANGELOG.md](CHANGELOG.md)）
@@ -305,7 +306,7 @@ src/
 └── schedule/             time.ts（调度计算）dsl.ts（触发语法）
 public/                   管理界面（纯静态）
 build/patches/            teleproto 的 no-eval 补丁
-tests/                    纯逻辑单测
+tests/                    纯逻辑单测（time / dsl / buttons / targets / guard / task）
 docs/API.md               前后端接口契约
 docs/DEPLOY.md            部署、secrets、排查表
 SECURITY.md               安全审计记录

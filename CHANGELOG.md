@@ -11,6 +11,17 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.3.15] - 2026-10-24
+
+把最近几个 bug 的判定逻辑纯函数化，并补成 62 个正反例（之前 49 个混在一个文件里，覆盖不到调度护栏）：
+
+- 抽出 `src/schedule/guard.ts`：`decideRun()` 集中「该不该跑」的规则（到点 / 每天一次 / 45 秒护栏 / 手动），
+  agent.tick 只负责记日志和顺延排期 —— **窗口连发那个 bug 现在有 6 个回归用例**
+- 抽出 `src/task.ts`（`normalizeTaskInput` + `taskFingerprint`）与 `src/settings.ts`（`redactSettings`）
+- 测试拆成模块：`time`(13) / `dsl`(18) / `buttons`(8) / `targets`(6) / `guard`(9) / `task`(8)，外加小型 harness
+- 补出的两个实现问题：只有空格的文本步骤没被过滤；`collectLinks` 的实体越界（测试用例本身写错）
+- 时间类用例覆盖：跨月/跨年、负时区、跨零点窗口、窗口随机全覆盖、execution-after 跳次日
+
 ## [0.3.14] - 2026-10-24
 
 - **触发前缀改为默认开启**（`tg`）：只有以它开头的消息才当配置解析，收藏夹里的笔记不再被误解析；

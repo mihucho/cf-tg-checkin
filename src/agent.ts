@@ -13,7 +13,8 @@ import { Store } from "./db";
 import type { AccountInfo, AgentState, LogEntry, Settings, Target, Task, TaskInput } from "./types";
 import { createTgClient, createTgClientOnDc, errorMessage, migrateDcFromError } from "./telegram/client";
 import { executeTask, resolveEntity, type ExecHooks } from "./telegram/executor";
-import { computeNextRun, formatInTimezone, isSameLocalDay } from "./schedule/time";
+import { computeNextRun, formatInTimezone } from "./schedule/time";
+import { decideRun } from "./schedule/guard";
 import {
   defaultName,
   findTimeToken,
@@ -25,6 +26,8 @@ import {
 } from "./schedule/dsl";
 import { messageTargetHint, usernameFromLink, type MessageLike, type MessageTargetHint } from "./telegram/targets";
 import type { Env } from "./env";
+import { normalizeTaskInput, taskFingerprint } from "./task";
+import { redactSettings } from "./settings";
 
 interface Credentials {
   apiId: number | null;
@@ -439,43 +442,23 @@ export class TgAgent implements DurableObject {
           // 护栏：同一任务 45 秒内不重复执行（防止调度 bug / 窗口边界造成连发）
           const runnable: Task[] = [];
           for (const task of due) {
-            // 硬约束：daily / window / once 本质上"每天最多一次"，同一天内不再重复执行
-            if (
-              settings !== null &&
-              task.schedule.kind !== "interval" &&
-              task.lastRunAt &&
-              isSameLocalDay(task.lastRunAt, now, settings.timezone)
-            ) {
-              this.store.addLog({
-                taskId: task.id,
-                taskName: task.name,
-                at: now,
-                ok: false,
-                level: "warn",
-                message: "跳过：今天已经执行过（每天类型任务一天只跑一次）",
-                detail: `上次执行：${formatInTimezone(task.lastRunAt, settings.timezone)}`,
-              });
-              this.store.setTaskNextRun(
-                task.id,
-                computeNextRun(task.schedule, now, settings.timezone, { afterExecution: true }),
-              );
-              continue;
-            }
-
-            if (task.lastRunAt && now - task.lastRunAt < 45_000) {
-              this.store.addLog({
-                taskId: task.id,
-                taskName: task.name,
-                at: now,
-                ok: false,
-                level: "warn",
-                message: `跳过：${Math.round((now - task.lastRunAt) / 1000)} 秒前刚执行过（防重复触发）`,
-                detail: null,
-              });
-              this.store.setTaskNextRun(
-                task.id,
-                computeNextRun(task.schedule, now, settings.timezone, { afterExecution: true }),
-              );
+            const decision = decideRun(task, now, settings.timezone);
+            if (!decision.run) {
+              if (decision.reason !== "not-due") {
+                this.store.addLog({
+                  taskId: task.id,
+                  taskName: task.name,
+                  at: now,
+                  ok: false,
+                  level: "warn",
+                  message:
+                    decision.reason === "already-ran-today"
+                      ? "跳过：今天已经执行过（每天类型任务一天只跑一次）"
+                      : `跳过：${decision.detail ?? "刚执行过"}`,
+                  detail: decision.detail ?? null,
+                });
+                if (decision.nextRunAt) this.store.setTaskNextRun(task.id, decision.nextRunAt);
+              }
               continue;
             }
             runnable.push(task);
@@ -1687,99 +1670,8 @@ function sanitizeSettings(patch: Partial<Settings>): Partial<Settings> {
   return clean;
 }
 
-const MAX_NAME = 80;
-const MAX_HANDLE = 80;
-const MAX_STEP_TEXT = 500;
-const MAX_KEYWORDS = 20;
 
 /** 对外输出设置时，把敏感字段换成布尔标记 */
-export function redactSettings(settings: Settings): Settings {
-  return {
-    ...settings,
-    turnstileSecretKey: "",
-    turnstileSecretConfigured: Boolean(settings.turnstileSecretKey),
-  };
-}
-
-function clampText(value: unknown, max: number): string {
-  return String(value ?? "").slice(0, max);
-}
-
-function normalizeTarget(input: TaskInput | Task): Target {
-  const kind = input.target?.kind;
-  const safeKind = kind === "channel" || kind === "chat" || kind === "user" ? kind : "user";
-  return {
-    kind: safeKind,
-    id: clampText(input.target?.id, MAX_HANDLE).trim(),
-    title: input.target?.title ? clampText(input.target.title, MAX_HANDLE) : undefined,
-    username: input.target?.username ? clampText(input.target.username, MAX_HANDLE) : undefined,
-    accessHash: input.target?.accessHash ? clampText(input.target.accessHash, 32) : undefined,
-  };
-}
-
-function normalizeTaskInput(input: TaskInput | Task): TaskInput {
-  const schedule = { ...input.schedule };
-  if (schedule.kind === "daily" || schedule.kind === "window" || schedule.kind === "once") {
-    schedule.time = schedule.time || "09:00";
-  }
-  if (schedule.kind === "window" && !schedule.windowEnd) schedule.windowEnd = schedule.time ?? "10:00";
-  if (schedule.kind === "interval") schedule.intervalMinutes = Math.max(1, Number(schedule.intervalMinutes ?? 60));
-  schedule.jitterSeconds = Math.max(0, Math.min(3600, Number(schedule.jitterSeconds ?? 0)));
-
-  const steps = (input.steps ?? [])
-    .slice(0, 20)
-    .map((step) => {
-      if (step.type === "wait") {
-        return { type: "wait" as const, seconds: Math.max(0, Math.min(600, Number(step.seconds ?? 3) || 0)) };
-      }
-      if (step.type === "random") {
-        return {
-          type: "random" as const,
-          options: (step.options ?? []).slice(0, 10).map((item) => clampText(item, MAX_STEP_TEXT)).filter(Boolean),
-        };
-      }
-      if (step.type === "click") {
-        return {
-          ...step,
-          text: clampText(step.text, MAX_STEP_TEXT),
-          row: Number.isFinite(Number(step.row)) ? Math.max(0, Math.min(50, Number(step.row))) : undefined,
-          column: Number.isFinite(Number(step.column)) ? Math.max(0, Math.min(50, Number(step.column))) : undefined,
-        };
-      }
-      if (step.type === "number") return { type: "number" as const, value: clampText(step.value, 20) };
-      return { type: "text" as const, text: clampText(step.text, MAX_STEP_TEXT) };
-    })
-    .filter((step) => {
-      if (step.type === "text") return !!step.text;
-      if (step.type === "random") return (step.options ?? []).length > 0;
-      if (step.type === "number") return !!step.value;
-      return true;
-    });
-
-  const threadId = Number(input.threadId);
-
-  return {
-    name: clampText(input.name, MAX_NAME).trim() || "未命名任务",
-    enabled: input.enabled !== false,
-    target: normalizeTarget(input),
-    threadId: Number.isFinite(threadId) && threadId > 0 ? threadId : null,
-    schedule,
-    steps,
-    successKeywords: (input.successKeywords ?? [])
-      .slice(0, MAX_KEYWORDS)
-      .map((keyword) => clampText(keyword, 60).trim())
-      .filter(Boolean),
-    timeoutSeconds: Math.max(5, Math.min(120, Number(input.timeoutSeconds ?? 30))),
-    stepDelaySeconds: Math.max(0, Math.min(60, Number(input.stepDelaySeconds ?? 3))),
-    deleteAfterSeconds: Math.max(0, Math.min(3600, Number(input.deleteAfterSeconds ?? 0))),
-    cleanupPrevious: !!input.cleanupPrevious,
-    source: input.source ?? "ui",
-    nextRunAt: input.nextRunAt ?? null,
-    lastRunAt: input.lastRunAt ?? null,
-    lastResult: input.lastResult ?? null,
-    lastMessage: input.lastMessage ?? null,
-  };
-}
 
 function welcomeText(prefix: string): string {
   const p = prefix ? `${prefix} ` : "";
