@@ -11,6 +11,15 @@ git push --follow-tags # 触发部署（Workers Builds / GitHub Actions）
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-24
+
+- **修：点任务行的操作图标也会弹出任务详情**。行点击的守卫用的是
+  `event.target instanceof HTMLElement`，而图标按钮里点到的是 SVG 元素（`<path>`），
+  SVG 元素不是 `HTMLElement` → 守卫被跳过 → 详情弹窗和操作同时触发。
+  改成 `instanceof Element` + `closest("button, a, input, select, textarea, label, [data-no-row-click]")`，
+  并给 `.row-actions` 加 `data-no-row-click` 作为显式标记。
+  实测：立即执行 / 停用 不再弹详情；编辑 / 删除 只弹自己的弹窗；点任务名才进详情
+
 ## [0.12.0] - 2026-10-24
 
 - **端到端集成测试**（`scripts/integration.mjs`，`npm run test:integration`）：真的起一个

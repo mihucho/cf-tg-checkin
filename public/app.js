@@ -845,13 +845,25 @@ function taskTable(tasks) {
         const row = taskRow(task);
         row.classList.add("is-clickable");
         row.addEventListener("click", (event) => {
-          if (event.target instanceof HTMLElement && event.target.closest("button, a, input, select")) return;
+          if (isInteractiveClick(event)) return;
           void openTaskDetail(task);
         });
         return row;
       }),
     ),
   );
+}
+
+/**
+ * 点击是否落在「行内的可交互元素」上（按钮 / 链接 / 输入框 / 带 data-no-row-click 的容器）。
+ *
+ * 注意目标可能是 SVG 元素（图标按钮里点到的是 <path>），它**不是** HTMLElement，
+ * 所以这里必须用 Element 判断 —— 之前用 HTMLElement 导致点图标按钮也会弹出任务详情。
+ */
+function isInteractiveClick(event) {
+  const target = event.target;
+  if (!(target instanceof Element)) return false;
+  return Boolean(target.closest("button, a, input, select, textarea, label, [data-no-row-click]"));
 }
 
 function taskRow(task) {
@@ -924,7 +936,7 @@ function taskRow(task) {
       { dataset: { label: "操作" }, class: "cell-actions" },
       el(
         "div",
-        { class: "row-actions" },
+        { class: "row-actions", "data-no-row-click": "" },
         iconButton("play", "立即执行", (event) => runTask(task, event.currentTarget)),
         iconButton("power", task.enabled ? "停用" : "启用", (event) => toggleTask(task, event.currentTarget), {
           className: task.enabled ? "is-on" : "",
