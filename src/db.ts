@@ -39,7 +39,9 @@ const SCHEMA = [
       ok INTEGER NOT NULL,
       level TEXT NOT NULL,
       message TEXT NOT NULL,
-      detail TEXT
+      detail TEXT,
+      source TEXT,
+      duration_ms INTEGER
     )`,
   `CREATE INDEX IF NOT EXISTS idx_logs_at ON logs(at DESC)`,
   `CREATE TABLE IF NOT EXISTS auth_attempts (
@@ -100,6 +102,8 @@ export interface LogRow extends Row {
   level: string;
   message: string;
   detail: string | null;
+  source: string | null;
+  duration_ms: number | null;
 }
 
 function parseJson<T>(value: string, fallback: T): T {
@@ -153,6 +157,8 @@ export function rowToLog(row: LogRow): LogEntry {
     level: (row.level as LogEntry["level"]) ?? "info",
     message: row.message,
     detail: row.detail,
+    source: (row.source as LogEntry["source"]) ?? null,
+    durationMs: row.duration_ms ?? null,
   };
 }
 
@@ -167,6 +173,16 @@ export class Store {
     }
     try {
       this.sql.exec("ALTER TABLE tasks ADD COLUMN last_detail TEXT");
+    } catch {
+      /* 列已存在 */
+    }
+    try {
+      this.sql.exec("ALTER TABLE logs ADD COLUMN source TEXT");
+    } catch {
+      /* 列已存在 */
+    }
+    try {
+      this.sql.exec("ALTER TABLE logs ADD COLUMN duration_ms INTEGER");
     } catch {
       /* 列已存在 */
     }
@@ -370,7 +386,7 @@ export class Store {
   // ---------- logs ----------
   addLog(entry: Omit<LogEntry, "id">): LogEntry {
     this.sql.exec(
-      "INSERT INTO logs (task_id, task_name, at, ok, level, message, detail) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO logs (task_id, task_name, at, ok, level, message, detail, source, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       entry.taskId,
       entry.taskName,
       entry.at,
@@ -378,6 +394,8 @@ export class Store {
       entry.level,
       entry.message,
       entry.detail,
+      entry.source ?? "system",
+      entry.durationMs ?? null,
     );
     // 只保留最近 2000 条，避免 DO 存储无限增长
     this.sql.exec("DELETE FROM logs WHERE id <= (SELECT MAX(id) - 2000 FROM logs)");

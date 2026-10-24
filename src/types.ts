@@ -76,6 +76,8 @@ export type TaskInput = Omit<
 > &
   Partial<Pick<Task, "id" | "nextRunAt" | "lastRunAt" | "lastResult" | "lastMessage">>;
 
+export type LogSource = "auto" | "manual" | "trigger" | "system";
+
 export interface LogEntry {
   id: number;
   taskId: number | null;
@@ -85,6 +87,10 @@ export interface LogEntry {
   level: "info" | "warn" | "error";
   message: string;
   detail: string | null;
+  /** 这次执行是谁触发的（老数据可能没有） */
+  source?: LogSource | null;
+  /** 执行耗时（毫秒），只有执行类日志有 */
+  durationMs?: number | null;
 }
 
 export interface Settings {

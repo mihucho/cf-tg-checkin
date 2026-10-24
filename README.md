@@ -70,9 +70,9 @@ tg 9.30 签到 btn:"每日签到" #kw:签到成功
 | --- | --- |
 | ![任务](docs/images/tasks.png) | ![编辑器](docs/images/editor.png) |
 
-| 日志（筛选 + 游标分页） | 登录人机验证（可选） |
+| 任务详情（最近运行 + 快捷操作） | 日志（来源 / 耗时 / 一次点开修复） |
 | --- | --- |
-| ![日志](docs/images/logs.png) | ![登录](docs/images/login-turnstile.png) |
+| ![任务详情](docs/images/task-detail.png) | ![日志](docs/images/logs.png) |
 
 设置 → 人机验证（Turnstile 也可以在这里配，不用改环境变量）：
 
