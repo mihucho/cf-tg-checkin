@@ -35,6 +35,12 @@ push 后 `.github/workflows/release.yml` 会自动：跑检查 → 写 `package.
 
 ## [Unreleased]
 
+### 修复
+
+- **tag 注释丢了 Markdown 标题**：`git tag -a -F` 默认会把 `#` 开头的行当注释删掉，
+  所以已发布版本 tag 里的 `## 小节` 全没了（Release 页面不受影响，那是另一份 notes）。
+  工作流已加 `--cleanup=verbatim`，并重打了 v0.18.0 ~ v0.19.2 六个 tag 的注释（提交对象未变）
+
 ## [0.19.2] - 2026-10-25
 
 上一版加了分组栏，这一版让「分组」真正参与操作：改名、导出、批量执行、导入都跟着当前分组走。

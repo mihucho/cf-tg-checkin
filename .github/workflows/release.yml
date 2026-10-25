@@ -87,7 +87,8 @@ jobs:
           if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
             echo "tag $TAG 已存在，跳过创建"
           else
-            git tag -a "$TAG" -F "$NOTES_FILE"
+            # --cleanup=verbatim：否则 `## 小节标题` 会被当成注释删掉
+            git tag -a "$TAG" -F "$NOTES_FILE" --cleanup=verbatim
             git push origin "$TAG"
           fi
 
