@@ -2782,6 +2782,34 @@ input[type="radio"] {
   color: var(--text-2, rgba(255, 255, 255, 0.75));
 }
 
+/* 目标类型标签（机器人 / 群组 / 频道 / 用户） */
+.tag-peer {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.tag-peer.is-bot {
+  color: var(--accent, #5cc8bd);
+  border-color: rgba(92, 200, 189, 0.4);
+  background: rgba(92, 200, 189, 0.08);
+}
+
+.tag-peer.is-group {
+  color: #8fb8e6;
+  border-color: rgba(143, 184, 230, 0.35);
+  background: rgba(143, 184, 230, 0.08);
+}
+
+.tag-peer.is-channel {
+  color: #c9a8e8;
+  border-color: rgba(201, 168, 232, 0.35);
+  background: rgba(201, 168, 232, 0.08);
+}
+
+.tag-peer.is-user {
+  color: var(--text-3, rgba(255, 255, 255, 0.5));
+}
+
 /* 通知类型多选 */
 .notify-types {
   display: grid;

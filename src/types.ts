@@ -29,6 +29,11 @@ export interface Target {
   accessHash?: string;
   /** 话题 id：只对这个目标生效，优先于任务的 threadId */
   threadId?: number;
+  /**
+   * 对方是什么：机器人 / 用户 / 群组 / 频道。
+   * 解析目标时记下来，界面上标出来，也方便判断"该等它回复还是等新菜单"。
+   */
+  peerKind?: "bot" | "user" | "group" | "channel";
 }
 
 export type ScheduleKind = "daily" | "window" | "interval" | "once";

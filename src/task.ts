@@ -43,6 +43,9 @@ function normalizeTarget(input: TaskInput | Task): Target {
       Number.isFinite(Number(input.target?.threadId)) && Number(input.target?.threadId) > 0
         ? Math.floor(Number(input.target?.threadId))
         : undefined,
+    peerKind: ["bot", "user", "group", "channel"].includes(String(input.target?.peerKind))
+      ? (input.target?.peerKind as Target["peerKind"])
+      : undefined,
   };
 }
 

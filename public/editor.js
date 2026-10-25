@@ -12,6 +12,7 @@ import {
   openModal,
   withLoading,
   targetLabel,
+  peerKindLabel,
 } from "./lib.js";
 
 const STEP_TYPES = [
@@ -646,6 +647,9 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
           { class: "resolved-chip" },
           icon("check", { size: 14 }),
           el("span", {}, targetLabel(model.resolved)),
+          model.resolved.peerKind
+            ? el("span", { class: `tag tag-peer is-${model.resolved.peerKind}` }, peerKindLabel(model.resolved.peerKind))
+            : null,
           model.resolved.kind ? el("span", { class: "muted small" }, `${model.resolved.kind}${model.resolved.id ? ` · ${model.resolved.id}` : ""}`) : null,
         ),
       );

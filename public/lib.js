@@ -289,6 +289,18 @@ export function describeSteps(steps) {
   return steps.map(stepSummary).join(" → ");
 }
 
+/** 目标类型的显示文案与短标记（机器人 / 群组 / 频道 / 用户） */
+export const PEER_KIND_LABEL = {
+  bot: "机器人",
+  group: "群组",
+  channel: "频道",
+  user: "用户",
+};
+
+export function peerKindLabel(peerKind) {
+  return PEER_KIND_LABEL[peerKind] || "";
+}
+
 export function targetLabel(target) {
   if (!target) return "—";
   const handle = target.username ? `@${target.username}` : "";

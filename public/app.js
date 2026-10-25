@@ -27,6 +27,7 @@ import {
   describeSteps,
   stepSummary,
   targetLabel,
+  peerKindLabel,
   emptyState,
   field,
 } from "./lib.js";
@@ -909,6 +910,7 @@ function taskRow(task) {
       el(
         "div",
         { class: "cell-main cell-trunc", title: targetLabel(target) },
+        peerKindLabel(target.peerKind) ? el("span", { class: `tag tag-peer is-${target.peerKind}` }, peerKindLabel(target.peerKind)) : null,
         targetLabel(target),
         task.targets && task.targets.length > 1 ? el("span", { class: "tag" }, `+${task.targets.length - 1}`) : null,
       ),
@@ -1019,6 +1021,10 @@ async function openTaskDetail(task) {
       el(
         "div",
         { class: "kv-list" },
+        kv(
+          "目标类型",
+          peerKindLabel(task.target.peerKind) || "未知（下次执行时自动识别）",
+        ),
         kv(
           "目标",
           task.targets && task.targets.length > 1

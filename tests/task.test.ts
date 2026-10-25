@@ -229,3 +229,35 @@ test("审计：文本步骤带 say 前缀后仍可读", () => {
   assert.match(cmd, /签到/);
   assert.match(cmd, /say:btn:不是按钮/);
 });
+
+/* ---------- 目标类型标记 ---------- */
+
+test("normalizeTaskInput：保留合法的 peerKind，非法值丢弃", () => {
+  const bot = normalizeTaskInput(input({ target: { kind: "user", id: "1", username: "a_bot", peerKind: "bot" } }));
+  assert.equal(bot.target.peerKind, "bot");
+
+  const group = normalizeTaskInput(input({ target: { kind: "channel", id: "-1001", peerKind: "group" } }));
+  assert.equal(group.target.peerKind, "group");
+
+  const bad = normalizeTaskInput({
+    ...input(),
+    target: { kind: "user", id: "1", peerKind: "robot" } as never,
+  });
+  assert.equal(bad.target.peerKind, undefined);
+});
+
+test("normalizeTaskInput：多目标各自保留类型", () => {
+  const task = normalizeTaskInput(
+    input({
+      target: { kind: "user", id: "a", username: "a", peerKind: "bot" },
+      targets: [
+        { kind: "user", id: "a", username: "a", peerKind: "bot" },
+        { kind: "chat", id: "-2002", peerKind: "group" },
+      ],
+    }),
+  );
+  assert.deepEqual(
+    task.targets?.map((item) => item.peerKind),
+    ["bot", "group"],
+  );
+});

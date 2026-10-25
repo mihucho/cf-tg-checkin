@@ -47,7 +47,7 @@ import {
   webhookUrlFromToken,
 } from "./notify/webhook";
 import { createTgClient, createTgClientOnDc, errorMessage, isConnectionError, migrateDcFromError } from "./telegram/client";
-import { executeTask, resolveEntity, type ExecHooks } from "./telegram/executor";
+import { classifyPeer, executeTask, resolveEntity, type ExecHooks } from "./telegram/executor";
 import { computeNextRun, formatInTimezone, localDayElapsedMs } from "./schedule/time";
 import { decideRun, shouldAutoPause } from "./schedule/guard";
 import { taskToCommand } from "./schedule/command";
@@ -1833,6 +1833,7 @@ export class TgAgent implements DurableObject {
       id,
       title,
       username: anyEntity.username,
+      peerKind: classifyPeer(entity),
       // 记下 access_hash：私有机器人/用户没有 username 时，只能靠它解析
       ...(accessHash !== undefined && accessHash !== null ? { accessHash: String(accessHash) } : {}),
     };
@@ -1863,8 +1864,8 @@ export class TgAgent implements DurableObject {
    */
   private async enrichTarget(client: TelegramClient, input: TaskInput, trace?: string[]): Promise<TaskInput> {
     const label = input.target.username ? `@${input.target.username}` : input.target.id;
-    if (input.target.title && input.target.accessHash) {
-      trace?.push(`目标已带显示名：${input.target.title}（${label}）`);
+    if (input.target.title && input.target.accessHash && input.target.peerKind) {
+      trace?.push(`目标已带显示名：${input.target.title}（${label}，${input.target.peerKind}）`);
       return input;
     }
     try {
@@ -2002,7 +2003,8 @@ export class TgAgent implements DurableObject {
     const entity = await resolveEntity(client, current);
 
     // 目标里缺 username / accessHash / 显示名时补一次，之后每次解析都能直接命中
-    if (!current.username || !current.accessHash || !current.title) {
+    const resolvedKind = classifyPeer(entity);
+    if (!current.username || !current.accessHash || !current.title || !current.peerKind) {
       const peerId = await client.getPeerId(entity as never).catch(() => null);
       const anyEntity = entity as unknown as {
         username?: string;
@@ -2017,6 +2019,7 @@ export class TgAgent implements DurableObject {
         undefined;
       const patch: Target = {
         ...current,
+        peerKind: resolvedKind,
         id: peerId ? String(peerId) : current.id,
         username: current.username ?? anyEntity.username,
         title: current.title ?? displayName,
