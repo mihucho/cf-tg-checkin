@@ -45,6 +45,22 @@ export function redactSettings(settings: Settings): Settings {
 }
 
 /**
+ * 设置对外脱敏：所有响应（`/api/state`、`/api/settings`）都走这里，
+ * 避免"保存成功后顺手把原始 Webhook 地址回显一遍"。
+ */
+export function redactSettingsForClient(settings: Settings): Settings {
+  return {
+    // 先走一遍 redactSettings（隐藏 Turnstile/加签密钥）
+    ...redactSettings(settings),
+    notifyWebhook: maskWebhookUrl(settings.notifyWebhook ?? ""),
+    notifyWebhookConfigured: Boolean((settings.notifyWebhook ?? "").trim()),
+    // 管理员 ID 本质是"自己的账号 id"，和 me.id 一样脱敏
+    adminUserId: maskValue(settings.adminUserId, 3),
+    adminUserIdConfigured: Boolean((settings.adminUserId ?? "").trim()),
+  };
+}
+
+/**
  * `/api/state` 对外脱敏。
  *
  * 前端真正需要的都在：任务、日志、状态、以及"有没有配"的布尔标记。
@@ -72,17 +88,7 @@ export function redactState(state: AgentState): AgentState {
         ? { ...account.pendingLogin, phone: maskPhone(account.pendingLogin.phone) }
         : account.pendingLogin,
     },
-    settings: {
-      // 先走一遍 redactSettings（隐藏 Turnstile/加签密钥），再脱敏 Webhook 地址
-      ...redactSettings(settings),
-      notifyWebhook: maskWebhookUrl(settings.notifyWebhook ?? ""),
-      notifyWebhookConfigured: Boolean((settings.notifyWebhook ?? "").trim()),
-      // 管理员 ID 本质是"自己的账号 id"，和 me.id 一样脱敏，只给"有没有配"的标记
-      adminUserId: maskValue(settings.adminUserId, 3),
-      adminUserIdConfigured: Boolean((settings.adminUserId ?? "").trim()),
-      // 指令来源要在设置里编辑，保留原文
-      controlChat: settings.controlChat,
-    },
+    settings: redactSettingsForClient(settings),
     tasks: state.tasks.map((task) => ({
       ...task,
       target: redactTarget(task.target),

@@ -65,7 +65,7 @@ import type { Env } from "./env";
 import { bucketDaily } from "./events";
 import { applyTargetPatch, normalizeTaskInput, shouldAutoRename, taskFingerprint, taskToExport } from "./task";
 import { BUILD } from "./version";
-import { redactSettings, redactState, shouldAutoFillAdminId } from "./settings";
+import { redactSettingsForClient, redactState, shouldAutoFillAdminId } from "./settings";
 
 interface Credentials {
   apiId: number | null;
@@ -264,7 +264,7 @@ export class TgAgent implements DurableObject {
         }
         if (before.controlChat !== saved.controlChat) this.resetTriggerCursor();
         if (before.triggerEnabled !== saved.triggerEnabled) await this.scheduleNextAlarm();
-        return json({ settings: redactSettings(this.store.getSettings()) });
+        return json({ settings: redactSettingsForClient(this.store.getSettings()) });
       }
 
       if (path === "/tasks" && method === "POST") {
@@ -2575,7 +2575,8 @@ export class TgAgent implements DurableObject {
         dc: Number(this.store.getKv("account:dc") ?? 0) || null,
         lastError: this.store.getKv(KV_LAST_ERROR),
       },
-      settings: redactSettings(settings),
+      // 这里先原样给出，fetch 出口统一走 redactState()（settings 会被脱敏）
+      settings,
       tasks,
       logs: this.store.listLogs({ limit: 50 }),
       stats: {

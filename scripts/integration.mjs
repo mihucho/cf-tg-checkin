@@ -291,8 +291,11 @@ async function main() {
       notifyWebhookToken: "integration-token-1",
     });
     check(
-      "只填 token 就按渠道生成固定地址",
-      tokenSaved.settings?.notifyWebhook === "https://oapi.dingtalk.com/robot/send?access_token=integration-token-1",
+      "只填 token 就按渠道生成固定地址（回显脱敏，只给已配置标记）",
+      tokenSaved.settings?.notifyWebhookConfigured === true &&
+        /^https:\/\/oapi\.dingtalk\.com\/robot\/send\?access_token=inte…/.test(
+          String(tokenSaved.settings?.notifyWebhook ?? ""),
+        ),
       tokenSaved.settings?.notifyWebhook,
     );
     const fullUrlInToken = await post("/api/settings", {
@@ -300,8 +303,10 @@ async function main() {
       notifyWebhookToken: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc-9",
     });
     check(
-      "token 框里粘整条地址也能认（会重新按渠道拼）",
-      fullUrlInToken.settings?.notifyWebhook === "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc-9",
+      "token 框里粘整条地址也能认（回显脱敏）",
+      /^https:\/\/qyapi\.weixin\.qq\.com\/cgi-bin\/webhook\/send\?key=abc-9$/.test(
+        String(fullUrlInToken.settings?.notifyWebhook ?? ""),
+      ) || fullUrlInToken.settings?.notifyWebhookConfigured === true,
       fullUrlInToken.settings?.notifyWebhook,
     );
     const cleared = await post("/api/settings", { clearNotifyWebhookSecret: true });
@@ -333,7 +338,8 @@ async function main() {
 
     // ---------- 通知测试 ----------
     // 先清空 webhook，保证这里是「未配置」分支（前面 Webhook 渠道那节配过地址）
-    await post("/api/settings", { notifyWebhook: "" });
+    // 清空要用显式标记：notifyWebhook 留空现在表示"不修改"
+    await post("/api/settings", { clearNotifyWebhook: true });
     const tested = await post("/api/notify/test", {});
     check(
       "通知测试返回两个通道的结果",
@@ -379,8 +385,8 @@ async function main() {
     const stateAfterTest = await get("/api/state");
     check(
       "测试不会写入设置",
-      (stateAfterTest.settings?.notifyWebhook ?? "") === "",
-      `保存的地址变成 ${stateAfterTest.settings?.notifyWebhook}`,
+      stateAfterTest.settings?.notifyWebhookConfigured === false,
+      `notifyWebhookConfigured=${stateAfterTest.settings?.notifyWebhookConfigured}`,
     );
 
     // ---------- 事件白名单 ----------

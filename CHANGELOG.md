@@ -35,6 +35,14 @@ push 后 `.github/workflows/release.yml` 会自动：跑检查 → 写 `package.
 
 ## [Unreleased]
 
+### 修复
+
+- **`/api/settings` 的响应也脱敏**：之前保存成功后会把原始 Webhook 地址回显一遍
+  （`/api/state` 已脱敏，两个接口不一致）。现在统一走 `redactSettingsForClient()`，
+  地址/管理员 ID 只给脱敏值 + `*Configured` 标记
+- 集成测试跟着调整：清空 Webhook 要用 `clearNotifyWebhook: true`（留空现在表示"不修改"），
+  否则 CI 会真的去请求企微接口（`93000 invalid webhook url`）
+
 ### 安全 / 隐私
 
 - **`/api/state` 对外脱敏**（`redactState()`）：手机号 `+861****0000`、自己的账号 id `765…321`、
