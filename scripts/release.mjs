@@ -52,7 +52,9 @@ export function parseReleaseDoc(raw) {
   if (!/^\d+\.\d+\.\d+$/.test(version)) {
     throw new Error(`front matter 的 version 必须是 x.y.z（当前是「${version || "(空)"}」）`);
   }
-  return { version, title: String(meta.title ?? "").trim() || `v${version}`, body };
+  // retro: true → 只更新这个「已存在 tag」的 GitHub Release 说明，不改代码、不建 tag
+  const retro = String(meta.retro ?? "").trim().toLowerCase() === "true";
+  return { version, title: String(meta.title ?? "").trim() || `v${version}`, body, retro };
 }
 
 /** a 是否严格大于 b（只比 x.y.z） */
@@ -137,6 +139,29 @@ function main() {
     return;
   }
   if (!doc.body) throw new Error("发布说明正文是空的：front matter 之后的 `---` 下面要写内容");
+
+  // retro：只改已发布 Release 的说明（例如修正措辞、脱敏），版本号可以 <= 当前版本
+  if (doc.retro) {
+    const tag = `v${doc.version}`;
+    console.log(`补改已发布 Release：${tag}（${doc.title}），不改代码`);
+    if (dryRun) {
+      console.log(`${doc.title}\n\n${doc.body}`);
+      output({ mode: "edit-release", skipped: "false", version: doc.version, tag, title: doc.title, notes_file: NOTES_OUT });
+      return;
+    }
+    fs.mkdirSync(path.dirname(NOTES_OUT), { recursive: true });
+    fs.writeFileSync(NOTES_OUT, `${doc.title}\n\n${doc.body}\n`);
+    const { reset } = buildArchiveAndTemplate({
+      version: doc.version,
+      title: doc.title,
+      body: doc.body,
+      template: docText,
+    });
+    fs.writeFileSync(DOC_PATH, reset);
+    output({ mode: "edit-release", skipped: "false", version: doc.version, tag, title: doc.title, notes_file: NOTES_OUT });
+    return;
+  }
+
   if (!isNewerVersion(doc.version, current) && doc.version !== current) {
     throw new Error(
       `版本号不能小于当前版本：文档里是 ${doc.version}，package.json 里是 ${current}（重发请改成更大的版本号，或改成当前版本号走"只补发布"）`,

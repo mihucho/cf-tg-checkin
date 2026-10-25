@@ -77,6 +77,8 @@ title: v0.18.0 — 一句话标题
 | **大于** `package.json` | 跑 typecheck + 单测 + 打包自检 → 写 `package.json`/`package-lock.json` → 把正文插进 `CHANGELOG.md`（`[Unreleased]` 之后）→ 归档到 `releases/archive/vX.Y.Z.md` 并重置模板 → 提交 → 打 annotated tag → 建/更新 GitHub Release → 触发 `deploy.yml` |
 | **等于**当前版本 | 只补 tag / GitHub Release（代码已发、说明写晚了；重复执行安全） |
 | **`0.0.0`**（模板） | 跳过 |
+| 带 **`retro: true`** | 只改这个已存在 tag 的 **GitHub Release 说明**（版本号可以 ≤ 当前版本），
+不动代码、不打 tag。用途：发布说明写错/需要脱敏时回头修 |
 
 规矩：
 

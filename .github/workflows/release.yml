@@ -77,6 +77,7 @@ jobs:
           fi
 
       - name: 打 tag（已存在则跳过）
+        if: steps.prepare.outputs.mode == 'bump' || steps.prepare.outputs.mode == 'release-only'
         env:
           VERSION: ${{ steps.prepare.outputs.version }}
           TAG: ${{ steps.prepare.outputs.tag }}
@@ -90,7 +91,24 @@ jobs:
             git push origin "$TAG"
           fi
 
+      - name: 补改已发布 Release 的说明（retro）
+        if: steps.prepare.outputs.mode == 'edit-release'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.prepare.outputs.tag }}
+          TITLE: ${{ steps.prepare.outputs.title }}
+          NOTES_FILE: ${{ steps.prepare.outputs.notes_file }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "✗ Release $TAG 不存在（retro 只能改已有 Release）" >&2
+            exit 1
+          fi
+          gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE"
+          echo "已更新 Release $TAG 的说明" >> "$GITHUB_STEP_SUMMARY"
+
       - name: 创建 GitHub Release（已存在则更新说明）
+        if: steps.prepare.outputs.mode != 'edit-release'
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.prepare.outputs.tag }}
