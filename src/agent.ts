@@ -1221,7 +1221,7 @@ export class TgAgent implements DurableObject {
     const apiId = Number(body.apiId ?? this.credentials().apiId ?? 0);
     const apiHash = String(body.apiHash ?? this.credentials().apiHash ?? "");
     const phone = String(body.phone ?? "").trim();
-    if (!apiId || !apiHash) throw new Error("请填写 apiId 和 apiHash（my.telegram.org 获取）");
+    if (!apiId || !apiHash) throw new Error("请填写应用 ID 和应用密钥（在 my.telegram.org 申请）");
     if (!phone) throw new Error("请填写手机号（含国家码，例如 +8613800000000）");
 
     this.store.setJson(KV_CREDS, { apiId, apiHash });

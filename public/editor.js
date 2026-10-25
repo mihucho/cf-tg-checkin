@@ -137,7 +137,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
     class: "input",
     id: id("name"),
     value: model.name,
-    placeholder: "例如：jerry bot 签到",
+    placeholder: "例如：签到小助手 签到",
     autocomplete: "off",
     maxlength: "60",
     "data-autofocus": "",
@@ -152,7 +152,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
     class: "input",
     id: id("target"),
     value: model.targetQuery,
-    placeholder: "@username 或 数字 id",
+    placeholder: "@username 或 数字 ID",
     autocomplete: "off",
     spellcheck: "false",
     oninput: (event) => {
@@ -217,7 +217,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
           id: id("jitterSeconds"),
           label: "随机延迟（秒）",
           control: numberInput("jitterSeconds", s.jitterSeconds, { min: 0, max: 3600, step: 1 }),
-          hint: "每次执行前随机等待 0–N 秒，避免固定时间点被识别。",
+          hint: "每次执行前随机等 0–N 秒，避免每次都踩在同一秒。",
         }),
       ),
     );
@@ -428,7 +428,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
           fieldRow(
             field({
               id: id(`${prefix}-row`),
-              label: "行（0 基）",
+              label: "行（从 0 开始）",
               control: el("input", {
                 class: "input",
                 id: id(`${prefix}-row`),
@@ -443,7 +443,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
             }),
             field({
               id: id(`${prefix}-column`),
-              label: "列（0 基）",
+              label: "列（从 0 开始）",
               control: el("input", {
                 class: "input",
                 id: id(`${prefix}-column`),
@@ -491,7 +491,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
               step.value = event.target.value;
             },
           }),
-          hint: "部分 bot 用数字键盘交互，直接发送数字即可。",
+          hint: "有些机器人用数字键盘交互，直接发数字即可。",
         }),
       );
     } else if (step.type === "wait") {
@@ -510,7 +510,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
               step.seconds = Number(event.target.value);
             },
           }),
-          hint: "用于等待 bot 响应或翻牌动画。",
+          hint: "用于等机器人回复或翻牌动画。",
         }),
       );
     }
@@ -552,7 +552,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
           class: "input",
           id: id("keywords"),
           value: model.successKeywords,
-          placeholder: "签到成功, 已签到",
+          placeholder: "签到成功，已签到",
           oninput: (event) => {
             model.successKeywords = event.target.value;
           },
@@ -622,7 +622,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
             model.cleanupPrevious = event.target.checked;
           },
         }),
-        el("span", {}, "每次执行前删除上一次自己发的消息"),
+        el("span", {}, "每次执行前删掉上一次自己发的消息"),
       ),
     ),
   );
@@ -639,7 +639,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
           { class: "field-hint" },
           defaultTarget
             ? `留空时使用设置里的默认目标：${defaultTarget}`
-            : "填 @username 或数字 id；点「解析」可以确认解析到的会话。",
+            : "填 @username 或数字 ID；点「解析」可以确认解析到的会话。",
         ),
       );
       return;

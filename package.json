@@ -12,7 +12,8 @@
     "test": "node build.mjs --test && node dist/test.cjs",
     "test:integration": "node build.mjs && node scripts/integration.mjs",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test && node build.mjs && npm run check:bundle",
+    "lint:copy": "node scripts/copy-lint.mjs",
+    "check": "npm run typecheck && npm run lint:copy && npm test && node build.mjs && npm run check:bundle",
     "smoke": "node build.mjs --smoke && wrangler dev --config wrangler.smoke.jsonc --port 8799",
     "check:bundle": "node scripts/check-bundle.mjs"
   },

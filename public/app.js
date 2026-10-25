@@ -476,7 +476,7 @@ function updateChrome() {
 }
 
 function accountLabel(account) {
-  if (!account || !account.signedIn || !account.me) return "未登录 TG";
+  if (!account || !account.signedIn || !account.me) return "未登录 Telegram";
   const name = account.me.firstName || account.me.username || account.me.id;
   return account.me.username ? `${name} @${account.me.username}` : String(name);
 }
@@ -542,7 +542,7 @@ function quickStartCard() {
     },
     {
       done: hasRun,
-      title: "跑一次看看",
+      title: "执行一次试试",
       desc: `例如在收藏夹发「${example}」`,
       action: { label: "复制示例", copy: example },
     },
@@ -597,10 +597,10 @@ function renderOverview() {
 
   const header = pageHead({
     title: "概览",
-    description: "签到任务的运行状态一览。",
+    description: "任务、调度与 Telegram 连接的一览。",
     actions: [
-      btn("运行全部", { iconName: "bolt", onClick: (event) => runAll(event.currentTarget) }),
-      btn("检查调度", {
+      btn("执行全部", { iconName: "bolt", onClick: (event) => runAll(event.currentTarget) }),
+      btn("立即检查", {
         variant: "subtle",
         iconName: "refresh",
         onClick: (event) => runTick(event.currentTarget),
@@ -626,7 +626,7 @@ function renderOverview() {
       sub: account.signedIn ? "空闲是正常状态，需要时才建立连接" : null,
     }),
     statCard({
-      label: "签到任务",
+      label: "任务",
       value: el(
         "span",
         { class: "num" },
@@ -658,7 +658,7 @@ function renderOverview() {
       label: "消息指令",
       dot: settings.triggerEnabled ? "ok" : "idle",
       value: settings.triggerEnabled ? "运行中" : "已关闭",
-      foot: `来源 ${controlChatLabel(settings)} · 检查间隔 ${Number(settings.pollSeconds) || 60}s${
+      foot: `来源 ${controlChatLabel(settings)} · 每 ${Number(settings.pollSeconds) || 60} 秒检查一次${
         runtime && runtime.nextPollAt ? `（下次 ${formatClock(runtime.nextPollAt)}）` : ""
       }`,
       sub:
@@ -770,13 +770,13 @@ function renderTasks() {
     title: "任务",
     description: tasks.length
       ? `${tasks.length} 个任务 · ${enabled} 个启用 · ${tasks.length - enabled} 个停用 · 「立即执行」只是手动跑一次，不影响定时`
-      : "还没有任务，先建一个签到任务。",
+      : "还没有任务，先建一个。",
     actions: [
       btn("导入", { variant: "subtle", iconName: "download", onClick: () => openImportDialog() }),
       ...(tasks.length
         ? [
             btn("导出", { variant: "subtle", iconName: "upload", onClick: () => withLoading(null, () => exportTasks()) }),
-            btn("运行全部", { iconName: "bolt", onClick: (event) => runAll(event.currentTarget) }),
+            btn("执行全部", { iconName: "bolt", onClick: (event) => runAll(event.currentTarget) }),
           ]
         : []),
       newBtn,
@@ -791,7 +791,7 @@ function renderTasks() {
         { class: "card card-pad" },
         emptyState({
           iconName: "list",
-          title: "还没有签到任务",
+          title: "还没有任务",
           text: "可以从模板开始，也可以手动新建，或直接在收藏夹发一条指令让它自己建。",
           actions: [
             newTaskBtn("ghost", "新建任务"),
@@ -1156,7 +1156,7 @@ async function renderTaskRuns(task, box) {
               "div",
               { class: "task-run-head" },
               el("span", { class: `dot ${run.ok ? "ok" : run.level === "warn" ? "warn" : "fail"}` }),
-              el("span", { class: "task-run-msg" }, run.message || "(无消息)"),
+              el("span", { class: "task-run-msg" }, run.message || "（无消息）"),
               el("span", { class: "task-run-time num", title: formatFullTime(toMillis(run.at)) }, formatRelative(toMillis(run.at))),
             ),
             run.detail ? el("pre", { class: "task-run-detail" }, String(run.detail)) : null,
@@ -1532,7 +1532,7 @@ async function deleteTask(task) {
 async function runAll(button) {
   const enabledCount = ((state.data && state.data.tasks) || []).filter((task) => task.enabled).length;
   const confirmed = await confirmDialog({
-    title: "运行全部任务？",
+    title: "执行全部任务？",
     message: enabledCount
       ? `会依次真实执行 ${enabledCount} 个已启用的任务（发消息、点按钮都会真的发生），可能要几分钟，期间别关页面。`
       : "当前没有已启用的任务。",
@@ -1620,7 +1620,7 @@ function renderLogs() {
     description:
       state.logsTotal !== undefined && state.logsTotal !== null && state.logsTotal > 0
         ? `共 ${state.logsTotal} 条${filterSummary()}，点击行可展开细节。服务端只保留最近 2000 条。`
-        : "执行记录与错误细节。",
+        : "任务执行记录与错误细节。",
     actions: [
       btn("刷新", {
         iconName: "refresh",
@@ -2016,7 +2016,7 @@ function logItem(log) {
     el(
       "span",
       { class: "log-msg" },
-      log.message || "(无消息)",
+      log.message || "（无消息）",
       log.ok ? null : el("span", { class: "log-level" }, levelText),
     ),
     el(
@@ -2068,7 +2068,7 @@ function renderAccount() {
   const account = (state.data && state.data.account) || {};
   const header = pageHead({
     title: "账号",
-    description: "这两个值只保存在服务端，网页不会显示完整密钥。",
+    description: "这两个值只在服务端保存，网页不会再显示。",
   });
 
   if (account.signedIn && account.me) {
@@ -2171,7 +2171,7 @@ function stepCredentials(account, pending) {
     ),
     field({
       id: "account-api-id",
-      label: "应用 ID（apiId）",
+      label: "应用 ID",
       control: el("input", {
         class: "input",
         id: "account-api-id",
@@ -2182,11 +2182,11 @@ function stepCredentials(account, pending) {
         value: apiIdValue,
         required: true,
       }),
-      hint: "纯数字。",
+      hint: "纯数字。my.telegram.org 里叫 api_id。",
     }),
     field({
       id: "account-api-hash",
-      label: "应用密钥（apiHash）",
+      label: "应用密钥",
       control: el("input", {
         class: "input",
         id: "account-api-hash",
@@ -2227,7 +2227,7 @@ function stepCredentials(account, pending) {
 
 function stepCode(account, pending) {
   const form = el("form", { class: "form-grid", onsubmit: submitCode });
-  const phone = pending.phone || state.accountPhone || account.phone || "你的 Telegram";
+  const phone = pending.phone || state.accountPhone || account.phone || "确认账号";
   form.append(
     el("p", { class: "form-note" }, `验证码已发送到 ${phone}，在 Telegram 的「Telegram 服务通知」里查看。`),
     state.accountHint ? banner("info", state.accountHint) : null,
@@ -2321,7 +2321,7 @@ async function submitCredentials(event) {
   const phone = formValue(form, "phone").trim();
 
   if (!Number.isFinite(apiId) || apiId <= 0) return setFormError(form, "应用 ID 需要是数字");
-  if (!apiHash) return setFormError(form, "请填写应用密钥（apiHash）");
+  if (!apiHash) return setFormError(form, "请填写应用密钥");
   if (!/^\+?\d{6,}$/.test(phone)) return setFormError(form, "手机号需要国际格式，例如 +8613800000000");
 
   setFormError(form, "");
@@ -2632,7 +2632,7 @@ function renderSettings() {
         id: "settings-controlChat",
         label: "指令来源",
         control: textControl("controlChat", settings.controlChat ?? "self", "self"),
-        hint: "默认 self（收藏夹）。也可填群组 @用户名 或数字 ID。",
+        hint: "默认读收藏夹。也可以填群组用户名或数字 ID。",
       }),
       field({
         id: "settings-pollSeconds",
@@ -2660,7 +2660,7 @@ function renderSettings() {
     field({
       id: "settings-defaultTarget",
       label: "默认目标",
-      control: textControl("defaultTarget", settings.defaultTarget ?? "", "@username 或数字 id"),
+      control: textControl("defaultTarget", settings.defaultTarget ?? "", "@username 或数字 ID"),
       hint: "指令中未能识别目标时使用，例如 @jerry_bot。",
     }),
   ]);
@@ -2747,7 +2747,7 @@ function renderSettings() {
       id: "settings-notifyWebhook",
       label: "Webhook 地址",
       control: textControl("notifyWebhook", settings.notifyWebhook ?? "", "https://你的服务/hook"),
-      hint: "自定义渠道：失败时 POST 一份 JSON 过去（含 taskId / taskName / message / text / at）。",
+      hint: "自定义渠道：失败时向该地址发一份 JSON（含任务编号、任务名、结果、时间）。",
     }),
     field({
       id: "settings-notifyWebhookSecret",
@@ -2761,7 +2761,7 @@ function renderSettings() {
         spellcheck: "false",
         placeholder: settings.notifyWebhookSecretConfigured ? "已配置（留空表示不修改）" : "机器人安全设置里的「加签」密钥",
       }),
-      hint: "只有钉钉需要：机器人开启「加签」时填这里，会自动算 timestamp + sign。只存服务端，不回传。",
+      hint: "只有钉钉需要：机器人在安全设置里开启「加签」时填这里。只存在服务端，不会回传。",
     }),
     el(
       "div",
@@ -2847,7 +2847,7 @@ function renderSettings() {
         el(
           "div",
           { class: "about-build" },
-          `出口机房 ${runtime.colo || "未记录"}` + (runtime.locationHint ? ` · DO 区域 ${runtime.locationHint}` : ""),
+          `出口机房 ${runtime.colo || "未记录"}` + (runtime.locationHint ? ` · 部署区域 ${runtime.locationHint}` : ""),
         ),
         usagePanel(),
         el(
@@ -3369,7 +3369,7 @@ async function runParse() {
   const task = async () => {
     try {
       const res = await api("/api/trigger/parse", { method: "POST", body: { text } });
-      state.parse = res && typeof res === "object" ? res : { ok: false, error: "服务端返回了空结果" };
+      state.parse = res && typeof res === "object" ? res : { ok: false, error: "没有拿到结果，请再试一次" };
     } catch (error) {
       state.parse = { ok: false, error: error.message || "解析失败" };
     }
@@ -3396,7 +3396,7 @@ function triggerHelp() {
         el(
           "p",
           { class: "card-desc" },
-          "在收藏夹（或设置里的 controlChat）里发一条消息，就能创建和管理签到任务。",
+          "在收藏夹（或设置里的「指令来源」）里发一条消息，就能创建和管理任务。",
         ),
       ),
     ),
@@ -3415,7 +3415,7 @@ function triggerHelp() {
         helpBlock("动作", [
           ["签到", "发送普通文本；带空格用引号"],
           ["btn:立即签到", "按按钮文本点击"],
-          ["btn:0,1", "按行列点击（0 基）"],
+          ["btn:0,1", "按行列点击（从 0 开始）"],
           ["num:1", "发送数字"],
           ["wait:5", "等待 5 秒"],
           ["rand:早安|晚上好", "随机发一条"],
