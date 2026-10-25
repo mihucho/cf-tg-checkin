@@ -3020,7 +3020,20 @@ function renderSettings() {
       field({
         id: "settings-adminUserId",
         label: "管理员 ID",
-        control: textControl("adminUserId", settings.adminUserId ?? "", meId || "登录后自动填入", "numeric"),
+        control: el("input", {
+          class: "input",
+          id: "settings-adminUserId",
+          name: "adminUserId",
+          type: "text",
+          inputmode: "numeric",
+          autocomplete: "off",
+          placeholder: settings.adminUserIdConfigured
+            ? `已配置：${settings.adminUserId || "（已隐藏）"}（留空表示不修改）`
+            : meId
+              ? "登录后自动填入"
+              : "登录后自动填入，或手动填写",
+          value: "",
+        }),
         hint: meId ? `仅该 Telegram 账号发出的指令有效（当前账号 ${meId}）。` : "登录后自动填入当前账号。",
       }),
     ),
@@ -3146,6 +3159,12 @@ function renderSettings() {
       { class: "check-row" },
       el("input", { type: "checkbox", id: "settings-clearNotifyWebhookSecret", name: "clearNotifyWebhookSecret" }),
       el("label", { for: "settings-clearNotifyWebhookSecret" }, "清除已保存的加签密钥"),
+    ),
+    el(
+      "div",
+      { class: "check-row" },
+      el("input", { type: "checkbox", id: "settings-clearAdminUserId", name: "clearAdminUserId" }),
+      el("label", { for: "settings-clearAdminUserId" }, "清除管理员 ID（任何账号的指令都会生效，慎用）"),
     ),
     el(
       "div",
@@ -3549,7 +3568,8 @@ async function saveSettings(event) {
     pollSeconds,
     triggerEnabled: checked("triggerEnabled"),
     controlChat: read("controlChat").trim() || "self",
-    adminUserId: read("adminUserId").trim(),
+    ...(read("adminUserId").trim() ? { adminUserId: read("adminUserId").trim() } : {}),
+    ...(checked("clearAdminUserId") ? { clearAdminUserId: true } : {}),
     defaultTarget: read("defaultTarget").trim(),
     stepPollSeconds,
     stepWaitSeconds,

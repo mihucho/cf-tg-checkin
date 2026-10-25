@@ -77,8 +77,10 @@ export function redactState(state: AgentState): AgentState {
       ...redactSettings(settings),
       notifyWebhook: maskWebhookUrl(settings.notifyWebhook ?? ""),
       notifyWebhookConfigured: Boolean((settings.notifyWebhook ?? "").trim()),
-      // 这两个是用户要在设置里编辑的值，保留原文
-      adminUserId: settings.adminUserId,
+      // 管理员 ID 本质是"自己的账号 id"，和 me.id 一样脱敏，只给"有没有配"的标记
+      adminUserId: maskValue(settings.adminUserId, 3),
+      adminUserIdConfigured: Boolean((settings.adminUserId ?? "").trim()),
+      // 指令来源要在设置里编辑，保留原文
       controlChat: settings.controlChat,
     },
     tasks: state.tasks.map((task) => ({

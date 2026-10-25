@@ -166,6 +166,8 @@ export interface Settings {
   notifyWebhookSecretConfigured?: boolean;
   /** 只读标记：接口返回时告知前端「Webhook 地址已配置」（地址本身已脱敏） */
   notifyWebhookConfigured?: boolean;
+  /** 只读标记：接口返回时告知前端「管理员 ID 已配置」（值本身已脱敏） */
+  adminUserIdConfigured?: boolean;
   /** 自定义模板（最多 20 个） */
   templates: TaskTemplate[];
   /** Turnstile 站点 key（公开，会下发前端） */

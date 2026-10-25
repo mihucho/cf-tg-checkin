@@ -409,6 +409,28 @@ test("redactState：手机号 / 自己的 id / api_id / access_hash / Webhook �
   assert.match(redacted.settings.notifyWebhook, /access_token=7629…cc9f/);
   assert.equal(redacted.tasks[0].target.accessHash, undefined);
   assert.equal(redacted.tasks[0].targets?.[0].accessHash, undefined);
-  // 需要编辑的字段保持原样
-  assert.equal(redacted.settings.adminUserId, "7654321");
+  // 管理员 ID 也脱敏（见下一个用例），指令来源保持原样
+  assert.equal(redacted.settings.adminUserId, "765…321");
+  assert.equal(redacted.settings.controlChat, "self");
+});
+
+test("redactState：管理员 ID 也脱敏，只给已配置标记", () => {
+  const state = {
+    account: { configured: true, apiId: null, phone: null, signedIn: false, me: null, connected: false, lastConnectedAt: null, pendingLogin: null, dc: null, lastError: null },
+    settings: { ...DEFAULT_SETTINGS, adminUserId: "7654321", controlChat: "@group" },
+    tasks: [],
+    logs: [],
+    stats: { totalTasks: 0, enabledTasks: 0, nextRunAt: null, lastRunAt: null },
+    now: 0,
+  };
+  const redacted = redactState(state as never);
+  assert.equal(redacted.settings.adminUserId, "765…321");
+  assert.equal(redacted.settings.adminUserIdConfigured, true);
+  assert.equal(JSON.stringify(redacted).includes("7654321"), false, "原始 id 不该出现在响应里");
+  // 指令来源是要编辑的字段，保持原样
+  assert.equal(redacted.settings.controlChat, "@group");
+
+  const empty = redactState({ ...state, settings: { ...state.settings, adminUserId: "" } } as never);
+  assert.equal(empty.settings.adminUserId, "");
+  assert.equal(empty.settings.adminUserIdConfigured, false);
 });
