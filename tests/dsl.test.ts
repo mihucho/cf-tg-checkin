@@ -91,9 +91,9 @@ test("动作流水线：文本 + 点按钮 + 等待 + 随机 + 数字", () => {
 });
 
 test("动作反例：空文本/缺时间/缺动作都要报错", () => {
-  assert.match(parseError("签到", { forwarded: bot }), /缺少时间/);
-  assert.match(parseError("9.30", { forwarded: bot }), /缺少动作/);
-  assert.match(parseError("9.30 签到", {}), /找不到签到目标/);
+  assert.match(parseError("签到", { forwarded: bot }), /缺时间/);
+  assert.match(parseError("9.30", { forwarded: bot }), /缺动作/);
+  assert.match(parseError("9.30 签到", {}), /没找到目标/);
 });
 
 test("带 emoji/空格的文本：引号与不引号等价", () => {

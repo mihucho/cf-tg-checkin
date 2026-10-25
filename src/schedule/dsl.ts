@@ -457,14 +457,14 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
   flushText();
 
   if (!schedule) {
-    return { ok: false, error: "缺少时间：参考 `9.30 签到` 或 `每2小时 签到`" };
+    return { ok: false, error: "缺时间：在最前面写上几点执行，例如「9.30 签到」或「每2小时 签到」" };
   }
   if (!steps.length) {
-    return { ok: false, error: "缺少动作：时间后面要写要发送的内容，例如 `9.30 签到`" };
+    return { ok: false, error: "缺动作：时间后面写要发的内容，例如「9.30 签到」「9.30 /start」" };
   }
 
   if (useHere && !ctx.sourceChat && !ctx.allowMissingTarget) {
-    return { ok: false, error: "@here 只能在控制会话里用：它表示「发到当前这个会话」" };
+    return { ok: false, error: "@here 表示「发到当前这个会话」，只能在这个会话里用" };
   }
 
   const resolvedTarget: Target | null =
@@ -478,7 +478,7 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
     return {
       ok: false,
       error:
-        "找不到签到目标：把机器人消息转发/分享到收藏夹、或直接回复那条消息，也可以在消息里写 @机器人，或在设置里填默认目标",
+        "没找到目标：把机器人的消息转发到收藏夹，或在指令里写 @机器人 / 到:-100xxx；也可以在设置里填「默认目标」",
     };
   }
 

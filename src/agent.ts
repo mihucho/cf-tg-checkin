@@ -136,6 +136,14 @@ function publicError(error: unknown): string {
 }
 
 /** query/body 里的数字参数：非数字一律回落到默认值，避免把 "abc" 塞进 SQL */
+/** 目标类型的中文写法（消息里显示用） */
+const PEER_KIND_TEXT: Record<string, string> = {
+  bot: "机器人",
+  group: "群组",
+  channel: "频道",
+  user: "用户",
+};
+
 /** 字节数转人话（存储告警用） */
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
@@ -496,7 +504,7 @@ export class TgAgent implements DurableObject {
           if (!stripped.matched) {
             return json({
               ok: false,
-              error: `消息需要以触发前缀「${prefix}」开头，例如：${prefix} ${rawText.slice(0, 60)}`,
+              error: `消息要以「${prefix}」开头，例如：${prefix} ${rawText.slice(0, 60)}`,
             });
           }
           parseText = stripped.rest;
@@ -1569,14 +1577,14 @@ export class TgAgent implements DurableObject {
           record(true, `登记目标（无前缀）：${hinted.title || (hinted.username ? `@${hinted.username}` : hinted.id)}`);
         } else if (findTimeToken(tokenize(text))) {
           trace.push(`看起来像配置但缺少前缀「${prefix}」→ 忽略`);
-          record(false, `忽略：消息缺少触发前缀「${prefix}」`);
+          record(false, `忽略：消息缺少前缀「${prefix}」`);
           // 只在"看起来像配置"时提醒，且 10 分钟最多一次，避免刷屏
           const lastHint = Number(this.store.getKv("trigger:prefixHintAt") ?? 0);
           if (Date.now() - lastHint > 10 * 60_000) {
             this.store.setKv("trigger:prefixHintAt", String(Date.now()));
             await client
               .sendMessage(entity as never, {
-                message: `⚠️ 需要在开头加触发前缀「${prefix}」，例如：\n${prefix} ${text.slice(0, 120)}`,
+                message: `需要在开头加「${prefix}」，例如：\n${prefix} ${text.slice(0, 120)}`,
                 parseMode: false,
               })
               .catch(() => undefined);
@@ -1681,8 +1689,8 @@ export class TgAgent implements DurableObject {
         });
         await reply(
           created
-            ? `✅ 已创建任务 #${task.id}\n${task.name}\n⏰ ${formatInTimezone(task.nextRunAt, settings.timezone)}（${settings.timezone >= 0 ? "+" : ""}${settings.timezone}）\n${result.explanation ?? ""}`
-            : `ℹ️ 已存在相同任务 #${task.id}（${task.name}），没有重复创建\n如需重建，先发「删除 ${task.id}」`,
+            ? `✅ 已创建任务 #${task.id}\n「${task.name}」\n⏰ 下次执行 ${formatInTimezone(task.nextRunAt, settings.timezone)}（UTC${settings.timezone >= 0 ? "+" : ""}${settings.timezone}）\n${result.explanation ?? ""}`
+            : `ℹ️ 已有相同任务 #${task.id}「${task.name}」，没有重复创建\n要重建的话，先发「删除 ${task.id}」`,
         );
         return;
       }
@@ -1700,13 +1708,15 @@ export class TgAgent implements DurableObject {
           record(true, `触发器命令：删除 #${found.id}`, { taskId: found.id, taskName: found.name });
           this.store.deleteTask(found.id);
           await this.scheduleNextAlarm();
-          await reply(`🗑️ 已删除任务 #${found.id} ${found.name}`);
+          await reply(`🗑️ 已删除任务 #${found.id}「${found.name}」`);
           return;
         }
         if (result.kind === "enable" || result.kind === "disable") {
           this.updateTask(found.id, { enabled: result.kind === "enable" });
           await this.scheduleNextAlarm();
-          await reply(`${result.kind === "enable" ? "✅" : "⏸️"} 任务 #${found.id} 已${result.kind === "enable" ? "启用" : "禁用"}`);
+          await reply(
+            `${result.kind === "enable" ? "✅" : "⏸️"} 任务 #${found.id}「${found.name}」已${result.kind === "enable" ? "启用" : "停用"}`,
+          );
           return;
         }
         const task = this.store.getTask(found.id)!;
@@ -1848,16 +1858,17 @@ export class TgAgent implements DurableObject {
 
   private renderTaskList(): string {
     const tasks = this.store.listTasks();
-    if (!tasks.length) return "📋 还没有任务。在收藏夹发一条 `9.30 签到` 试试，或发「帮助」看语法。";
+    if (!tasks.length) return "📋 还没有任务。在收藏夹发一条 `9.30 签到` 试试，或发「帮助」看写法。";
     const settings = this.store.getSettings();
     const lines = tasks.map((task) => {
       const status = task.enabled ? "✅" : "❌";
       const target = task.target.username ? `@${task.target.username}` : task.target.title || task.target.id;
       const next = formatInTimezone(task.nextRunAt, settings.timezone);
-      const last = task.lastResult === "ok" ? "上次成功" : task.lastResult === "fail" ? "上次失败" : "还没跑过";
-      return `${status} #${task.id} ${task.name}\n   目标 ${target} · 下次 ${next} · ${last}`;
+      const last = task.lastResult === "ok" ? "上次成功" : task.lastResult === "fail" ? "上次失败" : "还没执行过";
+      const kind = PEER_KIND_TEXT[task.target.peerKind ?? ""] ?? "";
+      return `${status} #${task.id} ${task.name}\n   ${kind ? `${kind} ` : ""}${target} · 下次 ${next} · ${last}`;
     });
-    return ["📋 任务列表", ...lines, "", "发「立即 <编号>」「开启 <编号>」「关闭 <编号>」「删除 <编号>」管理"].join("\n");
+    return ["📋 任务列表", ...lines, "", "管理：立即 3 · 开启 3 · 关闭 3 · 删除 3"].join("\n");
   }
 
   // ---------------------------------------------------------------- 任务
@@ -2613,47 +2624,60 @@ function sanitizeSettings(patch: Partial<Settings>): Partial<Settings> {
 
 function welcomeText(prefix: string): string {
   const p = prefix ? `${prefix} ` : "";
+  const rule = prefix ? `每条消息都要以「${prefix}」开头。` : "";
   return `👋 签到台已就绪
 
-往这里转发/分享要签到的机器人，再发一条配置就能建任务${
-    prefix ? `（每条配置都要以「${prefix}」开头）` : ""
-  }，例如：
+${rule}把要签到的机器人转发到收藏夹，再发一条指令就能建任务，例如：
 ${p}9.30 签到
 ${p}9.30 签到 btn:立即签到 #kw:签到成功
 ${p}8.30-9.30 rand:早上好|午安
 
-${p}列表 看任务，${p}帮助 看完整语法。`;
+看任务：${p}列表　　看写法：${p}帮助`;
 }
 
 function helpText(prefix: string): string {
-  const head = prefix
-    ? `💡 每条配置都要以「${prefix}」开头，例如：${prefix} 9.30 签到\n`
-    : "";
+  const head = prefix ? `每条指令都要以「${prefix}」开头，例如：${prefix} 9.30 签到\n\n` : "";
   return head + HELP_BODY;
 }
 
-const HELP_BODY = `💡 触发语法：[时间] [动作...]
+const HELP_BODY = `写法：[时间] + [要做的事]
 
-时间：9.30 / 09:30 / 0930；窗口 9.30-10.30；间隔 每30分 / 每2小时
-动作：
- · 直接写文本 → 发送该文本（含空格用引号）
- · btn:按钮文本 → 点击按钮；btn:0,1 → 按行列点击
- · num:1 → 直接发数字（数字选择类机器人）
- · wait:5 → 等待 5 秒
- · rand:早安|晚上好|午安 → 随机挑一条发送
-修饰：#kw:签到成功|已签到  #jitter:120  #once  #delete:30  #timeout:40  #delay:3  #thread:12  #name:名称  #keep（保留上次发的消息，默认会删）
-（每个动作之间默认间隔 3 秒，用 #delay:0 可关掉
-运行细节（每步、按钮列表、机器人回应）在「任务 → 最近结果 → 步骤日志」里）
-目标：@机器人 / @群组 / t.me 链接 / 到:-100xxx，或把消息转发/分享到收藏夹（先转发再发配置也认，30 分钟内有效）
-群组：@here = 发到当前这个群（在群里发配置时最省事）
+时间（放在哪都行）
+ · 9.30 / 09:30 / 0930 / 9点半
+ · 窗口：8.30-10.30（这段时间里随机挑一次）
+ · 间隔：每30分 / 每2小时
+ · 只跑一次：在时间后面加 once
 
-示例：
-9.30 签到
-9.30 签到 btn:立即签到 #kw:签到成功
-8.30-9.30 参与 rand:早上好|午安
-每2小时 打卡
+要做的事（按顺序执行）
+ · 直接写文字 → 发这段文字；带空格时用引号括起来
+ · btn:按钮文字 → 点这个按钮（也可以 btn:0,1 按行列点，行列从 0 开始）
+ · num:1 → 直接发数字（数字菜单类的机器人）
+ · wait:5 → 等 5 秒
+ · rand:早安|晚上好|午安 → 随机挑一条发
 
-管理命令：列表 / 立即 <编号> / 开启 <编号> / 关闭 <编号> / 删除 <编号> / 帮助
+附加设置（写在最后，多个用空格隔开）
+ · #kw:签到成功|已签到 → 机器人回复里出现任一个词就算成功
+ · #jitter:120 → 执行前随机等 0-120 秒
+ · #delay:5 → 每步之间停几秒（默认 3 秒，0 表示不停）
+ · #timeout:40 → 等机器人回应的上限（秒）
+ · #delete:30 → 发完 30 秒后删掉自己发的消息
+ · #thread:12 → 发到话题 12
+ · #keep → 保留上一次发的消息（默认会先删掉）
+ · #once → 只执行一次
+ · #name:名称 → 自定义任务名
 
-提示：如果在设置里配了「触发前缀」（例如 tg），所有配置都要以它开头，如「tg 9.30 签到」。`;
+发给谁
+ · @机器人 / @群组 / t.me 链接 / 到:-100xxx
+ · 到:@a|@b → 一次发给多个目标（最多 8 个）
+ · @here → 发到当前这个群
+ · 不写也行：先把机器人的消息转发到收藏夹，30 分钟内有效
+
+管理任务
+ · 列表 · 立即 <编号> · 开启 <编号> · 关闭 <编号> · 删除 <编号> · 帮助
+
+例子
+ 9.30 签到
+ 9.30 签到 btn:立即签到 #kw:签到成功
+ 8.30-9.30 参与 rand:早上好|午安
+ 每2小时 打卡`;
 
