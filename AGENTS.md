@@ -79,9 +79,13 @@ title: v0.18.0 — 一句话标题
 | **`0.0.0`**（模板） | 跳过 |
 | 带 **`retro: true`** | 只改这个已存在 tag 的 **GitHub Release 说明**（版本号可以 ≤ 当前版本），
 不动代码、不打 tag。用途：发布说明写错/需要脱敏时回头修 |
+| 带 **`retro: revoke`** | **撤销发版**：删掉这个版本的 GitHub Release 与 tag，代码改动保留。
+版本号回退仍要自己改 `package.json`（或者直接 revert 那次 release 提交） |
 
 规矩：
 
+- **不是每次改动都要发版**：平时只写 `CHANGELOG.md` 的 `[Unreleased]`，攒到一批、或者
+  要给别人一个可安装的版本时再发。没人要求就不要自作主张发版
 - **只有 `releases/unreleased.md` 的变化会触发发布**，别的改动走普通 CI；不要在别处手动 bump 版本号
 - 版本号判断口径见上一节（修 bug = `patch`），文档里写错会被脚本拒掉（必须严格递增，非 `x.y.z` 直接报错）
 - 正文要有内容（只写 front matter 会报错）；写完先 `node scripts/release.mjs --dry-run` 预览

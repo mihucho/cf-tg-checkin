@@ -91,6 +91,22 @@ jobs:
             git push origin "$TAG"
           fi
 
+      - name: 撤销发版（revoke：删 Release 与 tag，代码保留）
+        if: steps.prepare.outputs.mode == 'revoke'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete "$TAG" --yes --cleanup-tag
+            echo "已删除 Release 与 tag $TAG" >> "$GITHUB_STEP_SUMMARY"
+          else
+            # 没有 Release 也要清掉远端的 tag
+            git push origin ":refs/tags/$TAG" || echo "远端没有 $TAG"
+            echo "远端没有 Release，只清理了 tag $TAG" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: 补改已发布 Release 的说明（retro）
         if: steps.prepare.outputs.mode == 'edit-release'
         env:
@@ -108,7 +124,7 @@ jobs:
           echo "已更新 Release $TAG 的说明" >> "$GITHUB_STEP_SUMMARY"
 
       - name: 创建 GitHub Release（已存在则更新说明）
-        if: steps.prepare.outputs.mode != 'edit-release'
+        if: steps.prepare.outputs.mode != 'edit-release' && steps.prepare.outputs.mode != 'revoke'
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.prepare.outputs.tag }}

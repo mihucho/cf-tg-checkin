@@ -52,9 +52,12 @@ export function parseReleaseDoc(raw) {
   if (!/^\d+\.\d+\.\d+$/.test(version)) {
     throw new Error(`front matter 的 version 必须是 x.y.z（当前是「${version || "(空)"}」）`);
   }
-  // retro: true → 只更新这个「已存在 tag」的 GitHub Release 说明，不改代码、不建 tag
-  const retro = String(meta.retro ?? "").trim().toLowerCase() === "true";
-  return { version, title: String(meta.title ?? "").trim() || `v${version}`, body, retro };
+  // retro: true  → 只更新这个「已存在 tag」的 GitHub Release 说明
+  // retro: revoke → 撤销发版：删掉 Release 与 tag（版本号必须 ≤ 当前版本）
+  const retroRaw = String(meta.retro ?? "").trim().toLowerCase();
+  const retro = retroRaw === "true";
+  const revoke = retroRaw === "revoke";
+  return { version, title: String(meta.title ?? "").trim() || `v${version}`, body, retro, revoke };
 }
 
 /** a 是否严格大于 b（只比 x.y.z） */
@@ -155,6 +158,28 @@ function main() {
     return;
   }
   if (!doc.body) throw new Error("发布说明正文是空的：front matter 之后的 `---` 下面要写内容");
+
+  // revoke：撤销发版（删 Release + tag），不动代码
+  if (doc.revoke) {
+    const tag = `v${doc.version}`;
+    if (doc.version === TEMPLATE_VERSION) throw new Error("revoke 也要写清要撤销哪个版本号");
+    console.log(`撤销发版：${tag}（会删除 GitHub Release 与 tag，代码改动保留）`);
+    if (dryRun) {
+      output({ mode: "revoke", skipped: "false", version: doc.version, tag, title: doc.title, notes_file: NOTES_OUT });
+      return;
+    }
+    fs.mkdirSync(path.dirname(NOTES_OUT), { recursive: true });
+    fs.writeFileSync(NOTES_OUT, `${doc.title}\n\n${doc.body || "（撤销发版）"}\n`);
+    const { reset } = buildArchiveAndTemplate({
+      version: doc.version,
+      title: doc.title,
+      body: doc.body,
+      template: docText,
+    });
+    fs.writeFileSync(DOC_PATH, reset);
+    output({ mode: "revoke", skipped: "false", version: doc.version, tag, title: doc.title, notes_file: NOTES_OUT });
+    return;
+  }
 
   // retro：只改已发布 Release 的说明（例如修正措辞、脱敏），版本号可以 <= 当前版本
   if (doc.retro) {
