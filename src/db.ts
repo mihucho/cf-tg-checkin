@@ -391,6 +391,22 @@ export class Store {
     return this.getTask(id);
   }
 
+  /**
+   * 把某个分组下的任务整体改名（`from` 为空字符串表示「未分组」）。
+   * 返回被改动的任务数。
+   */
+  renameGroup(from: string, to: string, now: number): number {
+    const normalize = (value: string) => (value ?? "").trim();
+    const target = normalize(from);
+    const next = normalize(to);
+    const rows = this.rows<{ id: number; group_name: string | null }>("SELECT id, group_name FROM tasks");
+    const ids = rows.filter((row) => normalize(row.group_name ?? "") === target).map((row) => row.id);
+    for (const id of ids) {
+      this.sql.exec("UPDATE tasks SET group_name = ?, updated_at = ? WHERE id = ?", next || null, now, id);
+    }
+    return ids.length;
+  }
+
   setTaskNextRun(id: number, nextRunAt: number | null): void {
     this.sql.exec("UPDATE tasks SET next_run_at = ? WHERE id = ?", nextRunAt, id);
   }

@@ -268,6 +268,26 @@ export class TgAgent implements DurableObject {
         });
       }
 
+      if (path === "/tasks/group-rename" && method === "POST") {
+        const body = (await request.json()) as { from?: string; to?: string };
+        const from = String(body.from ?? "").trim();
+        const to = String(body.to ?? "").trim().slice(0, 20);
+        if (!to) return jsonError("新分组名不能为空", 400);
+        if (to === from) return json({ ok: true, updated: 0, from, to });
+        const updated = this.store.renameGroup(from, to, Date.now());
+        this.store.addLog({
+          taskId: null,
+          taskName: null,
+          at: Date.now(),
+          ok: true,
+          level: "info",
+          message: `分组改名：${from || "未分组"} → ${to}（${updated} 个任务）`,
+          detail: null,
+          source: "system",
+        });
+        return json({ ok: true, updated, from, to });
+      }
+
       if (path === "/tasks/import" && method === "POST") {
         const body = (await request.json()) as { tasks?: TaskInput[] };
         const incoming = Array.isArray(body.tasks) ? body.tasks.slice(0, 200) : [];

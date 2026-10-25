@@ -2840,6 +2840,29 @@ input[type="radio"] {
   letter-spacing: 0.08em;
 }
 
+.group-rail-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 8px;
+}
+
+.group-rail-row.is-active {
+  background: rgba(92, 200, 189, 0.12);
+}
+
+.group-rail-rename {
+  flex: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.group-rail-row:hover .group-rail-rename,
+.group-rail-row:focus-within .group-rail-rename,
+.group-rail-row.is-active .group-rail-rename {
+  opacity: 1;
+}
+
 .group-rail-item {
   display: flex;
   align-items: center;
@@ -2864,7 +2887,6 @@ input[type="radio"] {
 }
 
 .group-rail-item.is-active {
-  background: rgba(92, 200, 189, 0.12);
   color: var(--accent, #5cc8bd);
 }
 
@@ -2929,12 +2951,20 @@ input[type="radio"] {
     display: none;
   }
 
+  .group-rail-row {
+    flex: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+  }
+
   .group-rail-item {
     width: auto;
     flex: none;
     padding: 5px 10px;
-    border-radius: 999px;
-    border: 1px solid var(--line);
+  }
+
+  .group-rail-rename {
+    opacity: 1; /* 触屏没有 hover，常显 */
   }
 
   .group-rail-item.is-active {

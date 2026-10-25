@@ -173,6 +173,54 @@ async function main() {
       JSON.stringify(parsed.task?.steps),
     );
 
+    // ---------- 分组重命名 ----------
+    const groupA = { ...taskA, name: "分组样本-甲", group: "甲组" };
+    const groupB = { ...taskA, name: "分组样本-乙", group: "甲组" };
+    const groupC = { ...taskA, name: "分组样本-丙" }; // 未分组
+    const createdA = await post("/api/tasks", groupA);
+    const createdB = await post("/api/tasks", groupB);
+    const createdC = await post("/api/tasks", groupC);
+    check(
+      "分组字段能存下来",
+      createdA.task?.group === "甲组" && createdC.task?.group === undefined,
+      JSON.stringify({ a: createdA.task?.group, c: createdC.task?.group }),
+    );
+
+    const renamed = await post("/api/tasks/group-rename", { from: "甲组", to: "乙组" });
+    check("一键重命名分组（返回改动数）", renamed.updated === 2, JSON.stringify(renamed));
+    const afterRename = await get("/api/state");
+    const moved = afterRename.tasks.filter((item) => item.group === "乙组").length;
+    check("该分组下所有任务都改了名", moved === 2, `乙组有 ${moved} 个`);
+    check("别的分组不受影响", afterRename.tasks.find((t) => t.id === createdC.task.id)?.group === undefined);
+
+    const ungroupedRename = await post("/api/tasks/group-rename", { from: "", to: "已归类" });
+    check(
+      "「未分组」也能重命名（把未分组任务归到新组）",
+      ungroupedRename.updated >= 1,
+      JSON.stringify(ungroupedRename),
+    );
+    const emptyName = await post("/api/tasks/group-rename", { from: "乙组", to: "  " });
+    check("新分组名为空被拒（400）", emptyName.status === 400, `status=${emptyName.status}`);
+
+    // 按分组导出
+    const exportGroup = await get(`/api/tasks/export?group=${encodeURIComponent("乙组")}`);
+    check(
+      "导出可以按分组过滤",
+      exportGroup.tasks.length === 2 && exportGroup.tasks.every((item) => item.group === "乙组"),
+      JSON.stringify({ n: exportGroup.tasks.length }),
+    );
+    const exportUngrouped = await get("/api/tasks/export?group=__ungrouped");
+    check(
+      "导出未分组",
+      exportUngrouped.tasks.every((item) => !item.group),
+      JSON.stringify({ n: exportUngrouped.tasks.length }),
+    );
+
+    // 清理这几个测试任务
+    for (const item of [createdA, createdB, createdC]) {
+      if (item.task?.id) await request("DELETE", `/api/tasks/${item.task.id}`);
+    }
+
     // ---------- 导出 / 导入 ----------
     const exported = await get("/api/tasks/export");
     check("导出包含全部任务且不含运行态字段", exported.tasks.length >= 2 && !("id" in exported.tasks[0]) && !("nextRunAt" in exported.tasks[0]));

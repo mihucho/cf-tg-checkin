@@ -875,8 +875,8 @@ function taskGroupList(tasks) {
     hasGroups: named.size > 0,
     items: [
       { key: "", label: "全部", count: tasks.length },
-      // 「未分组」固定排在「全部」之后（用户要求放最前面）
-      ...(ungrouped ? [{ key: "__ungrouped", label: "未分组", count: ungrouped }] : []),
+      // 「未分组」固定排在「全部」之后，而且始终显示（哪怕一个任务都没有）
+      { key: "__ungrouped", label: "未分组", count: ungrouped },
       ...[...named.entries()]
         .sort((a, b) => a[0].localeCompare(b[0], "zh"))
         .map(([name, count]) => ({ key: name, label: name, count })),
@@ -919,34 +919,117 @@ function taskRowClickable(task) {
   return row;
 }
 
-/** 左侧分组栏（没有分组时不渲染，保持原来的单栏布局） */
+/** 左侧分组栏：始终渲染（未分组常显，可以在这里改名） */
 function taskGroupRail(groups, activeKey) {
-  if (!groups.hasGroups) return null;
   return el(
     "aside",
     { class: "group-rail", "aria-label": "任务分组" },
-    el(
+    el("div", { class: "group-rail-title" }, "分组"),
+    ...groups.items.map((item) => {
+      const isAll = item.key === "";
+      return el(
+        "div",
+        { class: `group-rail-row${activeKey === item.key ? " is-active" : ""}` },
+        el(
+          "button",
+          {
+            class: "group-rail-item",
+            type: "button",
+            "aria-pressed": String(activeKey === item.key),
+            onclick: () => {
+              setActiveTaskGroup(item.key);
+              paint({ force: true });
+            },
+          },
+          el("span", { class: "group-rail-name cell-trunc" }, item.label),
+          el("span", { class: "group-rail-count num" }, String(item.count)),
+        ),
+        isAll
+          ? null
+          : iconButton("pencil", `重命名「${item.label}」`, () => openGroupRename(item), {
+              className: "group-rail-rename",
+              size: 13,
+            }),
+      );
+    }),
+  );
+}
+
+/**
+ * 重命名分组：把这个分组下的任务一次性改成新名字。
+ * 「未分组」也能改 —— 相当于给所有还没分组的任务统一指定一个分组。
+ */
+async function openGroupRename(item) {
+  const from = item.key === "__ungrouped" ? "" : item.key;
+  const isUngrouped = item.key === "__ungrouped";
+  const input = el("input", {
+    class: "input",
+    id: "group-rename-input",
+    value: isUngrouped ? "" : item.key,
+    placeholder: "例如：日常签到",
+    maxlength: "20",
+    autocomplete: "off",
+  });
+
+  const submit = async () => {
+    const to = input.value.trim();
+    if (!to) {
+      toast("新分组名不能为空", { kind: "error" });
+      input.focus();
+      return false;
+    }
+    if (to === from) {
+      toast("名字没变", { kind: "info" });
+      return false;
+    }
+    try {
+      const res = await api("/api/tasks/group-rename", { method: "POST", body: { from, to } });
+      closeModal();
+      // 改的是当前选中的分组 → 选中跟着换成新名字
+      if (activeTaskGroup() === (isUngrouped ? "__ungrouped" : from)) setActiveTaskGroup(to);
+      toast(`已把 ${res.updated} 个任务改到「${to}」`, { kind: "ok" });
+      await refreshState({ silent: true });
+      paint({ force: true });
+      return true;
+    } catch (error) {
+      toast(error.message || "重命名失败", { kind: "error" });
+      return false;
+    }
+  };
+
+  openModal({
+    title: isUngrouped ? "给未分组的任务命名" : `重命名分组「${item.label}」`,
+    body: el(
       "div",
-      { class: "group-rail-title" },
-      "分组",
+      { class: "stack-sm" },
+      el(
+        "p",
+        { class: "hint" },
+        item.count
+          ? `${item.count} 个任务会一起改名。${isUngrouped ? "改名后它们就不再是「未分组」。" : ""}`
+          : "这个分组下暂时没有任务。",
+      ),
+      field({ id: "group-rename-field", label: "新分组名", control: input }),
     ),
-    ...groups.items.map((item) =>
+    footer: el(
+      "div",
+      { class: "dialog-actions" },
+      el("button", { class: "btn", type: "button", onclick: () => closeModal() }, "取消"),
       el(
         "button",
         {
-          class: `group-rail-item${activeKey === item.key ? " is-active" : ""}`,
+          class: "btn btn-primary",
           type: "button",
-          "aria-pressed": String(activeKey === item.key),
-          onclick: () => {
-            setActiveTaskGroup(item.key);
-            paint({ force: true });
-          },
+          onclick: (event) => withLoading(event.currentTarget, submit),
         },
-        el("span", { class: "group-rail-name cell-trunc" }, item.label),
-        el("span", { class: "group-rail-count num" }, String(item.count)),
+        isUngrouped ? "全部分到这个分组" : "重命名",
       ),
     ),
-  );
+  });
+  requestAnimationFrame(() => {
+    input.focus();
+    input.select();
+  });
 }
 
 function taskTable(tasks) {

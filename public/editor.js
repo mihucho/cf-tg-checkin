@@ -148,26 +148,39 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
     },
   });
 
-  const groupListId = id("group-list");
-  const groupInput = el("input", {
+  const groupNames = (typeof window.__taskGroups === "function" ? window.__taskGroups() : []) || [];
+  const currentGroup = task?.group || "";
+  // 当前任务的分组如果不在列表里（比如刚好被改过），补进去，避免下拉没有对应项
+  const groupOptionsList = [...new Set([...groupNames, currentGroup].filter(Boolean))];
+  const groupSelect = el("select", {
     class: "input",
     id: id("group"),
-    value: model.group,
-    placeholder: "例如：日常签到",
-    autocomplete: "off",
+    onchange: (event) => {
+      model.group = event.target.value === "__new" ? "" : event.target.value;
+      groupNewInput.hidden = event.target.value !== "__new";
+      if (event.target.value === "__new") groupNewInput.focus();
+    },
+  },
+    // 「未分组」始终可选（值留空）
+    el("option", { value: "", selected: !currentGroup }, "未分组"),
+    ...groupOptionsList.map((name) =>
+      el("option", { value: name, selected: name === currentGroup }, name),
+    ),
+    el("option", { value: "__new" }, "＋ 新建分组…"),
+  );
+  const groupNewInput = el("input", {
+    class: "input",
+    id: id("group-new"),
+    value: "",
+    placeholder: "新分组名，例如：日常签到",
     maxlength: "20",
-    list: groupListId,
+    autocomplete: "off",
+    hidden: true,
     oninput: (event) => {
       model.group = event.target.value;
     },
   });
-  const groupOptions = el(
-    "datalist",
-    { id: groupListId },
-    ...((typeof window.__taskGroups === "function" ? window.__taskGroups() : []) || []).map((name) =>
-      el("option", { value: name }),
-    ),
-  );
+  const groupControl = el("div", { class: "stack-xs" }, groupSelect, groupNewInput);
 
   const targetInput = el("input", {
     class: "input",
@@ -786,11 +799,10 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
       field({ id: id("name"), label: "任务名称", control: nameInput }),
       field({
         id: id("group"),
-        label: "分组（可选）",
-        control: groupInput,
-        hint: "同一个分组的任务会在列表里折叠在一起，例如「日常签到」「群活动」。",
+        label: "分组",
+        control: groupControl,
+        hint: "选「未分组」表示不归类；列表左侧的分组栏可以按分组筛选和重命名。",
       }),
-      groupOptions,
       el(
         "div",
         { class: "field" },
