@@ -2791,6 +2791,14 @@ input[type="radio"] {
   color: var(--text-2, rgba(255, 255, 255, 0.75));
 }
 
+.about-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 2px;
+  font-size: 12px;
+}
+
 /* 目标类型标签（机器人 / 群组 / 频道 / 用户） */
 .tag-peer {
   text-transform: none;

@@ -2565,6 +2565,8 @@ function settingsTabs(groups) {
   };
 }
 
+const REPO_URL = "https://github.com/mihucho/cf-tg-checkin";
+
 function renderSettings() {
   const settings = (state.data && state.data.settings) || {};
   const account = (state.data && state.data.account) || {};
@@ -2849,11 +2851,16 @@ function renderSettings() {
         ),
         usagePanel(),
         el(
-          "p",
-          { class: "hint" },
-          "管理界面是纯静态资源，版本号来自构建时注入的 git commit，可用 ",
-          el("code", {}, "/api/version"),
-          " 查看。",
+          "div",
+          { class: "about-links" },
+          ...[
+            ["使用说明", `${REPO_URL}#readme`],
+            ["部署与排查", `${REPO_URL}/blob/main/docs/DEPLOY.md`],
+            ["安全说明", `${REPO_URL}/blob/main/SECURITY.md`],
+            ["反馈问题", `${REPO_URL}/issues`],
+          ].map(([label, href]) =>
+            el("a", { class: "link", href, target: "_blank", rel: "noopener noreferrer" }, label),
+          ),
         ),
       ),
     ],
