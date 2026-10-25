@@ -1440,6 +1440,7 @@ async function openTemplate(template) {
     };
     openTaskEditor({
       task: draft,
+      defaultGroup: window.__activeTaskGroup?.() || "",
       defaultTarget: settings.defaultTarget || "",
       onSaved: async () => {
         await refreshState({ silent: true });
@@ -3576,7 +3577,10 @@ function renderParseResult() {
           onclick: async (event) => {
             await withLoading(event.currentTarget, async () => {
               try {
-                const created = await api("/api/tasks", { method: "POST", body: task });
+                // 指令里没写 #group 时，落到当前选中的分组
+                const group = window.__activeTaskGroup?.() || "";
+                const body = group && !String(task.group ?? "").trim() ? { ...task, group } : task;
+                const created = await api("/api/tasks", { method: "POST", body });
                 toast(`已创建任务 #${created.task.id}`, { kind: "ok" });
                 await refreshState({ silent: true });
               } catch (error) {
