@@ -1025,6 +1025,18 @@ input[type="radio"] {
   white-space: nowrap;
 }
 
+/*
+ * 和徽章同一行的文本：flex 项自己省略。
+ * 注意不能把整个 .cell-main 设成 block（那会让 gap 失效，徽章贴着文字）。
+ */
+.cell-text {
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .cell-sub {
   margin-top: 3px;
   overflow: hidden;

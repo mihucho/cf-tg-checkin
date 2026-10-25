@@ -899,7 +899,7 @@ function taskRow(task) {
         "div",
         { class: "cell-main" },
         el("span", { class: `dot ${task.enabled ? "ok" : "idle"}`, title: enabledText }),
-        el("span", { class: "task-name" }, task.name || `任务 #${task.id}`),
+        el("span", { class: "task-name cell-text" }, task.name || `任务 #${task.id}`),
         task.source === "trigger" ? el("span", { class: "tag" }, "指令创建") : null,
       ),
       el("div", { class: "cell-sub" }, subParts.join(" · ")),
@@ -909,9 +909,11 @@ function taskRow(task) {
       { dataset: { label: "目标" } },
       el(
         "div",
-        { class: "cell-main cell-trunc", title: targetLabel(target) },
-        peerKindLabel(target.peerKind) ? el("span", { class: `tag tag-peer is-${target.peerKind}` }, peerKindLabel(target.peerKind)) : null,
-        targetLabel(target),
+        { class: "cell-main", title: targetLabel(target) },
+        peerKindLabel(target.peerKind)
+          ? el("span", { class: `tag tag-peer is-${target.peerKind}` }, peerKindLabel(target.peerKind))
+          : null,
+        el("span", { class: "cell-text" }, targetLabel(target)),
         task.targets && task.targets.length > 1 ? el("span", { class: "tag" }, `+${task.targets.length - 1}`) : null,
       ),
       el(
@@ -1458,6 +1460,13 @@ function openEditor(task) {
 }
 
 async function runTask(task, button) {
+  const confirmed = await confirmDialog({
+    title: "立即执行这个任务？",
+    message: `会用「${task.name}」当前配置真实执行一次：发消息、点按钮都会真的发到 Telegram。手动执行不打乱原来的定时。`,
+    confirmLabel: "立即执行",
+  });
+  if (!confirmed) return;
+
   await withLoading(button, async () => {
     try {
       const res = await api(`/api/tasks/${encodeURIComponent(task.id)}/run`, { method: "POST" });
@@ -1473,6 +1482,15 @@ async function runTask(task, button) {
 }
 
 async function toggleTask(task, button) {
+  if (task.enabled) {
+    const confirmed = await confirmDialog({
+      title: "停用这个任务？",
+      message: `停用后「${task.name}」不再按计划执行，配置和历史日志都保留，随时可以再启用。`,
+      confirmLabel: "停用任务",
+    });
+    if (!confirmed) return;
+  }
+
   await withLoading(button, async () => {
     try {
       await api(`/api/tasks/${encodeURIComponent(task.id)}`, {
@@ -1490,7 +1508,7 @@ async function toggleTask(task, button) {
 async function deleteTask(task) {
   const ok = await confirmDialog({
     title: "删除任务",
-    message: `确定删除「${task.name}」？删除后无法恢复，历史日志会保留。`,
+    message: `确定删除「${task.name}」？删除后无法恢复，这个任务的执行日志也会一并删掉。`,
     confirmLabel: "删除任务",
     danger: true,
   });
@@ -1505,6 +1523,16 @@ async function deleteTask(task) {
 }
 
 async function runAll(button) {
+  const enabledCount = ((state.data && state.data.tasks) || []).filter((task) => task.enabled).length;
+  const confirmed = await confirmDialog({
+    title: "运行全部任务？",
+    message: enabledCount
+      ? `会依次真实执行 ${enabledCount} 个已启用的任务（发消息、点按钮都会真的发生），可能要几分钟，期间别关页面。`
+      : "当前没有已启用的任务。",
+    confirmLabel: "开始执行",
+  });
+  if (!confirmed) return;
+
   await withLoading(button, async () => {
     try {
       let done = 0;
