@@ -55,6 +55,13 @@ export type TaskSource = "ui" | "trigger";
 export interface Task {
   id: number;
   name: string;
+  /**
+   * 任务名是不是系统自动生成的。
+   * true  → 目标补全出显示名时，名字可以跟着改（「123456789 签到」→「示例机器人 签到」）
+   * false → 用户自己起的名字，任何情况下都不动它
+   * undefined（老数据）→ 只有名字仍等于系统默认名时才允许改
+   */
+  nameAuto?: boolean;
   enabled: boolean;
   /** 主目标（兼容老字段） */
   target: Target;

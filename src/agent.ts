@@ -63,7 +63,7 @@ import {
 import { messageTargetHint, usernameFromLink, type MessageLike, type MessageTargetHint } from "./telegram/targets";
 import type { Env } from "./env";
 import { bucketDaily } from "./events";
-import { applyTargetPatch, normalizeTaskInput, taskFingerprint, taskToExport } from "./task";
+import { applyTargetPatch, normalizeTaskInput, shouldAutoRename, taskFingerprint, taskToExport } from "./task";
 import { redactSettings, shouldAutoFillAdminId } from "./settings";
 
 interface Credentials {
@@ -1653,7 +1653,11 @@ export class TgAgent implements DurableObject {
               : "无（使用记住的目标 / 默认目标）"
           }`,
         );
-        const enriched = await this.enrichTarget(client, incoming, trace);
+        const enriched = await this.enrichTarget(
+          client,
+          { ...incoming, nameAuto: result.autoName === true },
+          trace,
+        );
         // 自动生成的名字要用「补全后的目标」重新算，否则会留下旧标签（@username）
         if (result.autoName) {
           const regenerated = defaultName(enriched.target, "", enriched.steps ?? []);
@@ -1661,6 +1665,9 @@ export class TgAgent implements DurableObject {
             trace.push(`任务名按最终目标生成：${regenerated}（原：${enriched.name}）`);
             enriched.name = regenerated;
           }
+          enriched.nameAuto = true;
+        } else {
+          enriched.nameAuto = false;
         }
         trace.push(`目标最终：${JSON.stringify(enriched.target)}`);
         trace.push(`调度：${JSON.stringify(enriched.schedule)}`);
@@ -1877,8 +1884,14 @@ export class TgAgent implements DurableObject {
           `username=${target.username ? `@${target.username}` : "（无）"} access_hash=${target.accessHash ? "有" : "无"}`,
       );
       const merged: Target = { ...target, id: target.id || input.target.id };
-      const name = renameForTarget(input.name, input.target, merged);
-      if (name !== input.name) trace?.push(`任务名同步：${input.name} → ${name}`);
+      const autoRename = shouldAutoRename({
+        name: input.name,
+        nameAuto: input.nameAuto,
+        target: input.target,
+        steps: input.steps ?? [],
+      });
+      const name = autoRename ? renameForTarget(input.name, input.target, merged) : input.name;
+      if (name !== input.name) trace?.push(`任务名同步：${input.name} → ${name}（原名由系统生成）`);
       return { ...input, name, target: merged };
     } catch (error) {
       // 不再静默丢弃：把原因写进日志
@@ -1993,6 +2006,17 @@ export class TgAgent implements DurableObject {
    * - 解析本身有兜底：@username → access_hash → getDialogs 预热后重试（见 executor.resolveEntity）
    * - 解析成功后顺手把 username / accessHash 回填进任务，下次就不必再靠 getDialogs
    */
+  /**
+   * 执行时解析目标。
+   *
+   * **只补"解析必需"的信息，不改任务名**：改名只发生在建任务那一刻（见 enrichTarget），
+   * 否则用户手动起的名字会被"执行时的补全"覆盖掉（v0.18.0 之前的坑）。
+   *
+   * 什么情况下才写回：
+   *   - 目标既没有 username 也没有 access_hash → 下次解析还得靠 getDialogs 预热，补一次省事
+   *   - 缺 peerKind（界面上要标类型）→ 补上
+   * 其余情况（已经有 username / access_hash）不再动数据库，执行只是读。
+   */
   private async ensureTarget(
     client: TelegramClient,
     task: Task,
@@ -2001,58 +2025,53 @@ export class TgAgent implements DurableObject {
     const targets = task.targets && task.targets.length > 1 ? task.targets : null;
     const current: Target = (targets ? targets[index] : undefined) ?? task.target;
     const entity = await resolveEntity(client, current);
-
-    // 目标里缺 username / accessHash / 显示名时补一次，之后每次解析都能直接命中
     const resolvedKind = classifyPeer(entity);
-    if (!current.username || !current.accessHash || !current.title || !current.peerKind) {
-      const peerId = await client.getPeerId(entity as never).catch(() => null);
-      const anyEntity = entity as unknown as {
-        username?: string;
-        accessHash?: unknown;
-        title?: string;
-        firstName?: string;
-        lastName?: string;
-      };
-      const displayName =
-        anyEntity.title ||
-        [anyEntity.firstName, anyEntity.lastName].filter(Boolean).join(" ").trim() ||
-        undefined;
-      const patch: Target = {
-        ...current,
-        peerKind: resolvedKind,
-        id: peerId ? String(peerId) : current.id,
-        username: current.username ?? anyEntity.username,
-        title: current.title ?? displayName,
-        ...(current.accessHash
-          ? { accessHash: current.accessHash }
-          : anyEntity.accessHash !== undefined && anyEntity.accessHash !== null
-            ? { accessHash: String(anyEntity.accessHash) }
-            : {}),
-      };
 
-      if (JSON.stringify(patch) !== JSON.stringify(current)) {
-        // 只有主目标能改任务名；附加目标只回写自己那一格（否则会顶掉主目标）
-        const renamed = applyTargetPatch(task, index, patch, {
-          renameTo: renameForTarget(task.name, current, patch) || null,
-        });
-        const renameTo = renamed.name ?? null;
-
-        const updated = this.store.updateTask(task.id, renamed, Date.now());
-        this.store.addLog({
-          taskId: task.id,
-          taskName: renameTo ?? task.name,
-          at: Date.now(),
-          ok: true,
-          level: "info",
-          message: `目标已自动补全：${patch.title || (patch.username ? `@${patch.username}` : patch.id)}`,
-          detail: renameTo ? `任务名同步更新为「${renameTo}」` : null,
-          source: "system",
-        });
-        return { entity, task: updated ?? task, target: patch };
-      }
+    // 已经有 username / access_hash、类型也标过了 → 纯粹读，不写库
+    if ((current.username || current.accessHash) && current.peerKind) {
+      return { entity, task, target: current };
     }
 
-    return { entity, task, target: current };
+    const peerId = await client.getPeerId(entity as never).catch(() => null);
+    const anyEntity = entity as unknown as {
+      username?: string;
+      accessHash?: unknown;
+      title?: string;
+      firstName?: string;
+      lastName?: string;
+    };
+    const displayName =
+      anyEntity.title || [anyEntity.firstName, anyEntity.lastName].filter(Boolean).join(" ").trim() || undefined;
+    const patch: Target = {
+      ...current,
+      peerKind: resolvedKind,
+      id: peerId ? String(peerId) : current.id,
+      username: current.username ?? anyEntity.username,
+      title: current.title ?? displayName,
+      ...(current.accessHash
+        ? { accessHash: current.accessHash }
+        : anyEntity.accessHash !== undefined && anyEntity.accessHash !== null
+          ? { accessHash: String(anyEntity.accessHash) }
+          : {}),
+    };
+
+    if (JSON.stringify(patch) === JSON.stringify(current)) {
+      return { entity, task, target: current };
+    }
+
+    // 只写目标信息，绝不改名（要不要改名只由建任务时的 nameAuto 决定）
+    const updated = this.store.updateTask(task.id, applyTargetPatch(task, index, patch), Date.now());
+    this.store.addLog({
+      taskId: task.id,
+      taskName: task.name,
+      at: Date.now(),
+      ok: true,
+      level: "info",
+      message: `补齐目标信息：${patch.title || (patch.username ? `@${patch.username}` : patch.id)}`,
+      detail: "只是记下用户名 / access_hash / 类型，方便下次直接解析；任务名不会被改动。",
+      source: "system",
+    });
+    return { entity, task: updated ?? task, target: patch };
   }
 
   private async runSingleTask(

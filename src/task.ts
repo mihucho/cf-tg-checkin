@@ -5,6 +5,7 @@
  * 避免超长字符串、非法类型、越界数字进数据库或进调度。
  */
 import type { Schedule, Step, Target, Task, TaskInput } from "./types";
+import { defaultName } from "./schedule/dsl";
 
 const MAX_NAME = 80;
 const MAX_HANDLE = 80;
@@ -99,6 +100,7 @@ export function normalizeTaskInput(input: TaskInput | Task): TaskInput {
 
   return {
     name: clampText(input.name, MAX_NAME).trim() || "未命名任务",
+    nameAuto: input.nameAuto === true,
     enabled: input.enabled !== false,
     target: targets[0] ?? normalizeTarget(input),
     targets: targets.length > 1 ? targets : undefined,
@@ -150,10 +152,24 @@ export function applyTargetPatch(
   return { targets: nextTargets };
 }
 
+/**
+ * 目标补全出显示名后，要不要把任务名一起改？
+ *
+ * - `nameAuto === true`：名字本来就是系统按目标生成的 → 可以改
+ * - `nameAuto === false`：用户自己起的 → **永远不动**（哪怕名字恰好以旧目标开头）
+ * - 老数据没有标记：只有名字仍等于「当前目标 + 动作」算出来的默认名时才改，
+ *   这样手动改过名字的老任务也不会被覆盖
+ */
+export function shouldAutoRename(task: Pick<Task, "name" | "nameAuto" | "target" | "steps">): boolean {
+  if (typeof task.nameAuto === "boolean") return task.nameAuto;
+  return task.name === defaultName(task.target, "", task.steps ?? []);
+}
+
 /** 导出的任务：去掉运行态字段，只保留可重建的配置 */
 export function taskToExport(task: Task): TaskInput {
   return {
     name: task.name,
+    nameAuto: task.nameAuto,
     enabled: task.enabled,
     target: task.target,
     targets: task.targets,

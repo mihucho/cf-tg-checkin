@@ -11,6 +11,7 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
+      name_auto INTEGER,
       enabled INTEGER NOT NULL DEFAULT 1,
       target TEXT NOT NULL,
       targets TEXT,
@@ -72,6 +73,7 @@ type Row = Record<string, SqlStorageValue>;
 interface TaskRow extends Row {
   id: number;
   name: string;
+  name_auto: number | null;
   enabled: number;
   target: string;
   targets: string | null;
@@ -138,6 +140,7 @@ export function rowToTask(row: TaskRow): Task {
   return {
     id: row.id,
     name: row.name,
+    nameAuto: row.name_auto === null || row.name_auto === undefined ? undefined : row.name_auto === 1,
     enabled: !!row.enabled,
     target: normalizeTarget(parseJson<Target>(row.target, { kind: "user", id: "" })),
     targets: (() => {
@@ -195,6 +198,11 @@ export class Store {
     }
     try {
       this.sql.exec("ALTER TABLE tasks ADD COLUMN targets TEXT");
+    } catch {
+      /* 列已存在 */
+    }
+    try {
+      this.sql.exec("ALTER TABLE tasks ADD COLUMN name_auto INTEGER");
     } catch {
       /* 列已存在 */
     }
@@ -303,11 +311,12 @@ export class Store {
 
   createTask(input: TaskInput, now: number, nextRunAt: number | null): Task {
     this.sql.exec(
-      `INSERT INTO tasks (name, enabled, target, targets, thread_id, schedule, steps, success_keywords,
+      `INSERT INTO tasks (name, name_auto, enabled, target, targets, thread_id, schedule, steps, success_keywords,
          timeout_seconds, step_delay_seconds, delete_after_seconds, cleanup_previous, next_run_at,
          last_run_at, last_result, last_message, source, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       input.name,
+      input.nameAuto === undefined ? null : input.nameAuto ? 1 : 0,
       input.enabled ? 1 : 0,
       JSON.stringify(input.target),
       input.targets && input.targets.length > 1 ? JSON.stringify(input.targets) : null,
@@ -343,12 +352,13 @@ export class Store {
     } as Task;
 
     this.sql.exec(
-      `UPDATE tasks SET name = ?, enabled = ?, target = ?, targets = ?, thread_id = ?, schedule = ?, steps = ?,
+      `UPDATE tasks SET name = ?, name_auto = ?, enabled = ?, target = ?, targets = ?, thread_id = ?, schedule = ?, steps = ?,
          success_keywords = ?, timeout_seconds = ?, step_delay_seconds = ?, delete_after_seconds = ?,
          cleanup_previous = ?, next_run_at = ?, last_run_at = ?, last_result = ?, last_message = ?,
          last_detail = ?, updated_at = ?
        WHERE id = ?`,
       merged.name,
+      merged.nameAuto === undefined ? null : merged.nameAuto ? 1 : 0,
       merged.enabled ? 1 : 0,
       JSON.stringify(merged.target),
       merged.targets && merged.targets.length > 1 ? JSON.stringify(merged.targets) : null,

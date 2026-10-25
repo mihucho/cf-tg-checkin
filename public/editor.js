@@ -122,6 +122,8 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
     stepDelaySeconds: task?.stepDelaySeconds ?? 3,
     deleteAfterSeconds: task?.deleteAfterSeconds ?? 0,
     cleanupPrevious: task ? Boolean(task.cleanupPrevious) : true,
+    /** 用户是否手动改过任务名（决定以后目标补全时能不能自动改名） */
+    nameTouched: task ? task.nameAuto === false : false,
     // 多目标：第一个是主目标，其余放在这里（`|` 分隔）
     extraTargets: (task?.targets ?? [])
       .slice(1)
@@ -141,6 +143,8 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
     "data-autofocus": "",
     oninput: (event) => {
       model.name = event.target.value;
+      // 用户动过名字输入框 → 这个任务是「人手起的名字」，以后目标补全也不许改
+      model.nameTouched = true;
     },
   });
 
@@ -1053,6 +1057,9 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
 
         const payload = {
           name,
+          // 名字是用户起的就锁定；空着自动生成的才允许以后跟着目标改名。
+          // 编辑老任务时保持原样（老数据没有标记就继续留空，交由服务端按默认名判断）
+          nameAuto: model.nameTouched ? false : isEdit ? task.nameAuto : true,
           enabled: Boolean(model.enabled),
           target,
           targets: extraTargets.length ? [target, ...extraTargets] : undefined,

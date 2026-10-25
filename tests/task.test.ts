@@ -1,7 +1,7 @@
 /** 任务输入规范化 + 去重指纹 + 设置脱敏（正反例） */
 import assert from "node:assert/strict";
 import { test } from "./harness.ts";
-import { applyTargetPatch, normalizeTaskInput, taskFingerprint } from "../src/task.ts";
+import { applyTargetPatch, normalizeTaskInput, shouldAutoRename, taskFingerprint, taskToExport } from "../src/task.ts";
 import { taskToCommand } from "../src/schedule/command.ts";
 import { redactSettings, shouldAutoFillAdminId } from "../src/settings.ts";
 import { DEFAULT_SETTINGS, type Task, type TaskInput } from "../src/types.ts";
@@ -260,4 +260,59 @@ test("normalizeTaskInput：多目标各自保留类型", () => {
     task.targets?.map((item) => item.peerKind),
     ["bot", "group"],
   );
+});
+
+/* ---------- 任务名是否允许跟着目标自动改 ---------- */
+
+test("shouldAutoRename：改名只发生在建任务时（执行阶段不再调用）", () => {
+  // 执行路径已不再改名：ensureTarget 只补 username / accessHash / peerKind，
+  // 这里保留纯函数语义，供建任务（enrichTarget）判断
+  const legacy = {
+    name: "示例机器人 签到",
+    target: { kind: "user" as const, id: "123456789", title: "示例机器人" },
+    steps: [{ type: "text" as const, text: "签到" }],
+  };
+  assert.equal(shouldAutoRename(legacy), true, "名字正好等于系统默认名 → 可改");
+  assert.equal(shouldAutoRename({ ...legacy, nameAuto: false }), false, "标记为手动 → 不改");
+});
+
+test("shouldAutoRename：用户自己起的名字永不改", () => {
+  const task = {
+    name: "123456789 签到",
+    nameAuto: false,
+    target: { kind: "user" as const, id: "123456789", username: undefined },
+    steps: [{ type: "text" as const, text: "签到" }],
+  };
+  assert.equal(shouldAutoRename(task), false, "手动命名的任务即使名字以旧目标开头也不改");
+});
+
+test("shouldAutoRename：系统生成的名字可以跟着目标变", () => {
+  const task = {
+    name: "123456789 签到",
+    nameAuto: true,
+    target: { kind: "user" as const, id: "123456789" },
+    steps: [{ type: "text" as const, text: "签到" }],
+  };
+  assert.equal(shouldAutoRename(task), true);
+});
+
+test("shouldAutoRename：老数据（无标记）只有名字仍是默认名时才改", () => {
+  const target = { kind: "user" as const, id: "123456789" };
+  const steps = [{ type: "text" as const, text: "签到" }];
+  // 名字恰好是系统默认名 → 允许改（保持老行为）
+  assert.equal(shouldAutoRename({ name: "123456789 签到", target, steps }), true);
+  // 用户改过名 → 不动
+  assert.equal(shouldAutoRename({ name: "我的签到", target, steps }), false);
+});
+
+test("normalizeTaskInput：保留 nameAuto 标记", () => {
+  assert.equal(normalizeTaskInput(input({ nameAuto: true })).nameAuto, true);
+  assert.equal(normalizeTaskInput(input({ nameAuto: false })).nameAuto, false);
+  // 没传就落成 false（新任务默认由用户/UI 决定，不再默认放行改名）
+  assert.equal(normalizeTaskInput(input()).nameAuto, false);
+});
+
+test("taskToExport：导出带上 nameAuto，便于导入后保持原来的命名意图", () => {
+  const task = { ...normalizeTaskInput(input({ nameAuto: true })), id: 7 } as never;
+  assert.equal(taskToExport(task).nameAuto, true);
 });
