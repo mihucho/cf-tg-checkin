@@ -404,13 +404,13 @@ test("redactState：手机号 / 自己的 id / api_id / access_hash / Webhook �
   }
   assert.equal(redacted.account.phone, "+861****0000");
   assert.equal(redacted.account.pendingLogin?.phone, "+861****0000");
-  assert.equal(redacted.account.me?.id, "765…321");
+  assert.equal(redacted.account.me?.id, "765****321");
   assert.equal(redacted.settings.notifyWebhookConfigured, true);
-  assert.match(redacted.settings.notifyWebhook, /access_token=7629…cc9f/);
+  assert.match(redacted.settings.notifyWebhook, /access_token=7629\*\*\*\*cc9f/);
   assert.equal(redacted.tasks[0].target.accessHash, undefined);
   assert.equal(redacted.tasks[0].targets?.[0].accessHash, undefined);
   // 管理员 ID 也脱敏（见下一个用例），指令来源保持原样
-  assert.equal(redacted.settings.adminUserId, "765…321");
+  assert.equal(redacted.settings.adminUserId, "765****321");
   assert.equal(redacted.settings.controlChat, "self");
 });
 
@@ -424,7 +424,7 @@ test("redactState：管理员 ID 也脱敏，只给已配置标记", () => {
     now: 0,
   };
   const redacted = redactState(state as never);
-  assert.equal(redacted.settings.adminUserId, "765…321");
+  assert.equal(redacted.settings.adminUserId, "765****321");
   assert.equal(redacted.settings.adminUserIdConfigured, true);
   assert.equal(JSON.stringify(redacted).includes("7654321"), false, "原始 id 不该出现在响应里");
   // 指令来源是要编辑的字段，保持原样

@@ -17,15 +17,15 @@ export function shouldAutoFillAdminId(options: {
   return true;
 }
 
-/** 只显示首尾的脱敏：`7629…4acd` */
+/** 脱敏统一用固定 4 个星号（不泄露原始长度）：`7629****4acd` */
 export function maskValue(value: string | number | null | undefined, keep = 4): string {
   const text = String(value ?? "").trim();
   if (!text) return "";
-  if (text.length <= keep * 2) return `${text.slice(0, 1)}***`;
-  return `${text.slice(0, keep)}…${text.slice(-keep)}`;
+  if (text.length <= keep * 2) return `${text.slice(0, 1)}****`;
+  return `${text.slice(0, keep)}****${text.slice(-keep)}`;
 }
 
-/** 手机号脱敏：+8613****0000（保留国家码前缀和末 4 位） */
+/** 手机号脱敏：+861****0000（保留国家码前缀和末 4 位） */
 export function maskPhone(phone: string | null | undefined): string {
   const text = String(phone ?? "").trim();
   if (!text) return "";

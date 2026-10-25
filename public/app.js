@@ -2813,11 +2813,6 @@ function metaRow(label, value) {
   return el("div", { class: "meta-row" }, el("span", { class: "meta-label" }, label), el("span", { class: "meta-value" }, value));
 }
 
-function maskPhone(phone) {
-  const text = String(phone);
-  if (text.length <= 7) return text;
-  return `${text.slice(0, 4)}${"*".repeat(Math.max(2, text.length - 7))}${text.slice(-3)}`;
-}
 
 async function logoutAccount() {
   const ok = await confirmDialog({

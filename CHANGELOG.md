@@ -37,6 +37,12 @@ push 后 `.github/workflows/release.yml` 会自动：跑检查 → 写 `package.
 
 ### 修复
 
+- **脱敏符号统一成 `****`**：之前手机号用 `*`、id / Webhook 用 `…`，同一个页面里两种写法。
+  现在一律固定 4 个星号（`765****321`、`+861****0000`、`access_token=7629****cc9f`），
+  长度固定也就不会从星号个数反推原值有多长
+
+### 修复
+
 - **`/api/settings` 的响应也脱敏**：之前保存成功后会把原始 Webhook 地址回显一遍
   （`/api/state` 已脱敏，两个接口不一致）。现在统一走 `redactSettingsForClient()`，
   地址/管理员 ID 只给脱敏值 + `*Configured` 标记
