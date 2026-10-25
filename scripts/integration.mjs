@@ -293,7 +293,7 @@ async function main() {
     check(
       "只填 token 就按渠道生成固定地址（回显脱敏，只给已配置标记）",
       tokenSaved.settings?.notifyWebhookConfigured === true &&
-        /^https:\/\/oapi\.dingtalk\.com\/robot\/send\?access_token=inte…/.test(
+        /^https:\/\/oapi\.dingtalk\.com\/robot\/send\?access_token=inte\*\*\*\*/.test(
           String(tokenSaved.settings?.notifyWebhook ?? ""),
         ),
       tokenSaved.settings?.notifyWebhook,
