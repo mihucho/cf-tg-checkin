@@ -45,7 +45,7 @@ push 后 `.github/workflows/release.yml` 会自动：跑检查 → 写 `package.
 - 发布流水线支持 `retro: true`：可以回头修改**已发布**版本的 Release 说明
   （脱敏、纠错），不动代码、不重新打 tag
 - 发布流水线支持 **`retro: revoke`**：撤销某次发版（删 Release 与 tag，代码改动保留）
-- `AGENTS.md` 写明：**不是每次改动都要发版**，平时只写 `[Unreleased]`，攒一批或需要可安装版本时再发
+- `AGENTS.md` 写明：**只有用户明确要求时才发版**，平时改动只 commit + push，写进 `[Unreleased]`
 - `AGENTS.md` 新增「隐私」一节：示例一律用占位符；tag 注释同样是公开的，
   已发布的可以 `retro: true` 改 Release 说明，tag 注释需要重建 tag（提交对象不变）
 
