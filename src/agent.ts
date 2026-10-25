@@ -251,11 +251,19 @@ export class TgAgent implements DurableObject {
         return json({ task });
       }
       if (path === "/tasks/export" && method === "GET") {
-        const tasks = this.store.listTasks().map(taskToExport);
+        // ?group=名称 只导出这个分组；?group=__ungrouped 只导出未分组的；不传 = 全部
+        const groupParam = (url.searchParams.get("group") ?? "").trim();
+        const all = this.store.listTasks().map(taskToExport);
+        const tasks = !groupParam
+          ? all
+          : groupParam === "__ungrouped"
+            ? all.filter((task) => !(task.group ?? "").trim())
+            : all.filter((task) => (task.group ?? "").trim() === groupParam);
         return json({
           format: "cf-tg-checkin.tasks",
           version: 1,
           exportedAt: Date.now(),
+          ...(groupParam ? { group: groupParam === "__ungrouped" ? "" : groupParam } : {}),
           tasks,
         });
       }

@@ -766,6 +766,13 @@ function renderTasks() {
   }
   const duplicates = [...buckets.values()].filter((group) => group.length > 1);
 
+  // 当前选中的分组（导出等操作跟着它走）
+  const groups = taskGroupList(tasks);
+  const storedGroup = activeTaskGroup();
+  const activeKey = groups.items.some((item) => item.key === storedGroup) ? storedGroup : "";
+  const activeLabel = groups.items.find((item) => item.key === activeKey)?.label || "全部";
+  const scopedCount = tasksInGroup(tasks, activeKey).length;
+
   const header = pageHead({
     title: "任务",
     description: tasks.length
@@ -775,7 +782,11 @@ function renderTasks() {
       btn("导入", { variant: "subtle", iconName: "download", onClick: () => openImportDialog() }),
       ...(tasks.length
         ? [
-            btn("导出", { variant: "subtle", iconName: "upload", onClick: () => withLoading(null, () => exportTasks()) }),
+            btn(activeKey ? `导出「${activeLabel}」` : "导出", {
+              variant: "subtle",
+              iconName: "upload",
+              onClick: () => withLoading(null, () => exportTasks(activeKey, activeLabel)),
+            }),
             btn("执行全部", { iconName: "bolt", onClick: (event) => runAll(event.currentTarget) }),
           ]
         : []),
@@ -824,10 +835,6 @@ function renderTasks() {
         )
       : null,
     (() => {
-      const groups = taskGroupList(tasks);
-      // 选中的分组没了（任务被改/删）→ 回到「全部」
-      const stored = activeTaskGroup();
-      const activeKey = groups.items.some((item) => item.key === stored) ? stored : "";
       const visible = tasksInGroup(tasks, activeKey);
       const rail = taskGroupRail(groups, activeKey);
       const table = el("div", { class: "card table-card" }, el("div", { class: "table-wrap" },
@@ -1477,17 +1484,31 @@ function templateChips({ onSaved } = {}) {
 }
 
 /** 导出全部任务为 JSON 文件 */
-async function exportTasks() {
+/**
+ * 导出任务：跟随当前选中的分组（「全部」= 导出所有）。
+ * 文件名带上分组名，方便区分；分组里没有任务时直接提示，不产生空文件。
+ */
+async function exportTasks(group = "", label = "全部") {
   try {
-    const data = await api("/api/tasks/export");
+    const query = group ? `?group=${encodeURIComponent(group)}` : "";
+    const data = await api(`/api/tasks/export${query}`);
+    const count = Array.isArray(data.tasks) ? data.tasks.length : 0;
+    if (!count) {
+      toast(`「${label}」里没有任务，没什么可导出的`, { kind: "info" });
+      return;
+    }
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
-    const link = el("a", { href: url, download: `cf-tg-checkin-tasks-${new Date().toISOString().slice(0, 10)}.json` });
+    const suffix = group ? `-${label.replace(/[\\/:*?"<>|]/g, "_")}` : "";
+    const link = el("a", {
+      href: url,
+      download: `cf-tg-checkin-tasks${suffix}-${new Date().toISOString().slice(0, 10)}.json`,
+    });
     document.body.append(link);
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
-    toast(`已导出 ${data.tasks.length} 个任务`, { kind: "ok" });
+    toast(group ? `已导出「${label}」的 ${count} 个任务` : `已导出 ${count} 个任务`, { kind: "ok" });
   } catch (error) {
     toast(error.message || "导出失败", { kind: "error" });
   }
