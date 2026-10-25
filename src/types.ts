@@ -164,6 +164,8 @@ export interface Settings {
   notifyWebhookSecret: string;
   /** 只读标记：接口返回时告知前端"加签密钥已配置" */
   notifyWebhookSecretConfigured?: boolean;
+  /** 只读标记：接口返回时告知前端「Webhook 地址已配置」（地址本身已脱敏） */
+  notifyWebhookConfigured?: boolean;
   /** 自定义模板（最多 20 个） */
   templates: TaskTemplate[];
   /** Turnstile 站点 key（公开，会下发前端） */

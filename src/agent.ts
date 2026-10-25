@@ -65,7 +65,7 @@ import type { Env } from "./env";
 import { bucketDaily } from "./events";
 import { applyTargetPatch, normalizeTaskInput, shouldAutoRename, taskFingerprint, taskToExport } from "./task";
 import { BUILD } from "./version";
-import { redactSettings, shouldAutoFillAdminId } from "./settings";
+import { redactSettings, redactState, shouldAutoFillAdminId } from "./settings";
 
 interface Credentials {
   apiId: number | null;
@@ -213,16 +213,22 @@ export class TgAgent implements DurableObject {
     try {
       const colo = request.headers.get("x-cf-colo");
       if (colo && this.store.getKv("runtime:colo") !== colo) this.store.setKv("runtime:colo", colo);
-      if (path === "/state" && method === "GET") return json(this.buildState());
+      if (path === "/state" && method === "GET") return json(redactState(this.buildState()));
       if (path === "/settings" && method === "POST") {
         type SettingsBody = Partial<Settings> & {
           clearTurnstileSecret?: boolean;
           clearNotifyWebhookSecret?: boolean;
+          clearNotifyWebhook?: boolean;
           notifyWebhookToken?: string;
         };
         const body = (await request.json()) as SettingsBody;
-        const { clearTurnstileSecret, clearNotifyWebhookSecret, notifyWebhookToken, ...rest } = body;
+        const { clearTurnstileSecret, clearNotifyWebhookSecret, clearNotifyWebhook, notifyWebhookToken, ...rest } = body;
         const patch: Partial<Settings> = { ...rest };
+        // 地址回传时是脱敏的：留空表示"不修改"，要清空请勾「清除 Webhook」
+        if (patch.notifyWebhook !== undefined && !String(patch.notifyWebhook).trim() && !clearNotifyWebhook) {
+          delete patch.notifyWebhook;
+        }
+        if (clearNotifyWebhook) patch.notifyWebhook = "";
         // 固定渠道（钉钉/企微/飞书）只要 token，地址由模板生成
         if (notifyWebhookToken !== undefined) {
           const kind = (patch.notifyWebhookKind ?? this.store.getSettings().notifyWebhookKind ?? "generic") as WebhookKind;

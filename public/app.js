@@ -2800,8 +2800,8 @@ function profileCard(account) {
                 ? `空闲（按需连接，上次成功连接 ${formatRelative(account.lastConnectedAt)}）`
                 : "空闲（需要时自动连接，比如下次执行任务）",
           ),
-          metaRow("用户 id", String(me.id ?? "—")),
-          metaRow("手机号", account.phone ? maskPhone(account.phone) : "—"),
+          metaRow("用户 id", String(me.id ?? "—")), // 服务端已脱敏
+          metaRow("手机号", account.phone || "—"), // 服务端已脱敏
           metaRow("应用 ID", account.apiId ? String(account.apiId) : "—"),
         ),
       ),
@@ -3113,8 +3113,19 @@ function renderSettings() {
     field({
       id: "settings-notifyWebhook",
       label: "Webhook 地址",
-      control: textControl("notifyWebhook", settings.notifyWebhook ?? "", "https://你的服务/hook"),
-      hint: "自定义渠道：失败时向该地址发一份 JSON（含任务编号、任务名、结果、时间）。",
+      control: el("input", {
+        class: "input",
+        id: "settings-notifyWebhook",
+        name: "notifyWebhook",
+        type: "text",
+        autocomplete: "off",
+        spellcheck: "false",
+        placeholder: settings.notifyWebhookConfigured
+          ? `已配置：${settings.notifyWebhook || "（已隐藏）"}（留空表示不修改）`
+          : "https://你的服务/hook",
+        value: "",
+      }),
+      hint: "自定义渠道：失败时向该地址发一份 JSON（含任务编号、任务名、结果、时间）。地址里带 token，所以回显是脱敏的。",
     }),
     field({
       id: "settings-notifyWebhookSecret",
@@ -3135,6 +3146,12 @@ function renderSettings() {
       { class: "check-row" },
       el("input", { type: "checkbox", id: "settings-clearNotifyWebhookSecret", name: "clearNotifyWebhookSecret" }),
       el("label", { for: "settings-clearNotifyWebhookSecret" }, "清除已保存的加签密钥"),
+    ),
+    el(
+      "div",
+      { class: "check-row" },
+      el("input", { type: "checkbox", id: "settings-clearNotifyWebhook", name: "clearNotifyWebhook" }),
+      el("label", { for: "settings-clearNotifyWebhook" }, "清除已保存的 Webhook 地址（关闭通知推送）"),
     ),
     el(
       "div",
@@ -3541,6 +3558,7 @@ async function saveSettings(event) {
     ...(read("notifyWebhookKind") === "generic" || !read("notifyWebhookKind")
       ? { notifyWebhook: read("notifyWebhook").trim() }
       : { notifyWebhookToken: read("notifyWebhookToken").trim() }),
+    ...(checked("clearNotifyWebhook") ? { clearNotifyWebhook: true } : {}),
     notifyWebhookKind: read("notifyWebhookKind") || "generic",
     notifyEvents: [...form.querySelectorAll('input[name="notifyEvents"]:checked')].map((node) => node.value),
     digestHour: Number(read("digestHour") || 22),

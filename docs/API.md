@@ -22,7 +22,7 @@
 
 ```jsonc
 {
-  "account": {
+  "account": {            // 敏感字段已脱敏：phone → +861****0000，me.id → 765…321，apiId → 1234…5678
     "configured": true,          // 是否已填 apiId/apiHash
     "apiId": 123456,             // 脱敏后可返回
     "phone": "+8613800000000",   // 脱敏显示由前端处理
@@ -46,7 +46,8 @@
     "stepPollSeconds": 3,        // 等下一步按钮/回复时，每隔多少秒查一次（1–30）
     "stepWaitSeconds": 30,       // 单次最多等多久（5–300）
     "notifyOnFailure": true,     // 任务失败时给自己发一条 Telegram 消息
-    "notifyWebhook": "",         // 可选：失败提醒推送到这个地址
+    "notifyWebhook": "",         // 可选：失败提醒推送到这个地址（/api/state 里是脱敏值，如 ?access_token=7629…4acd）
+    "notifyWebhookConfigured": false, // 只读：地址是否已配置
     "notifyWebhookKind": "generic", // 推送渠道：dingtalk | wecom | feishu | generic（自定义渠道）
                                     // 日报/周报：dingtalk+wecom 用 markdown 包体，feishu 用交互卡片
     "notifyWebhookSecret": "",   // 钉钉加签密钥：永远不回传，用 notifyWebhookSecretConfigured 表示是否已配

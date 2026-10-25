@@ -340,3 +340,75 @@ test("import/export：分组跟着任务一起走", () => {
   const task = { ...normalizeTaskInput(input({ group: "日常签到" })), id: 9 } as never;
   assert.equal(taskToExport(task).group, "日常签到");
 });
+
+/* ---------- /api/state 脱敏 ---------- */
+
+import { redactState } from "../src/settings.ts";
+
+test("redactState：手机号 / 自己的 id / api_id / access_hash / Webhook 都脱敏", () => {
+  const state = {
+    account: {
+      configured: true,
+      apiId: 12345678,
+      phone: "+8613800000000",
+      signedIn: true,
+      me: { id: "7654321", username: "someone", firstName: "某人" },
+      connected: false,
+      lastConnectedAt: null,
+      pendingLogin: { phone: "+8613800000000", stage: "code" },
+      dc: 5,
+      lastError: null,
+    },
+    settings: {
+      ...DEFAULT_SETTINGS,
+      adminUserId: "7654321",
+      controlChat: "self",
+      notifyWebhook: "https://oapi.dingtalk.com/robot/send?access_token=76296f36644444b916ed96cc183cc9f",
+      notifyWebhookSecret: "SECret",
+    },
+    tasks: [
+      {
+        id: 1,
+        name: "t",
+        enabled: true,
+        target: { kind: "user", id: "7654321", username: "someone", accessHash: "1234567890123456789" },
+        targets: [{ kind: "user", id: "7654321", username: "someone", accessHash: "987654321" }],
+        threadId: null,
+        schedule: { kind: "daily", time: "09:30", jitterSeconds: 0 },
+        steps: [],
+        successKeywords: [],
+        timeoutSeconds: 30,
+        stepDelaySeconds: 3,
+        deleteAfterSeconds: 0,
+        cleanupPrevious: true,
+        nextRunAt: null,
+        lastRunAt: null,
+        lastResult: null,
+        lastMessage: null,
+        source: "ui",
+        createdAt: 0,
+        updatedAt: 0,
+      },
+    ],
+    logs: [],
+    stats: { totalTasks: 1, enabledTasks: 1, nextRunAt: null, lastRunAt: null },
+    now: 0,
+  };
+
+  const redacted = redactState(state as never);
+  const text = JSON.stringify(redacted);
+
+  // 敏感原文一个都不能出现
+  for (const secret of ["+8613800000000", "76296f36644444b916ed96cc183cc9f", "1234567890123456789", "987654321", "SECret"]) {
+    assert.equal(text.includes(secret), false, `泄露了 ${secret}`);
+  }
+  assert.equal(redacted.account.phone, "+861****0000");
+  assert.equal(redacted.account.pendingLogin?.phone, "+861****0000");
+  assert.equal(redacted.account.me?.id, "765…321");
+  assert.equal(redacted.settings.notifyWebhookConfigured, true);
+  assert.match(redacted.settings.notifyWebhook, /access_token=7629…cc9f/);
+  assert.equal(redacted.tasks[0].target.accessHash, undefined);
+  assert.equal(redacted.tasks[0].targets?.[0].accessHash, undefined);
+  // 需要编辑的字段保持原样
+  assert.equal(redacted.settings.adminUserId, "7654321");
+});

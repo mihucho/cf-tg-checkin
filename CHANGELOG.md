@@ -35,6 +35,14 @@ push 后 `.github/workflows/release.yml` 会自动：跑检查 → 写 `package.
 
 ## [Unreleased]
 
+### 安全 / 隐私
+
+- **`/api/state` 对外脱敏**（`redactState()`）：手机号 `+861****0000`、自己的账号 id `765…321`、
+  `api_id` `1234…5678`、任务的 `accessHash` 直接去掉、Webhook 地址只留首尾
+  （`?access_token=7629…4acd`，并新增 `notifyWebhookConfigured` 标记）
+- 设置页的 Webhook 地址改成「留空 = 不修改」：回显是脱敏值放在 placeholder 里，
+  想清空要勾「清除已保存的 Webhook 地址」，避免看到星号就把它保存成清空
+
 ### 排查
 
 - `/api/state` 的 `runtime` 里加上 `build`（version / buildId / commit）：
