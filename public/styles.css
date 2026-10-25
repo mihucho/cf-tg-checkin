@@ -2800,11 +2800,18 @@ input[type="radio"] {
 }
 
 /* 任务页：左侧分组栏 */
+/*
+ * 任务页两栏各自滚动：分组栏与表格各有自己的滚动条，
+ * 页面本身不再整体变长（否则任务一多就要滚到很下面才能看到分组）。
+ * 高度按「视口 - 顶栏 - 页面留白」算，两栏顶到同一水平线。
+ */
 .tasks-layout {
   display: grid;
   grid-template-columns: 168px minmax(0, 1fr);
   gap: 14px;
   align-items: start;
+  --tasks-pane-h: calc(100dvh - 210px);
+  min-height: min(320px, var(--tasks-pane-h));
 }
 
 .tasks-main {
@@ -2818,6 +2825,12 @@ input[type="radio"] {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.015);
+  /* 自己滚动：分组多的时候不会把页面撑长 */
+  max-height: max(220px, var(--tasks-pane-h));
+  overflow-y: auto;
+  position: sticky;
+  top: 72px;
+  scrollbar-width: thin;
 }
 
 .group-rail-title {
@@ -2870,18 +2883,41 @@ input[type="radio"] {
   color: inherit;
 }
 
+.tasks-main .table-wrap {
+  /* 表格区也自己滚动，表头固定在顶部 */
+  max-height: max(260px, var(--tasks-pane-h));
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.tasks-main .table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel, #12151a);
+}
+
 @media (max-width: 720px) {
-  /* 窄屏：分组栏变成横向一条，避免挤掉表格 */
+  /* 窄屏：分组栏变成横向一条，避免挤掉表格；两栏都不再固定高度，跟着页面滚 */
   .tasks-layout {
     grid-template-columns: minmax(0, 1fr);
     gap: 10px;
+    --tasks-pane-h: none;
+    min-height: 0;
+  }
+
+  .tasks-main .table-wrap {
+    max-height: none;
   }
 
   .group-rail {
     display: flex;
     gap: 6px;
     padding: 6px;
+    max-height: none;
+    position: static;
     overflow-x: auto;
+    overflow-y: hidden;
     scrollbar-width: none;
   }
 
