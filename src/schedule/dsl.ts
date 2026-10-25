@@ -472,7 +472,8 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
     (useHere ? (ctx.sourceChat ?? null) : null) ??
     ctx.forwarded ??
     (ctx.defaultTarget ? targetFromId(ctx.defaultTarget) : null) ??
-    (ctx.allowMissingTarget ? { kind: "user", id: "", title: "（待指定目标）" } : null);
+    // 试算/预填时允许还没定目标：占位目标不带标题，任务名就只由动作生成（不会出现「（待指定目标） 签到」）
+    (ctx.allowMissingTarget ? { kind: "user", id: "" } : null);
 
   if (!resolvedTarget) {
     return {
@@ -513,7 +514,9 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
 
   const targetLabel = resolvedTarget.title || (resolvedTarget.username ? `@${resolvedTarget.username}` : resolvedTarget.id);
   const keywords = successKeywords.length ? `，成功关键词：${successKeywords.join(" / ")}` : "";
-  const explanation = `${scheduleLabel || "每天"} → ${targetLabel}：${describeSteps(steps)}${keywords}`;
+  // 还没定目标（编辑器预填/试算）时不要渲染出「→ ：」这种空目标
+  const targetPart = targetLabel ? ` → ${targetLabel}` : " → 目标待选";
+  const explanation = `${scheduleLabel || "每天"}${targetPart}：${describeSteps(steps)}${keywords}`;
 
   return { ok: true, result: { kind: "create", task, explanation, autoName: !nameOverride } };
 }
