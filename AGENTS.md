@@ -114,8 +114,9 @@ title: v0.18.0 — 一句话标题
 > 已经发出去的可以用 `retro: true` 改 Release 说明；tag 注释只能重建 tag：
 > `git tag -a vX -F notes.md -f <commit> && git push --force origin refs/tags/vX`（提交对象不变，Release 不受影响）。
 
-`npm run lint:copy` 会扫全仓文本文件，命中黑名单直接失败（黑名单在 `scripts/copy-lint.mjs` 的
-`PRIVACY_BLOCKLIST`，发现新的真实标识就加进去）。
+**没有自动检查**：黑名单本身（哪怕 base64）就等于把要保护的东西写进公开仓库，
+所以 `scripts/copy-lint.mjs` 已删除。隐私靠提交前 review —— 不确定的东西一律用占位符。
+纯文风规则还在，跑在 `tests/copy.test.ts`（`npm test` 会执行），那份不含任何真实数据。
 
 ## 硬约束（都是踩过的坑，别改回去）
 

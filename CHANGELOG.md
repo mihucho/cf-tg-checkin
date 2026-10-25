@@ -40,8 +40,9 @@ push 后 `.github/workflows/release.yml` 会自动：跑检查 → 写 `package.
 - **仓库里不再出现真实账号**：真实机器人用户名、数字 id、显示名（共 5 处）全部换成占位
   （`example_bot` / `123456789` / `示例机器人`）—— 之前的发布说明、CHANGELOG、测试用例、注释里都有，
   等于把真实签到对象公开了；已发布版本的 Release 说明也一并覆盖成脱敏版
-- `npm run lint:copy` 增加**隐私黑名单**：扫全仓文本文件（md/ts/js/mjs/json），
-  命中真实标识直接失败，CI 会拦
+- ~~`npm run lint:copy` 的隐私黑名单~~ **已删除**：黑名单本身（明文或 base64）就是把要保护的东西
+  写进公开仓库，等于新的泄漏点。现在只保留纯文风检查（`tests/copy.test.ts`，不含任何真实数据），
+  隐私靠提交前 review
 - 发布流水线支持 `retro: true`：可以回头修改**已发布**版本的 Release 说明
   （脱敏、纠错），不动代码、不重新打 tag
 - 发布流水线支持 **`retro: revoke`**：撤销某次发版（删 Release 与 tag，代码改动保留）
