@@ -221,6 +221,45 @@ async function main() {
       if (item.task?.id) await request("DELETE", `/api/tasks/${item.task.id}`);
     }
 
+    // ---------- 按分组的批量操作 ----------
+    const scopedTask = {
+      ...taskA,
+      name: "分组执行样本",
+      group: "执行组",
+    };
+    const scopedCreated = await post("/api/tasks", scopedTask);
+    const otherTask = await post("/api/tasks", { ...taskA, name: "不在执行组", group: "别的组" });
+    const runScoped = await post(`/api/tasks/run-all?offset=0&limit=5&group=${encodeURIComponent("执行组")}`);
+    check(
+      "执行全部可以只跑指定分组",
+      runScoped.processed === 1 && String(runScoped.logs?.[0]?.taskName ?? "").includes("分组执行样本"),
+      JSON.stringify({ processed: runScoped.processed, names: (runScoped.logs || []).map((l) => l.taskName) }),
+    );
+
+    const importedIntoGroup = await post("/api/tasks/import", {
+      group: "导入目标组",
+      tasks: [{ ...taskA, name: "导入到分组-甲" }, { ...taskA, name: "导入到分组-乙", group: "保留原组" }],
+    });
+    check(
+      "导入会把没分组的任务放进指定分组",
+      importedIntoGroup.created === 2,
+      JSON.stringify(importedIntoGroup),
+    );
+    const afterImport = await get("/api/state");
+    const importedA = afterImport.tasks.find((item) => item.name === "导入到分组-甲");
+    const importedB = afterImport.tasks.find((item) => item.name === "导入到分组-乙");
+    check(
+      "文件里没分组 → 用目标分组；自带分组 → 保持原样",
+      importedA?.group === "导入目标组" && importedB?.group === "保留原组",
+      JSON.stringify({ a: importedA?.group, b: importedB?.group }),
+    );
+    for (const item of [scopedCreated, otherTask]) {
+      if (item.task?.id) await request("DELETE", `/api/tasks/${item.task.id}`);
+    }
+    for (const item of [importedA, importedB]) {
+      if (item?.id) await request("DELETE", `/api/tasks/${item.id}`);
+    }
+
     // ---------- 导出 / 导入 ----------
     const exported = await get("/api/tasks/export");
     check("导出包含全部任务且不含运行态字段", exported.tasks.length >= 2 && !("id" in exported.tasks[0]) && !("nextRunAt" in exported.tasks[0]));

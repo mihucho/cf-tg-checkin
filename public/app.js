@@ -775,9 +775,15 @@ function renderTasks() {
 
   const header = pageHead({
     title: "任务",
-    description: tasks.length
-      ? `${tasks.length} 个任务 · ${enabled} 个启用 · ${tasks.length - enabled} 个停用 · 「立即执行」只是手动跑一次，不影响定时`
-      : "还没有任务，先建一个。",
+    description: (() => {
+      if (!tasks.length) return "还没有任务，先建一个。";
+      if (!activeKey) {
+        return `${tasks.length} 个任务 · ${enabled} 个启用 · ${tasks.length - enabled} 个停用 · 「立即执行」只是手动跑一次，不影响定时`;
+      }
+      const scoped = tasksInGroup(tasks, activeKey);
+      const scopedEnabled = scoped.filter((task) => task.enabled).length;
+      return `「${activeLabel}」${scoped.length} 个任务 · ${scopedEnabled} 个启用 · ${scoped.length - scopedEnabled} 个停用 · 共 ${tasks.length} 个`;
+    })(),
     actions: [
       btn("导入", { variant: "subtle", iconName: "download", onClick: () => openImportDialog() }),
       ...(tasks.length
@@ -787,7 +793,10 @@ function renderTasks() {
               iconName: "upload",
               onClick: () => withLoading(null, () => exportTasks(activeKey, activeLabel)),
             }),
-            btn("执行全部", { iconName: "bolt", onClick: (event) => runAll(event.currentTarget) }),
+            btn(activeKey ? `执行「${activeLabel}」` : "执行全部", {
+              iconName: "bolt",
+              onClick: (event) => runAll(event.currentTarget, activeKey, activeLabel),
+            }),
           ]
         : []),
       newBtn,
@@ -1650,7 +1659,10 @@ function openImportDialog() {
               try {
                 const parsed = JSON.parse(text);
                 const tasks = Array.isArray(parsed) ? parsed : parsed.tasks;
-                const res = await api("/api/tasks/import", { method: "POST", body: { tasks } });
+                const res = await api("/api/tasks/import", {
+                  method: "POST",
+                  body: { tasks, group: window.__activeTaskGroup() || undefined },
+                });
                 toast(
                   `导入完成：新增 ${res.created} 个${res.skipped && res.skipped.length ? `，跳过 ${res.skipped.length} 个` : ""}`,
                   { kind: "ok" },
@@ -1670,9 +1682,16 @@ function openImportDialog() {
   });
 }
 
+/** 当前选中的分组名（未分组/全部 → 空字符串），给编辑器和导入用 */
+window.__activeTaskGroup = () => {
+  const key = activeTaskGroup();
+  return !key || key === "__ungrouped" ? "" : key;
+};
+
 function openEditor(task) {
   openTaskEditor({
     task,
+    defaultGroup: task ? "" : window.__activeTaskGroup(),
     defaultTarget: (state.data && state.data.settings && state.data.settings.defaultTarget) || "",
     onSaved: async () => {
       await refreshState({ silent: true });
@@ -1744,13 +1763,19 @@ async function deleteTask(task) {
   }
 }
 
-async function runAll(button) {
-  const enabledCount = ((state.data && state.data.tasks) || []).filter((task) => task.enabled).length;
+async function runAll(button, group = "", label = "全部") {
+  const inGroup = (task) => {
+    if (!group) return true;
+    const name = (task.group || "").trim();
+    return group === "__ungrouped" ? !name : name === group;
+  };
+  const enabledCount = ((state.data && state.data.tasks) || []).filter((task) => task.enabled && inGroup(task)).length;
+  const scope = group ? `「${label}」里` : "";
   const confirmed = await confirmDialog({
-    title: "执行全部任务？",
+    title: group ? `执行「${label}」的任务？` : "执行全部任务？",
     message: enabledCount
-      ? `会依次真实执行 ${enabledCount} 个已启用的任务（发消息、点按钮都会真的发生），可能要几分钟，期间别关页面。`
-      : "当前没有已启用的任务。",
+      ? `会依次真实执行${scope} ${enabledCount} 个已启用的任务（发消息、点按钮都会真的发生），可能要几分钟，期间别关页面。`
+      : `当前${scope || ""}没有已启用的任务。`,
     confirmLabel: "开始执行",
   });
   if (!confirmed) return;
@@ -1760,9 +1785,10 @@ async function runAll(button) {
       let done = 0;
       let failed = 0;
       let offset = 0;
+      const scopeQuery = group ? `&group=${encodeURIComponent(group)}` : "";
       // 服务端每次只跑一批（避免网关超时），按 offset 推进直到跑完
       for (let round = 0; round < 30; round += 1) {
-        const res = await api(`/api/tasks/run-all?offset=${offset}`, { method: "POST" });
+        const res = await api(`/api/tasks/run-all?offset=${offset}${scopeQuery}`, { method: "POST" });
         const logs = Array.isArray(res && res.logs) ? res.logs : [];
         done += logs.length;
         failed += logs.filter((log) => !log.ok).length;
@@ -1770,7 +1796,9 @@ async function runAll(button) {
         const remaining = Number(res && res.remaining) || 0;
         if (!remaining) {
           toast(
-            done ? `执行了 ${done} 个任务${failed ? `，${failed} 个失败` : "，全部成功"}` : "没有可执行的任务",
+            done
+              ? `执行了${scope} ${done} 个任务${failed ? `，${failed} 个失败` : "，全部成功"}`
+              : `没有可执行的任务`,
             { kind: failed ? "error" : "ok" },
           );
           break;

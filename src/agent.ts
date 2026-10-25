@@ -289,8 +289,12 @@ export class TgAgent implements DurableObject {
       }
 
       if (path === "/tasks/import" && method === "POST") {
-        const body = (await request.json()) as { tasks?: TaskInput[] };
-        const incoming = Array.isArray(body.tasks) ? body.tasks.slice(0, 200) : [];
+        const body = (await request.json()) as { tasks?: TaskInput[]; group?: string };
+        const fallbackGroup = String(body.group ?? "").trim().slice(0, 20);
+        const incoming = (Array.isArray(body.tasks) ? body.tasks.slice(0, 200) : []).map((item) =>
+          // 导入到当前分组：文件里自带分组的保持原样，没分组的落到目标分组
+          fallbackGroup && !String(item?.group ?? "").trim() ? { ...item, group: fallbackGroup } : item,
+        );
         if (!incoming.length) return jsonError("没有可导入的任务", 400);
 
         const created: number[] = [];
@@ -313,7 +317,9 @@ export class TgAgent implements DurableObject {
         // 每次只处理一批，把剩余数量返回给前端，由前端接着调。
         const limit = intParam(url.searchParams.get("limit"), RUN_ALL_BATCH, 1, 50);
         const offset = intParam(url.searchParams.get("offset"), 0, 0, 10_000);
-        const result = await this.serialize(() => this.runAllTasksBatch(offset, limit));
+        // ?group=名称 只跑这个分组（__ungrouped = 未分组），不传 = 全部
+        const group = (url.searchParams.get("group") ?? "").trim();
+        const result = await this.serialize(() => this.runAllTasksBatch(offset, limit, group));
         await this.scheduleNextAlarm();
         return json(result);
       }
@@ -2025,8 +2031,14 @@ export class TgAgent implements DurableObject {
   private async runAllTasksBatch(
     offset: number,
     limit: number,
+    group = "",
   ): Promise<{ ok: boolean; logs: LogEntry[]; processed: number; remaining: number; nextOffset: number }> {
-    const tasks = this.store.listTasks().filter((task) => task.enabled);
+    const inGroup = (task: Task) => {
+      if (!group) return true;
+      const name = (task.group ?? "").trim();
+      return group === "__ungrouped" ? !name : name === group;
+    };
+    const tasks = this.store.listTasks().filter((task) => task.enabled && inGroup(task));
     const batch = tasks.slice(offset, offset + limit);
     const logs = batch.length ? await this.runTasks(batch, undefined, { manual: true }) : [];
     const nextOffset = offset + batch.length;

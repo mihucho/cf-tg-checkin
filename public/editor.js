@@ -97,7 +97,7 @@ const targetQueryOf = (target) => {
   return target.threadId ? `${base}#${target.threadId}` : base;
 };
 
-export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}) {
+export function openTaskEditor({ task = null, defaultTarget = "", defaultGroup = "", onSaved } = {}) {
   const isEdit = Boolean(task && task.id);
   const uid = Math.random().toString(36).slice(2, 7);
   const id = (name) => `${uid}-${name}`;
@@ -149,7 +149,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
   });
 
   const groupNames = (typeof window.__taskGroups === "function" ? window.__taskGroups() : []) || [];
-  const currentGroup = task?.group || "";
+  const currentGroup = task?.group || defaultGroup || "";
   // 当前任务的分组如果不在列表里（比如刚好被改过），补进去，避免下拉没有对应项
   const groupOptionsList = [...new Set([...groupNames, currentGroup].filter(Boolean))];
   const groupSelect = el("select", {
