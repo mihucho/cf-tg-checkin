@@ -2475,44 +2475,94 @@ async function logoutAccount() {
 /* --------------------------------------------------------------- 设置 */
 
 /** 设置页的分组容器（可折叠，状态记在 localStorage） */
-function settingsGroup(id, title, fields, { collapsed = false } = {}) {
-  const storageKey = `cf-tg.settings.group.${id}`;
-  let open = !collapsed;
-  try {
-    const saved = localStorage.getItem(storageKey);
-    if (saved === "0") open = false;
-    if (saved === "1") open = true;
-  } catch {
-    /* 隐私模式忽略 */
-  }
+const SETTINGS_TAB_KEY = "cf-tg.settings.tab";
 
-  const body = el("div", { class: "settings-group-body" }, ...fields.filter(Boolean));
-  const chevron = el("span", { class: "settings-group-chevron" }, icon("chevron", { size: 14 }));
-  const toggle = el(
-    "button",
+/** 记住上次停在哪个二级 tab（默认「执行」） */
+function activeSettingsTab() {
+  try {
+    return localStorage.getItem(SETTINGS_TAB_KEY) || "schedule";
+  } catch {
+    return "schedule";
+  }
+}
+
+/**
+ * 设置页的二级 tab 面板。
+ *
+ * 设置项一多，一页拉下来太长 —— 现在按「执行 / 消息指令 / 登录与安全 / 关于」分 tab。
+ * 注意：非当前 tab 的**只是 hidden，不是不渲染**，保存时仍然一次提交所有字段。
+ */
+function settingsPanel(id, _title, fields) {
+  return el(
+    "section",
     {
-      class: "settings-group-head",
-      type: "button",
-      "aria-expanded": String(open),
-      onclick: () => {
-        const next = body.hidden;
-        body.hidden = !next;
-        toggle.setAttribute("aria-expanded", String(next));
-        chevron.classList.toggle("is-open", next);
-        try {
-          localStorage.setItem(storageKey, next ? "1" : "0");
-        } catch {
-          /* ignore */
-        }
-      },
+      class: "settings-panel",
+      id: `settings-panel-${id}`,
+      role: "tabpanel",
+      "aria-labelledby": `settings-tab-${id}`,
+      dataset: { panel: id },
     },
-    el("span", { class: "settings-group-title" }, title),
-    chevron,
+    // 标题已经由二级 tab 表达，这里不再重复显示（保留 aria-labelledby 供读屏）
+    ...fields.filter(Boolean),
+  );
+}
+
+/** 二级 tab 栏 + 面板容器（只显示当前 tab） */
+function settingsTabs(groups) {
+  const current = groups.some((group) => group.id === activeSettingsTab()) ? activeSettingsTab() : groups[0].id;
+
+  const panels = el("div", { class: "settings-panels" }, ...groups.map((group) => group.panel));
+
+  const buttons = groups.map((group) =>
+    el(
+      "button",
+      {
+        class: `tab tab-sub${group.id === current ? " is-active" : ""}`,
+        type: "button",
+        role: "tab",
+        id: `settings-tab-${group.id}`,
+        "aria-selected": String(group.id === current),
+        "aria-controls": `settings-panel-${group.id}`,
+        dataset: { tab: group.id },
+        onclick: () => activate(group.id),
+        onkeydown: (event) => {
+          if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+          event.preventDefault();
+          const index = groups.findIndex((item) => item.id === (event.currentTarget.dataset.tab || ""));
+          const next = groups[(index + (event.key === "ArrowRight" ? 1 : groups.length - 1)) % groups.length];
+          if (next) activate(next.id, true);
+        },
+      },
+      group.title,
+      group.hint ? el("span", { class: "tab-hint" }, group.hint) : null,
+    ),
   );
 
-  body.hidden = !open;
-  chevron.classList.toggle("is-open", open);
-  return el("section", { class: "settings-group" }, toggle, body);
+  function activate(id, focus = false) {
+    for (const button of buttons) {
+      const on = button.dataset.tab === id;
+      button.classList.toggle("is-active", on);
+      button.setAttribute("aria-selected", String(on));
+      if (on && focus) button.focus();
+    }
+    for (const panel of panels.children) {
+      panel.hidden = panel.dataset.panel !== id;
+    }
+    try {
+      localStorage.setItem(SETTINGS_TAB_KEY, id);
+    } catch {
+      /* 隐私模式忽略 */
+    }
+  }
+
+  for (const panel of panels.children) {
+    panel.hidden = panel.dataset.panel !== current;
+  }
+
+  return {
+    bar: el("div", { class: "tabbar tabbar-sub", role: "tablist", "aria-label": "设置分组" }, ...buttons),
+    panels,
+  };
 }
 
 function renderSettings() {
@@ -2534,7 +2584,7 @@ function renderSettings() {
 
   const meId = account.me && account.me.id ? String(account.me.id) : "";
 
-  const groupSchedule = settingsGroup("schedule", "执行", [
+  const groupSchedule = settingsPanel("schedule", "执行", [
     el(
       "div",
       { class: "form-row" },
@@ -2559,7 +2609,7 @@ function renderSettings() {
     }),
   ]);
 
-  const groupTrigger = settingsGroup("trigger", "消息指令", [
+  const groupTrigger = settingsPanel("trigger", "消息指令", [
     el(
       "div",
       { class: "field" },
@@ -2614,7 +2664,7 @@ function renderSettings() {
   ]);
 
   const panel = el("div", { class: "notify-test-result", hidden: true });
-  const groupSecurity = settingsGroup("security", "登录与安全", [
+  const groupSecurity = settingsPanel("security", "登录与安全", [
     el(
       "div",
       { class: "check-row" },
@@ -2784,7 +2834,7 @@ function renderSettings() {
     ),
   ]);
 
-  const groupAbout = settingsGroup(
+  const groupAbout = settingsPanel(
     "about",
     "关于",
     [
@@ -2807,14 +2857,18 @@ function renderSettings() {
         ),
       ),
     ],
-    { collapsed: true },
   );
 
+  const tabs = settingsTabs([
+    { id: "schedule", title: "执行", panel: groupSchedule },
+    { id: "trigger", title: "消息指令", panel: groupTrigger },
+    { id: "security", title: "登录与安全", panel: groupSecurity },
+    { id: "about", title: "关于", panel: groupAbout },
+  ]);
+
   form.append(
-    groupSchedule,
-    groupTrigger,
-    groupSecurity,
-    groupAbout,
+    tabs.bar,
+    tabs.panels,
     el(
       "div",
       { class: "form-actions form-actions-sticky" },
