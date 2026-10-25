@@ -2799,6 +2799,66 @@ input[type="radio"] {
   font-size: 12px;
 }
 
+/* 任务页：批量删除（选择模式） */
+.tasks-table .th-select,
+.tasks-table .cell-select {
+  width: 34px;
+  padding-right: 0;
+}
+
+.tasks-table .task-select-box {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent, #5cc8bd);
+  cursor: pointer;
+}
+
+.tasks-table tr.is-selected {
+  background: rgba(92, 200, 189, 0.08);
+}
+
+.selection-bar {
+  position: sticky;
+  bottom: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
+  border-radius: 10px;
+  background: var(--panel, #12151a);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.selection-count {
+  font-size: 12.5px;
+  color: var(--text-2, rgba(255, 255, 255, 0.72));
+}
+
+.selection-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 560px) {
+  .selection-bar {
+    bottom: 8px;
+  }
+
+  .selection-actions {
+    width: 100%;
+  }
+
+  .selection-actions .btn {
+    flex: 1 1 0;
+  }
+}
+
 /* 任务页：左侧分组栏 */
 /*
  * 任务页两栏各自滚动：分组栏与表格各有自己的滚动条，

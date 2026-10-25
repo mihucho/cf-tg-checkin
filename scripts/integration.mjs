@@ -403,6 +403,19 @@ async function main() {
       JSON.stringify({ processed: batch.processed, remaining: batch.remaining, nextOffset: batch.nextOffset }),
     );
 
+    // ---------- 批量删除 ----------
+    const bulkA = await post("/api/tasks", { ...taskA, name: "批量删除-甲" });
+    const bulkB = await post("/api/tasks", { ...taskA, name: "批量删除-乙" });
+    const bulk = await post("/api/tasks/delete-batch", { ids: [bulkA.task.id, bulkB.task.id, 999999] });
+    check("批量删除返回实际删除数（忽略不存在的 id）", bulk.deleted === 2, JSON.stringify(bulk));
+    const afterBulk = await get("/api/state");
+    check(
+      "被删的任务不在列表里",
+      !afterBulk.tasks.some((item) => item.id === bulkA.task.id || item.id === bulkB.task.id),
+    );
+    const emptyBulk = await post("/api/tasks/delete-batch", { ids: [] });
+    check("空选择被拒（400）", emptyBulk.status === 400, `status=${emptyBulk.status}`);
+
     // ---------- 删除 ----------
     const del = await request("DELETE", `/api/tasks/${task.id}`);
     check("删除任务成功", del.status === 200);

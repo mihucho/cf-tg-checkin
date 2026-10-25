@@ -268,6 +268,32 @@ export class TgAgent implements DurableObject {
         });
       }
 
+      if (path === "/tasks/delete-batch" && method === "POST") {
+        const body = (await request.json()) as { ids?: number[] };
+        const ids = Array.isArray(body.ids)
+          ? [...new Set(body.ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))].slice(0, 200)
+          : [];
+        if (!ids.length) return jsonError("没有选中任务", 400);
+        let deleted = 0;
+        for (const id of ids) {
+          if (!this.store.getTask(id)) continue;
+          this.store.deleteTask(id);
+          deleted += 1;
+        }
+        await this.scheduleNextAlarm();
+        this.store.addLog({
+          taskId: null,
+          taskName: null,
+          at: Date.now(),
+          ok: true,
+          level: "info",
+          message: `批量删除任务：${deleted} 个`,
+          detail: ids.length > deleted ? `另有 ${ids.length - deleted} 个已经不存在` : null,
+          source: "system",
+        });
+        return json({ ok: true, deleted });
+      }
+
       if (path === "/tasks/group-rename" && method === "POST") {
         const body = (await request.json()) as { from?: string; to?: string };
         const from = String(body.from ?? "").trim();

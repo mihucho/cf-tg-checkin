@@ -51,6 +51,8 @@ const state = {
   logLevel: "", // "" | "ok" | "fail"
   logTaskId: "", // "" = 全部任务
   logQuery: "", // 关键字搜索
+  taskSelectMode: false, // 任务页「选择」模式（批量删除用）
+  taskSelection: new Set(), // 选中的任务 id
   expandedLogs: new Set(),
   refreshing: false,
   accountStep: 1,
@@ -797,6 +799,15 @@ function renderTasks() {
               iconName: "bolt",
               onClick: (event) => runAll(event.currentTarget, activeKey, activeLabel),
             }),
+            btn(state.taskSelectMode ? "退出选择" : "批量删除", {
+              variant: "subtle",
+              iconName: "trash",
+              onClick: () => {
+                state.taskSelectMode = !state.taskSelectMode;
+                if (!state.taskSelectMode) state.taskSelection.clear();
+                paint({ force: true });
+              },
+            }),
           ]
         : []),
       newBtn,
@@ -857,13 +868,18 @@ function renderTasks() {
             }),
       ));
 
-      if (!rail) return table;
+      // 选择模式下把操作条挂在表格下方
+      const withSelection = state.taskSelectMode
+        ? frag(table, taskSelectionBar(visible))
+        : table;
+
+      if (!rail) return withSelection;
 
       return el(
         "div",
         { class: "tasks-layout" },
         rail,
-        el("div", { class: "tasks-main" }, table),
+        el("div", { class: "tasks-main" }, withSelection),
       );
     })(),
   );
@@ -919,8 +935,18 @@ function tasksInGroup(tasks, key) {
 
 /** 任务行的通用点击行为（点空白处打开详情） */
 function taskRowClickable(task) {
-  const row = taskRow(task);
+  const row = taskRow(task, { selecting: state.taskSelectMode });
   row.classList.add("is-clickable");
+  if (state.taskSelectMode) {
+    if (state.taskSelection.has(task.id)) row.classList.add("is-selected");
+    row.addEventListener("click", (event) => {
+      if (isInteractiveClick(event)) return;
+      if (state.taskSelection.has(task.id)) state.taskSelection.delete(task.id);
+      else state.taskSelection.add(task.id);
+      paint({ force: true });
+    });
+    return row;
+  }
   row.addEventListener("click", (event) => {
     if (isInteractiveClick(event)) return;
     void openTaskDetail(task);
@@ -1042,15 +1068,17 @@ async function openGroupRename(item) {
 }
 
 function taskTable(tasks) {
+  const selecting = state.taskSelectMode;
   return el(
     "table",
-    { class: "table tasks-table" },
+    { class: `table tasks-table${selecting ? " is-selecting" : ""}` },
     el(
       "thead",
       {},
       el(
         "tr",
         {},
+        selecting ? el("th", { class: "th-select" }, "") : null,
         el("th", {}, "任务"),
         el("th", {}, "目标"),
         el("th", {}, "调度"),
@@ -1068,6 +1096,100 @@ function taskTable(tasks) {
   );
 }
 
+/** 选择模式下的复选框单元格 */
+function taskSelectCell(task) {
+  const checked = state.taskSelection.has(task.id);
+  const box = el("input", {
+    type: "checkbox",
+    class: "task-select-box",
+    checked,
+    "aria-label": `选择任务 ${task.name}`,
+    onclick: (event) => event.stopPropagation(),
+    onchange: (event) => {
+      if (event.currentTarget.checked) state.taskSelection.add(task.id);
+      else state.taskSelection.delete(task.id);
+      paint({ force: true });
+    },
+  });
+  return el("td", { class: "cell-select", "data-no-row-click": "" }, box);
+}
+
+/** 底部操作条：已选 N 个 / 全选本组 / 删除 */
+function taskSelectionBar(visibleTasks) {
+  const count = state.taskSelection.size;
+  const allSelected = visibleTasks.length > 0 && visibleTasks.every((task) => state.taskSelection.has(task.id));
+  return el(
+    "div",
+    { class: "selection-bar" },
+    el("span", { class: "selection-count" }, count ? `已选 ${count} 个` : "勾选要删除的任务"),
+    el(
+      "div",
+      { class: "selection-actions" },
+      el(
+        "button",
+        {
+          class: "btn btn-sm",
+          type: "button",
+          onclick: () => {
+            if (allSelected) visibleTasks.forEach((task) => state.taskSelection.delete(task.id));
+            else visibleTasks.forEach((task) => state.taskSelection.add(task.id));
+            paint({ force: true });
+          },
+        },
+        allSelected ? "取消全选" : `全选本页 ${visibleTasks.length} 个`,
+      ),
+      el(
+        "button",
+        {
+          class: "btn btn-sm btn-danger",
+          type: "button",
+          disabled: count ? undefined : true,
+          onclick: () => deleteSelectedTasks(),
+        },
+        count ? `删除所选（${count}）` : "删除所选",
+      ),
+      el(
+        "button",
+        {
+          class: "btn btn-sm",
+          type: "button",
+          onclick: () => {
+            state.taskSelectMode = false;
+            state.taskSelection.clear();
+            paint({ force: true });
+          },
+        },
+        "退出选择",
+      ),
+    ),
+  );
+}
+
+/** 批量删除（带二次确认） */
+async function deleteSelectedTasks() {
+  const ids = [...state.taskSelection];
+  if (!ids.length) return;
+  const tasks = ((state.data && state.data.tasks) || []).filter((task) => ids.includes(task.id));
+  const names = tasks.slice(0, 3).map((task) => `「${task.name}」`).join("、");
+  const confirmed = await confirmDialog({
+    title: `删除这 ${ids.length} 个任务？`,
+    message: `${names}${tasks.length > 3 ? ` 等 ${tasks.length} 个` : ""}会被删除，它们的执行日志也会一起删掉，无法恢复。`,
+    confirmLabel: `删除 ${ids.length} 个`,
+    danger: true,
+  });
+  if (!confirmed) return;
+  try {
+    const res = await api("/api/tasks/delete-batch", { method: "POST", body: { ids } });
+    state.taskSelection.clear();
+    state.taskSelectMode = false;
+    toast(`已删除 ${res.deleted} 个任务`, { kind: "ok" });
+    await refreshState({ silent: true });
+    paint({ force: true });
+  } catch (error) {
+    toast(error.message || "批量删除失败", { kind: "error" });
+  }
+}
+
 /**
  * 点击是否落在「行内的可交互元素」上（按钮 / 链接 / 输入框 / 带 data-no-row-click 的容器）。
  *
@@ -1080,7 +1202,7 @@ function isInteractiveClick(event) {
   return Boolean(target.closest("button, a, input, select, textarea, label, [data-no-row-click]"));
 }
 
-function taskRow(task) {
+function taskRow(task, { selecting = false } = {}) {
   const target = task.target || {};
   const enabledText = task.enabled ? "已启用" : "已停用";
   const subParts = [`#${task.id}`];
@@ -1105,6 +1227,7 @@ function taskRow(task) {
   return el(
     "tr",
     { class: task.enabled ? "" : "is-disabled", dataset: { id: String(task.id) } },
+    selecting ? taskSelectCell(task) : null,
     el(
       "td",
       { dataset: { label: "任务" } },
