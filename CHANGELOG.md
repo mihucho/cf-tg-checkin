@@ -44,7 +44,8 @@ push 后 `.github/workflows/release.yml` 会自动：跑检查 → 写 `package.
   命中真实标识直接失败，CI 会拦
 - 发布流水线支持 `retro: true`：可以回头修改**已发布**版本的 Release 说明
   （脱敏、纠错），不动代码、不重新打 tag
-- `AGENTS.md` 新增「隐私」一节：示例一律用占位符
+- `AGENTS.md` 新增「隐私」一节：示例一律用占位符；tag 注释同样是公开的，
+  已发布的可以 `retro: true` 改 Release 说明，tag 注释需要重建 tag（提交对象不变）
 
 ## [0.18.2] - 2026-10-25
 

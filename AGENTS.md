@@ -103,7 +103,11 @@ title: v0.18.0 — 一句话标题
 | 展示名 | `示例机器人` |
 | 聊天内容 | 改写过的示例句子（不要直接贴自己收到的消息） |
 | 手机号 | `+8613800000000` |
-| 发布说明 / CHANGELOG / 测试 / 截图 | 同上，一个都不能例外 |
+| 发布说明 / CHANGELOG / 测试 / 截图 / **tag 注释** | 同上，一个都不能例外 |
+
+> tag 注释也是公开的（`git tag -l -n`、GitHub API 都能读）。写完发布文档顺手看一眼有没有真实值，
+> 已经发出去的可以用 `retro: true` 改 Release 说明；tag 注释只能重建 tag：
+> `git tag -a vX -F notes.md -f <commit> && git push --force origin refs/tags/vX`（提交对象不变，Release 不受影响）。
 
 `npm run lint:copy` 会扫全仓文本文件，命中黑名单直接失败（黑名单在 `scripts/copy-lint.mjs` 的
 `PRIVACY_BLOCKLIST`，发现新的真实标识就加进去）。
