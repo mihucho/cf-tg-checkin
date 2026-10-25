@@ -2168,15 +2168,8 @@ export class TgAgent implements DurableObject {
       };
 
       this.store.setJson(sentKey, outcome.sent);
-      // 「对方回了什么」既是排查依据，也是没有关键词时的成功观感
-      const replyNote = outcome.replyText ? `\n▶ 回复：${outcome.replyText.slice(0, 200)}` : "";
-      this.store.recordRun(
-        task.id,
-        outcome.ok ? "ok" : "fail",
-        outcome.message,
-        `${outcome.detail}${replyNote}` || null,
-        Date.now(),
-      );
+      // 回复已经作为「收到机器人回复 #id：…」记在 detail 里了，这里不要再追加一遍
+      this.store.recordRun(task.id, outcome.ok ? "ok" : "fail", outcome.message, outcome.detail || null, Date.now());
       log = this.store.addLog({
         taskId: task.id,
         taskName: task.name,
@@ -2184,7 +2177,7 @@ export class TgAgent implements DurableObject {
         ok: outcome.ok,
         level: outcome.ok ? "info" : "warn",
         message: outcome.message,
-        detail: `${outcome.detail}${replyNote}` || null,
+        detail: outcome.detail || null,
         source: triggerSource,
         durationMs: Date.now() - startedAt,
       });

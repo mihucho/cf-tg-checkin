@@ -17,5 +17,6 @@ import "./rate.test.ts";
 import "./notify-test.test.ts";
 import "./release-doc.test.ts";
 import "./peer.test.ts";
+import "./executor-reply.test.ts";
 
 void runAll();

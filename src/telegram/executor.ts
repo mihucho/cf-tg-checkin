@@ -33,6 +33,18 @@ export interface ExecuteOutcome {
   replyId: number | null;
 }
 
+/**
+ * 把多行文本压成一行：日志是按行写的，机器人回复里的换行会把一条记录拆成好几行。
+ * 换行折成 ` / `，连续空白收成一个空格。
+ */
+export function oneLine(text: string, limit = 200): string {
+  const flat = String(text ?? "")
+    .replace(/\s*\n+\s*/g, " / ")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+  return flat.length > limit ? `${flat.slice(0, limit)}…` : flat;
+}
+
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
@@ -772,9 +784,10 @@ export async function executeTask(
       { pollIntervalMs },
     );
     if (found) {
-      replyText = found.text || "（无文本内容）";
+      // 原始回复可能有多行，存进日志前压成一行（否则一条日志被拆成好几行）
+      replyText = oneLine(found.text) || "（无文本内容）";
       replyId = found.id;
-      note("info", `收到${peerLabel}回复 #${found.id}：${replyText.slice(0, 120)}`);
+      note("info", `收到${peerLabel}回复 #${found.id}：${replyText}`);
     } else if (task.successKeywords?.length) {
       note("warn", `等待 ${Math.round((options.stepWaitMs ?? 30_000) / 1000)}s 没等到回复`);
     }
@@ -799,7 +812,7 @@ export async function executeTask(
       note("warn", preview ? `${message}；最近回复：${preview.slice(0, 300)}` : message);
     }
   } else if (replyText) {
-    message = `执行完成 · 收到回复「${replyText.slice(0, 40)}」`;
+    message = `执行完成 · 收到回复「${oneLine(replyText, 40)}」`;
   }
 
   return { ok, message, detail: detail.join("\n"), sent, chatId, peerKind, replyText, replyId };
