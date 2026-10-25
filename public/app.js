@@ -364,6 +364,13 @@ async function onLoginSubmit(event) {
 }
 
 async function onLogout() {
+  const confirmed = await confirmDialog({
+    title: "退出管理界面？",
+    message: "退出后需要重新输入管理口令才能进来。签到任务照常按计划执行，不受影响。",
+    confirmLabel: "退出登录",
+  });
+  if (!confirmed) return;
+
   await withLoading(dom.logoutBtn, async () => {
     try {
       await api("/api/logout", { method: "POST", auth: false });
