@@ -868,10 +868,11 @@ function taskGroupList(tasks) {
     hasGroups: named.size > 0,
     items: [
       { key: "", label: "全部", count: tasks.length },
+      // 「未分组」固定排在「全部」之后（用户要求放最前面）
+      ...(ungrouped ? [{ key: "__ungrouped", label: "未分组", count: ungrouped }] : []),
       ...[...named.entries()]
         .sort((a, b) => a[0].localeCompare(b[0], "zh"))
         .map(([name, count]) => ({ key: name, label: name, count })),
-      ...(ungrouped ? [{ key: "__ungrouped", label: "未分组", count: ungrouped }] : []),
     ],
   };
 }
