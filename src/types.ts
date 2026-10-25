@@ -76,6 +76,8 @@ export interface Task {
   stepDelaySeconds: number;
   deleteAfterSeconds: number;
   cleanupPrevious: boolean;
+  /** 任务分组（自由文本，空 = 未分组）；列表按它折叠 */
+  group?: string;
   nextRunAt: number | null;
   lastRunAt: number | null;
   lastResult: "ok" | "fail" | null;

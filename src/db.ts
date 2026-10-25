@@ -23,6 +23,7 @@ const SCHEMA = [
       step_delay_seconds INTEGER NOT NULL DEFAULT 3,
       delete_after_seconds INTEGER NOT NULL DEFAULT 0,
       cleanup_previous INTEGER NOT NULL DEFAULT 0,
+      group_name TEXT,
       next_run_at INTEGER,
       last_run_at INTEGER,
       last_result TEXT,
@@ -85,6 +86,7 @@ interface TaskRow extends Row {
   step_delay_seconds: number | null;
   delete_after_seconds: number;
   cleanup_previous: number;
+  group_name: string | null;
   next_run_at: number | null;
   last_run_at: number | null;
   last_result: string | null;
@@ -155,6 +157,7 @@ export function rowToTask(row: TaskRow): Task {
     stepDelaySeconds: row.step_delay_seconds ?? 3,
     deleteAfterSeconds: row.delete_after_seconds,
     cleanupPrevious: !!row.cleanup_previous,
+    group: row.group_name || undefined,
     nextRunAt: row.next_run_at,
     lastRunAt: row.last_run_at,
     lastResult: (row.last_result as Task["lastResult"]) ?? null,
@@ -203,6 +206,11 @@ export class Store {
     }
     try {
       this.sql.exec("ALTER TABLE tasks ADD COLUMN name_auto INTEGER");
+    } catch {
+      /* 列已存在 */
+    }
+    try {
+      this.sql.exec("ALTER TABLE tasks ADD COLUMN group_name TEXT");
     } catch {
       /* 列已存在 */
     }
@@ -312,9 +320,9 @@ export class Store {
   createTask(input: TaskInput, now: number, nextRunAt: number | null): Task {
     this.sql.exec(
       `INSERT INTO tasks (name, name_auto, enabled, target, targets, thread_id, schedule, steps, success_keywords,
-         timeout_seconds, step_delay_seconds, delete_after_seconds, cleanup_previous, next_run_at,
+         timeout_seconds, step_delay_seconds, delete_after_seconds, cleanup_previous, group_name, next_run_at,
          last_run_at, last_result, last_message, source, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       input.name,
       input.nameAuto === undefined ? null : input.nameAuto ? 1 : 0,
       input.enabled ? 1 : 0,
@@ -328,6 +336,7 @@ export class Store {
       input.stepDelaySeconds ?? 3,
       input.deleteAfterSeconds ?? 0,
       input.cleanupPrevious ? 1 : 0,
+      input.group ?? null,
       nextRunAt,
       input.lastRunAt ?? null,
       input.lastResult ?? null,
@@ -354,7 +363,7 @@ export class Store {
     this.sql.exec(
       `UPDATE tasks SET name = ?, name_auto = ?, enabled = ?, target = ?, targets = ?, thread_id = ?, schedule = ?, steps = ?,
          success_keywords = ?, timeout_seconds = ?, step_delay_seconds = ?, delete_after_seconds = ?,
-         cleanup_previous = ?, next_run_at = ?, last_run_at = ?, last_result = ?, last_message = ?,
+         cleanup_previous = ?, group_name = ?, next_run_at = ?, last_run_at = ?, last_result = ?, last_message = ?,
          last_detail = ?, updated_at = ?
        WHERE id = ?`,
       merged.name,
@@ -370,6 +379,7 @@ export class Store {
       merged.stepDelaySeconds ?? 3,
       merged.deleteAfterSeconds ?? 0,
       merged.cleanupPrevious ? 1 : 0,
+      merged.group ?? null,
       merged.nextRunAt ?? null,
       merged.lastRunAt ?? null,
       merged.lastResult ?? null,

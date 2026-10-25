@@ -290,6 +290,7 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
   let onlyOnce = false;
   let useHere = false;
   let nameOverride = "";
+  let group: string | undefined;
   let pendingText = "";
 
   const pushText = (value: string) => {
@@ -435,6 +436,12 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
         nameOverride = value;
         break;
       }
+      case "group":
+      case "分组": {
+        flushText();
+        group = value.trim().slice(0, 20) || undefined;
+        break;
+      }
       case "to":
       case "at":
       case "到": {
@@ -509,6 +516,7 @@ export function parseTrigger(raw: string, ctx: TriggerContext = {}): ParseResult
     stepDelaySeconds,
     deleteAfterSeconds,
     cleanupPrevious,
+    group,
     source: "trigger",
   };
 

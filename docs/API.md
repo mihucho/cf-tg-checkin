@@ -80,6 +80,7 @@
   "enabled": true,
   "target": { "kind": "user", "id": "7661096533", "title": "Jerry Bot", "username": "jerry_bot" },
   "targets": [ /* 可选：多目标，第一项与 target 相同，最多 8 个 */ ],
+  "group": "日常签到",        // 可选：任务分组（≤20 字，空 = 未分组）
                                     // title 是 Telegram 里显示的群名/机器人名，任务名优先用它
   "threadId": null,                 // 群组话题 id
   "schedule": {

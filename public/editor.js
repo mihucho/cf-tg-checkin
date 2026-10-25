@@ -148,6 +148,27 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
     },
   });
 
+  const groupListId = id("group-list");
+  const groupInput = el("input", {
+    class: "input",
+    id: id("group"),
+    value: model.group,
+    placeholder: "例如：日常签到",
+    autocomplete: "off",
+    maxlength: "20",
+    list: groupListId,
+    oninput: (event) => {
+      model.group = event.target.value;
+    },
+  });
+  const groupOptions = el(
+    "datalist",
+    { id: groupListId },
+    ...((typeof window.__taskGroups === "function" ? window.__taskGroups() : []) || []).map((name) =>
+      el("option", { value: name }),
+    ),
+  );
+
   const targetInput = el("input", {
     class: "input",
     id: id("target"),
@@ -763,6 +784,13 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
       { class: "editor-section" },
       el("h3", { class: "editor-section-title" }, "基本信息"),
       field({ id: id("name"), label: "任务名称", control: nameInput }),
+      field({
+        id: id("group"),
+        label: "分组（可选）",
+        control: groupInput,
+        hint: "同一个分组的任务会在列表里折叠在一起，例如「日常签到」「群活动」。",
+      }),
+      groupOptions,
       el(
         "div",
         { class: "field" },
@@ -869,6 +897,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
           stepDelaySeconds: clampInt(model.stepDelaySeconds, 0, 60, 3),
           deleteAfterSeconds: clampInt(model.deleteAfterSeconds, 0, 86400, 0),
           cleanupPrevious: Boolean(model.cleanupPrevious),
+          group: String(model.group || "").trim() || undefined,
           threadId: model.threadId ?? null,
           source: "ui",
         };
@@ -1070,6 +1099,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", onSaved } = {}
           stepDelaySeconds: clampInt(model.stepDelaySeconds, 0, 60, 3),
           deleteAfterSeconds: clampInt(model.deleteAfterSeconds, 0, 86400, 0),
           cleanupPrevious: Boolean(model.cleanupPrevious),
+          group: String(model.group || "").trim() || undefined,
         };
         if (task && task.threadId) payload.threadId = task.threadId;
 

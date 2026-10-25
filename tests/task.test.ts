@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "./harness.ts";
 import { applyTargetPatch, normalizeTaskInput, shouldAutoRename, taskFingerprint, taskToExport } from "../src/task.ts";
 import { taskToCommand } from "../src/schedule/command.ts";
+import { parseTrigger } from "../src/schedule/dsl.ts";
 import { redactSettings, shouldAutoFillAdminId } from "../src/settings.ts";
 import { DEFAULT_SETTINGS, type Task, type TaskInput } from "../src/types.ts";
 
@@ -315,4 +316,27 @@ test("normalizeTaskInput：保留 nameAuto 标记", () => {
 test("taskToExport：导出带上 nameAuto，便于导入后保持原来的命名意图", () => {
   const task = { ...normalizeTaskInput(input({ nameAuto: true })), id: 7 } as never;
   assert.equal(taskToExport(task).nameAuto, true);
+});
+
+/* ---------- 任务分组 ---------- */
+
+test("normalizeTaskInput：分组去空白、限长 20，空值落成 undefined", () => {
+  assert.equal(normalizeTaskInput(input({ group: "  日常签到  " })).group, "日常签到");
+  assert.equal(normalizeTaskInput(input({ group: "" })).group, undefined);
+  assert.equal(normalizeTaskInput(input({ group: "   " })).group, undefined);
+  assert.equal(normalizeTaskInput(input({ group: "字".repeat(30) })).group?.length, 20);
+});
+
+test("指令往返：分组走 #group:", () => {
+  const task = normalizeTaskInput(input({ group: "群活动" }));
+  const command = taskToCommand(task);
+  assert.match(command, /#group:群活动/);
+  const parsed = parseTrigger(command.replace(/^tg\s+/, ""), { allowMissingTarget: true });
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.ok && parsed.result.task?.group, "群活动");
+});
+
+test("import/export：分组跟着任务一起走", () => {
+  const task = { ...normalizeTaskInput(input({ group: "日常签到" })), id: 9 } as never;
+  assert.equal(taskToExport(task).group, "日常签到");
 });

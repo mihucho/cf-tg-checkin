@@ -18,6 +18,7 @@ export interface CommandSource {
   stepDelaySeconds?: number;
   deleteAfterSeconds?: number;
   cleanupPrevious?: boolean;
+  group?: string;
   threadId?: number | null;
 }
 
@@ -144,6 +145,7 @@ export function taskToCommand(task: CommandSource, prefix = "tg"): string {
   const deleteAfter = Number(task.deleteAfterSeconds ?? 0);
   if (Number.isFinite(deleteAfter) && deleteAfter > 0) parts.push(`#delete:${deleteAfter}`);
 
+  if (task.group) parts.push(`#group:${quoteIfNeeded(task.group)}`);
   if (task.threadId) parts.push(`#thread:${task.threadId}`);
   if (task.cleanupPrevious === false) parts.push("#keep");
 

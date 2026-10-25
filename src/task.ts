@@ -11,6 +11,7 @@ const MAX_NAME = 80;
 const MAX_HANDLE = 80;
 const MAX_STEP_TEXT = 500;
 const MAX_KEYWORDS = 20;
+const MAX_GROUP = 20;
 
 function clampText(value: unknown, max: number): string {
   return String(value ?? "").slice(0, max);
@@ -115,6 +116,7 @@ export function normalizeTaskInput(input: TaskInput | Task): TaskInput {
     stepDelaySeconds: Math.max(0, Math.min(60, Number(input.stepDelaySeconds ?? 3))),
     deleteAfterSeconds: Math.max(0, Math.min(3600, Number(input.deleteAfterSeconds ?? 0))),
     cleanupPrevious: input.cleanupPrevious !== false,
+    group: clampText(input.group, MAX_GROUP).trim() || undefined,
     source: input.source ?? "ui",
     nextRunAt: input.nextRunAt ?? null,
     lastRunAt: input.lastRunAt ?? null,
@@ -181,6 +183,7 @@ export function taskToExport(task: Task): TaskInput {
     stepDelaySeconds: task.stepDelaySeconds,
     deleteAfterSeconds: task.deleteAfterSeconds,
     cleanupPrevious: task.cleanupPrevious,
+    group: task.group,
     source: task.source,
   };
 }

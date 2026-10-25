@@ -823,7 +823,121 @@ function renderTasks() {
           ),
         )
       : null,
-    el("div", { class: "card table-card" }, el("div", { class: "table-wrap" }, taskTable(tasks))),
+    (() => {
+      const groups = taskGroupList(tasks);
+      // 选中的分组没了（任务被改/删）→ 回到「全部」
+      const stored = activeTaskGroup();
+      const activeKey = groups.items.some((item) => item.key === stored) ? stored : "";
+      const visible = tasksInGroup(tasks, activeKey);
+      const rail = taskGroupRail(groups, activeKey);
+      const table = el("div", { class: "card table-card" }, el("div", { class: "table-wrap" },
+        visible.length
+          ? taskTable(visible)
+          : emptyState({
+              iconName: "list",
+              title: "这个分组还没有任务",
+              text: "在编辑器里给任务填上分组名，它就会出现在这里。",
+              actions: [newTaskBtn("primary", "新建任务")],
+            }),
+      ));
+
+      if (!rail) return table;
+
+      return el(
+        "div",
+        { class: "tasks-layout" },
+        rail,
+        el("div", { class: "tasks-main" }, table),
+      );
+    })(),
+  );
+}
+
+const TASK_GROUP_KEY = "cf-tg.taskGroup.active";
+
+/** 侧栏里的分组项：全部 / 各分组 / 未分组 */
+function taskGroupList(tasks) {
+  const named = new Map();
+  let ungrouped = 0;
+  for (const task of tasks) {
+    const name = (task.group || "").trim();
+    if (name) named.set(name, (named.get(name) || 0) + 1);
+    else ungrouped += 1;
+  }
+  return {
+    hasGroups: named.size > 0,
+    items: [
+      { key: "", label: "全部", count: tasks.length },
+      ...[...named.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0], "zh"))
+        .map(([name, count]) => ({ key: name, label: name, count })),
+      ...(ungrouped ? [{ key: "__ungrouped", label: "未分组", count: ungrouped }] : []),
+    ],
+  };
+}
+
+function activeTaskGroup() {
+  try {
+    return localStorage.getItem(TASK_GROUP_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function setActiveTaskGroup(key) {
+  try {
+    if (key) localStorage.setItem(TASK_GROUP_KEY, key);
+    else localStorage.removeItem(TASK_GROUP_KEY);
+  } catch {
+    /* 隐私模式忽略 */
+  }
+}
+
+/** 当前分组下的任务（未分组的任务归到「未分组」） */
+function tasksInGroup(tasks, key) {
+  if (!key) return tasks;
+  if (key === "__ungrouped") return tasks.filter((task) => !(task.group || "").trim());
+  return tasks.filter((task) => (task.group || "").trim() === key);
+}
+
+/** 任务行的通用点击行为（点空白处打开详情） */
+function taskRowClickable(task) {
+  const row = taskRow(task);
+  row.classList.add("is-clickable");
+  row.addEventListener("click", (event) => {
+    if (isInteractiveClick(event)) return;
+    void openTaskDetail(task);
+  });
+  return row;
+}
+
+/** 左侧分组栏（没有分组时不渲染，保持原来的单栏布局） */
+function taskGroupRail(groups, activeKey) {
+  if (!groups.hasGroups) return null;
+  return el(
+    "aside",
+    { class: "group-rail", "aria-label": "任务分组" },
+    el(
+      "div",
+      { class: "group-rail-title" },
+      "分组",
+    ),
+    ...groups.items.map((item) =>
+      el(
+        "button",
+        {
+          class: `group-rail-item${activeKey === item.key ? " is-active" : ""}`,
+          type: "button",
+          "aria-pressed": String(activeKey === item.key),
+          onclick: () => {
+            setActiveTaskGroup(item.key);
+            paint({ force: true });
+          },
+        },
+        el("span", { class: "group-rail-name cell-trunc" }, item.label),
+        el("span", { class: "group-rail-count num" }, String(item.count)),
+      ),
+    ),
   );
 }
 
@@ -849,15 +963,7 @@ function taskTable(tasks) {
     el(
       "tbody",
       {},
-      tasks.map((task) => {
-        const row = taskRow(task);
-        row.classList.add("is-clickable");
-        row.addEventListener("click", (event) => {
-          if (isInteractiveClick(event)) return;
-          void openTaskDetail(task);
-        });
-        return row;
-      }),
+      tasks.map((task) => taskRowClickable(task)),
     ),
   );
 }
@@ -1203,6 +1309,10 @@ const TASK_TEMPLATES = [
 ];
 
 // editor.js 里要展示同一份模板，这里挂到 window 上避免循环 import
+window.__taskGroups = () =>
+  [...new Set(((state.data && state.data.tasks) || []).map((task) => (task.group || "").trim()).filter(Boolean))].sort(
+    (a, b) => a.localeCompare(b, "zh"),
+  );
 window.__openEditorTemplate = (template) => void openTemplate(template);
 window.__openEditorTemplates = () => [
   ...TASK_TEMPLATES,
