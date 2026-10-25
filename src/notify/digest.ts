@@ -29,7 +29,9 @@ export interface DigestCardRow {
 
 export interface DigestCard {
   title: string;
-  /** 两列「指标 → 数值」，在卡片里渲染成字段/表格 */
+  /** 一行汇总（钉钉/企业微信这类只支持有限 markdown 的渠道用它，比两列堆叠好读） */
+  summary?: string;
+  /** 两列「指标 → 数值」，飞书卡片渲染成字段 */
   rows: DigestCardRow[];
   /** 需要逐条列出的内容（失败任务等） */
   bullets: string[];
@@ -89,13 +91,14 @@ export function buildDigest(stats: DigestStats, options: { timezone: number; now
   const bullets: string[] = [];
   const footnotes: string[] = [];
   const lines: string[] = [];
+  let summary = "今天没有任务执行记录。";
 
   if (!total) {
     lines.push("今天没有任务执行记录。");
-    bullets.push("今天没有任务执行记录");
   } else {
     const rate = Math.round((stats.ok / total) * 100);
-    lines.push(`执行 ${total} 次：成功 ${stats.ok} · 失败 ${stats.fail}（成功率 ${rate}%）`);
+    summary = `执行 ${total} 次：成功 ${stats.ok} · 失败 ${stats.fail}（成功率 ${rate}%）`;
+    lines.push(summary);
     rows.push({ label: "执行次数", value: String(total) });
     rows.push({ label: "成功 / 失败", value: `${stats.ok} / ${stats.fail}` });
     rows.push({ label: "成功率", value: `${rate}%` });
@@ -103,8 +106,9 @@ export function buildDigest(stats: DigestStats, options: { timezone: number; now
 
   if (stats.failedTasks.length) {
     const shown = stats.failedTasks.slice(0, 5);
-    lines.push(`失败任务：${shown.join("、")}${stats.failedTasks.length > shown.length ? " 等" : ""}`);
-    bullets.push(...shown);
+    const line = `失败任务：${shown.join("、")}${stats.failedTasks.length > shown.length ? " 等" : ""}`;
+    lines.push(line);
+    bullets.push(line);
   }
 
   lines.push(`任务 ${stats.totalTasks} 个（启用 ${stats.enabledTasks}）`);
@@ -120,7 +124,7 @@ export function buildDigest(stats: DigestStats, options: { timezone: number; now
     footnotes.push(`最近一次：${stats.lastMessage.slice(0, 80)}`);
   }
 
-  return { title, text: lines.join("\n"), card: { title, rows, bullets, footnotes } };
+  return { title, text: lines.join("\n"), card: { title, summary, rows, bullets, footnotes } };
 }
 
 /** 从当天日志里挑出失败的任务名（去重，保留最近的顺序；只算执行日志） */
@@ -212,14 +216,15 @@ export function buildWeeklyDigest(stats: WeeklyStats, options: { timezone: numbe
   const rows: DigestCardRow[] = [];
   const bullets: string[] = [];
   const footnotes: string[] = [];
+  let summary = "本周没有任务执行记录。";
 
   if (!total && !prevTotal) {
     lines.push("本周没有任务执行记录。");
-    bullets.push("本周没有任务执行记录");
   } else {
     const rate = total ? Math.round((stats.ok / total) * 100) : 0;
     const prevRate = prevTotal ? Math.round((stats.prevOk / prevTotal) * 100) : null;
-    lines.push(`本周执行 ${total} 次：成功 ${stats.ok} · 失败 ${stats.fail}（成功率 ${rate}%）`);
+    summary = `本周执行 ${total} 次：成功 ${stats.ok} · 失败 ${stats.fail}（成功率 ${rate}%）`;
+    lines.push(summary);
     rows.push({ label: "本周执行", value: `${total} 次` });
     rows.push({ label: "成功 / 失败", value: `${stats.ok} / ${stats.fail}` });
     rows.push({ label: "本周成功率", value: `${rate}%` });
@@ -237,7 +242,7 @@ export function buildWeeklyDigest(stats: WeeklyStats, options: { timezone: numbe
   if (stats.topFailed.length) {
     const list = stats.topFailed.slice(0, 5).map((item) => `${item.name}（${item.count} 次）`).join("、");
     lines.push(`失败最多的任务：${list}`);
-    bullets.push(...stats.topFailed.slice(0, 5).map((item) => `${item.name} —— ${item.count} 次`));
+    bullets.push(`失败最多：${list}`);
   }
 
   lines.push(`任务 ${stats.totalTasks} 个（启用 ${stats.enabledTasks}）`);
@@ -249,7 +254,7 @@ export function buildWeeklyDigest(stats: WeeklyStats, options: { timezone: numbe
     footnotes.push(`下次执行 ${text}`);
   }
 
-  return { title, text: lines.join("\n"), card: { title, rows, bullets, footnotes } };
+  return { title, text: lines.join("\n"), card: { title, summary, rows, bullets, footnotes } };
 }
 
 /** 从日志里统计「每个任务失败几次」，降序返回 */

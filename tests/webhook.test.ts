@@ -129,10 +129,13 @@ test("卡片：钉钉用 markdown 包体", () => {
   const body = JSON.parse(buildWebhookBody("dingtalk", { ...message, card: digestCard }));
   assert.equal(body.msgtype, "markdown");
   assert.equal(body.markdown.title, "📊 签到日报 10/24");
-  assert.match(body.markdown.text, /### 📊 签到日报 10\/24/);
-  assert.match(body.markdown.text, /\*\*成功率\*\*：75% {2}/);
-  assert.match(body.markdown.text, /- 每日签到/);
-  assert.match(body.markdown.text, /> 任务 5 个（启用 4）/);
+  assert.match(body.markdown.text, /^### 📊 签到日报 10\/24/);
+  // 一行汇总放在加粗里（钉钉 markdown 不支持表格，别堆成两列）
+  assert.match(body.markdown.text, /\*\*执行 12 次：成功 9 · 失败 3（成功率 75%）\*\*/);
+  assert.match(body.markdown.text, /- 失败任务：每日签到、群签到/);
+  assert.match(body.markdown.text, /- 任务 5 个（启用 4）/);
+  assert.match(body.markdown.text, /- 下次执行 10\/25 09:30/);
+  assert.doesNotMatch(body.markdown.text, /\n{3,}/, "不该出现连续空行");
   assert.equal(body.at.isAtAll, false);
 });
 
@@ -146,7 +149,7 @@ test("卡片：飞书用交互卡片 + 两列 fields", () => {
   assert.match(fields[0].text.content, /执行次数/);
   // 明细 + 备注都在
   const text = JSON.stringify(body.card.elements);
-  assert.match(text, /每日签到/);
+  assert.match(text, /失败任务：每日签到、群签到/);
   assert.match(text, /任务 5 个（启用 4）/);
 });
 
@@ -166,8 +169,10 @@ test("卡片：企业微信用 markdown，周报标题换颜色", () => {
   ).card;
   const wecom = JSON.parse(buildWebhookBody("wecom", { ...message, card: weekly }));
   assert.equal(wecom.msgtype, "markdown");
-  assert.match(wecom.markdown.content, /本周执行\*\*：25 次/);
-  assert.match(wecom.markdown.content, /↑ 30 个百分点/);
+  // 企业微信不支持 ### 标题，用加粗标题代替
+  assert.match(wecom.markdown.content, /^\*\*📈 签到周报/);
+  assert.doesNotMatch(wecom.markdown.content, /^###/m);
+  assert.match(wecom.markdown.content, /\*\*本周执行 25 次：成功 20 · 失败 5（成功率 80%）\*\*/);
 
   const feishu = JSON.parse(buildWebhookBody("feishu", { ...message, card: weekly }));
   assert.equal(feishu.card.header.template, "indigo", "周报用另一种主题色");

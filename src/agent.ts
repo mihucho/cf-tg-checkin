@@ -2123,10 +2123,27 @@ export class TgAgent implements DurableObject {
           .join("\n\n"),
         sent: outcomes.flatMap((item) => item.outcome.sent),
         chatId: outcomes[0].outcome.chatId,
+        // 单目标时直接用那次的结果；多目标时拼成列表
+        replyText:
+          targets.length > 1
+            ? outcomes
+                .filter((item) => item.outcome.replyText)
+                .map((item) => `${item.target.username || item.target.id}：${item.outcome.replyText}`)
+                .join("；") || null
+            : outcomes[0].outcome.replyText,
+        peerKind: outcomes[0].outcome.peerKind,
       };
 
       this.store.setJson(sentKey, outcome.sent);
-      this.store.recordRun(task.id, outcome.ok ? "ok" : "fail", outcome.message, outcome.detail || null, Date.now());
+      // 「对方回了什么」既是排查依据，也是没有关键词时的成功观感
+      const replyNote = outcome.replyText ? `\n▶ 回复：${outcome.replyText.slice(0, 200)}` : "";
+      this.store.recordRun(
+        task.id,
+        outcome.ok ? "ok" : "fail",
+        outcome.message,
+        `${outcome.detail}${replyNote}` || null,
+        Date.now(),
+      );
       log = this.store.addLog({
         taskId: task.id,
         taskName: task.name,
@@ -2134,7 +2151,7 @@ export class TgAgent implements DurableObject {
         ok: outcome.ok,
         level: outcome.ok ? "info" : "warn",
         message: outcome.message,
-        detail: outcome.detail || null,
+        detail: `${outcome.detail}${replyNote}` || null,
         source: triggerSource,
         durationMs: Date.now() - startedAt,
       });

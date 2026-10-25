@@ -200,21 +200,25 @@ export async function buildWebhookUrl(
   return url.toString();
 }
 
-/** 卡片里的两列指标渲染成 Markdown（钉钉/企微的 markdown 不支持表格，用加粗行代替） */
-export function cardToMarkdown(card: DigestCard): string {
-  const parts: string[] = [`### ${card.title}`];
-  if (card.rows.length) parts.push("");
-  for (const row of card.rows) {
-    parts.push(`**${row.label}**：${row.value}  `);
-  }
-  if (card.bullets.length) {
-    parts.push("", "**明细**");
-    for (const item of card.bullets) parts.push(`- ${item}`);
-  }
-  if (card.footnotes.length) {
-    parts.push("", `> ${card.footnotes.join(" · ")}`);
-  }
-  return parts.join("\n").trim();
+/**
+ * 卡片 → Markdown（钉钉 / 企业微信用）。
+ *
+ * 这两家的 markdown 是子集：钉钉支持 `###` 标题，企业微信不支持；
+ * 两家都**不支持表格**，所以不用两列堆叠，改成
+ *   一行加粗汇总 + 列表明细 + 列表备注
+ * —— 比 `**指标**：值` 硬换行好看，也不会把备注挤成一行。
+ */
+export function cardToMarkdown(card: DigestCard, options: { heading?: boolean } = {}): string {
+  const lines: string[] = [];
+  const useHeading = options.heading !== false;
+
+  lines.push(useHeading ? `### ${card.title}` : `**${card.title}**`, "");
+  if (card.summary) lines.push(`**${card.summary}**`, "");
+  // 明细与备注合成一个列表（中间空行在钉钉里会被当成两个列表，读起来断裂）
+  for (const bullet of card.bullets) lines.push(`- ${bullet}`);
+  for (const footnote of card.footnotes) lines.push(`- ${footnote}`);
+
+  return lines.join("\n").trim();
 }
 
 /** 飞书交互卡片（两列 fields 是最接近表格的排版，且稳定支持） */
@@ -258,12 +262,13 @@ export function buildWebhookBody(kind: WebhookKind, message: WebhookMessage): st
     if (kind === "dingtalk") {
       return JSON.stringify({
         msgtype: "markdown",
-        markdown: { title: card.title, text: cardToMarkdown(card) },
+        markdown: { title: card.title, text: cardToMarkdown(card, { heading: true }) },
         at: { isAtAll: false },
       });
     }
     if (kind === "wecom") {
-      return JSON.stringify({ msgtype: "markdown", markdown: { content: cardToMarkdown(card) } });
+      // 企业微信的 markdown 不支持 `###` 标题
+      return JSON.stringify({ msgtype: "markdown", markdown: { content: cardToMarkdown(card, { heading: false }) } });
     }
     if (kind === "feishu") {
       return JSON.stringify({ msg_type: "interactive", card: cardToFeishu(card) });

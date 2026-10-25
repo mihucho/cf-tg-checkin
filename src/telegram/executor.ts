@@ -17,6 +17,8 @@ export interface ExecHooks {
   log(level: LogLevel, message: string): void;
 }
 
+export type PeerKind = "bot" | "user" | "group" | "channel";
+
 export interface ExecuteOutcome {
   ok: boolean;
   message: string;
@@ -24,6 +26,11 @@ export interface ExecuteOutcome {
   sent: number[];
   /** 聊天 id（字符串），用于稍后删除 */
   chatId: string | null;
+  /** 目标是什么（机器人 / 普通用户 / 群组 / 频道） */
+  peerKind: PeerKind;
+  /** 最后一步之后，对方回的第一条消息 */
+  replyText: string | null;
+  replyId: number | null;
 }
 
 export function sleep(ms: number): Promise<void> {
@@ -154,6 +161,48 @@ export async function resolveEntity(client: TelegramClient, target: Target | str
     `无法解析目标「${ref || (peer ? "access_hash" : "")}」：${rawMessage}；` +
       `私有机器人请先在 Telegram 里和它对话，或把任务目标改成 @username`,
   );
+}
+
+/**
+ * 判断目标是机器人 / 普通用户 / 群组 / 频道。
+ *
+ * 为什么要区分：签到类机器人只回**文本**（不是按钮），群组里则是"别人发的第一条消息"，
+ * 点按钮的流程里"回复"就是那条新菜单。上层据此决定等什么、日志里怎么说。
+ */
+export function classifyPeer(entity: unknown): PeerKind {
+  const value = entity as
+    | { bot?: boolean; className?: string; _?: string; megagroup?: boolean; broadcast?: boolean }
+    | null
+    | undefined;
+  if (!value) return "user";
+  if (value.bot === true) return "bot";
+
+  const className = String(value.className ?? value._ ?? "");
+  if (/Channel/i.test(className)) {
+    if (value.broadcast === true) return "channel";
+    if (value.megagroup === true) return "group";
+    return value.broadcast === false ? "group" : "channel";
+  }
+  if (/Chat/i.test(className)) return "group";
+  return "user";
+}
+
+/**
+ * 从最近的消息里挑出「最后一步之后、对方发的第一条」。
+ *
+ * `out` 表示消息是我们自己发的（自己的账号），必须排除；群组里任何人发的都算。
+ */
+export function pickFirstPeerReply<T extends { id: number; out?: boolean; message?: string }>(
+  messages: T[],
+  afterId: number,
+): T | null {
+  let best: T | null = null;
+  for (const message of messages) {
+    if (message.id <= afterId) continue;
+    if (message.out) continue;
+    if (!best || message.id < best.id) best = message;
+  }
+  return best;
 }
 
 export interface ButtonInfo {
@@ -381,6 +430,32 @@ async function waitForInteractive(
  * HumanTG 适配器就是走这条路（它对按钮类型、switch_inline、password 的处理更全）。
  * 我们的手写实现覆盖不到的类型（或 layer 差异）就交给它。
  */
+/**
+ * 等「对方的第一条回复」。和 waitForInteractive 的区别：这里不限按钮，纯文本也算。
+ * 机器人签到通常只回一句「签到成功」，群组里则是别人接的那句话。
+ */
+async function waitForPeerReply(
+  client: TelegramClient,
+  entity: EntityLike,
+  afterId: number,
+  deadline: number,
+  hooks: ExecHooks,
+  options: { pollIntervalMs: number },
+): Promise<{ id: number; text: string } | null> {
+  while (Date.now() < deadline) {
+    let messages: Api.Message[] = [];
+    try {
+      messages = await fetchRecent(client, entity);
+    } catch (error) {
+      hooks.log("warn", `拉取消息失败：${errorMessage(error)}`);
+    }
+    const reply = pickFirstPeerReply(messages, afterId);
+    if (reply) return { id: reply.id, text: (reply.message ?? "").trim() };
+    await sleep(options.pollIntervalMs);
+  }
+  return null;
+}
+
 async function clickWithTeleprotoHelper(
   message: Api.Message,
   button: ButtonInfo,
@@ -508,6 +583,8 @@ export async function executeTask(
 
   const entity = options.entity ?? (await resolveEntity(client, task.target));
   const chatId = String((entity as { id?: unknown }).id ?? task.target.id);
+  const peerKind = classifyPeer(entity);
+  const peerLabel = { bot: "机器人", user: "用户", group: "群组", channel: "频道" }[peerKind];
   const timeoutMs = Math.max(5, Math.min(90, task.timeoutSeconds || 25)) * 1000;
   /** 每等待一次机器人回复的超时时间（从每次等待开始算，不被步骤间隔吃掉） */
   const interactiveDeadline = () => Date.now() + timeoutMs;
@@ -532,6 +609,8 @@ export async function executeTask(
       note("warn", `清理上次消息失败：${errorMessage(error)}`);
     }
   }
+
+  note("info", `目标类型：${peerLabel}`);
 
   const baseline = await latestMessageId(client, entity);
   let interactive: InteractiveMessage | null = null;
@@ -664,16 +743,51 @@ export async function executeTask(
       detail: detail.join("\n"),
       sent,
       chatId,
+      peerKind,
+      replyText: null,
+      replyId: null,
     };
   }
 
-  // 判定成功
+  // ---------- 最后一步之后：等对方的第一条回复 ----------
+  // 机器人签到多数只回**文本**（不点按钮），所以这里必须单独等一次，
+  // 而且群组/普通用户也要能拿到"最后一步之后别人回的第一条"。
+  const lastStep = task.steps[task.steps.length - 1];
+  const expectsReply =
+    Boolean(task.successKeywords?.length) ||
+    lastStep === undefined ||
+    lastStep.type === "text" ||
+    lastStep.type === "random" ||
+    lastStep.type === "number";
+
+  let replyText: string | null = null;
+  let replyId: number | null = null;
+  if (expectsReply) {
+    const found = await waitForPeerReply(
+      client,
+      entity,
+      cursorId,
+      Math.min(interactiveDeadline(), stepWaitDeadline()),
+      hooks,
+      { pollIntervalMs },
+    );
+    if (found) {
+      replyText = found.text || "（无文本内容）";
+      replyId = found.id;
+      note("info", `收到${peerLabel}回复 #${found.id}：${replyText.slice(0, 120)}`);
+    } else if (task.successKeywords?.length) {
+      note("warn", `等待 ${Math.round((options.stepWaitMs ?? 30_000) / 1000)}s 没等到回复`);
+    }
+  }
+
+  // ---------- 判定成功 ----------
   let ok = true;
   let message = "执行完成";
   if (task.successKeywords?.length) {
+    // 用「最后一步之后的全部回复」判定（回复可能分好几条）
     const messages = await fetchRecent(client, entity).catch(() => [] as Api.Message[]);
-    const fresh = messages.filter((item) => item.id > baseline && !item.out);
-    const texts = fresh.map((item) => item.message ?? "");
+    const fresh = messages.filter((item) => item.id > Math.min(baseline, cursorId) && !item.out);
+    const texts = fresh.map((item) => (item.message ?? "").trim()).filter(Boolean);
     const hit = task.successKeywords.find((keyword) => texts.some((text) => text.includes(keyword)));
     if (hit) {
       message = `命中关键词「${hit}」`;
@@ -681,10 +795,12 @@ export async function executeTask(
     } else {
       ok = false;
       message = `未匹配到关键词（${task.successKeywords.join(" / ")}）`;
-      const preview = texts.filter(Boolean).slice(-2).join(" | ");
+      const preview = texts.slice(-2).join(" | ");
       note("warn", preview ? `${message}；最近回复：${preview.slice(0, 300)}` : message);
     }
+  } else if (replyText) {
+    message = `执行完成 · 收到回复「${replyText.slice(0, 40)}」`;
   }
 
-  return { ok, message, detail: detail.join("\n"), sent, chatId };
+  return { ok, message, detail: detail.join("\n"), sent, chatId, peerKind, replyText, replyId };
 }
