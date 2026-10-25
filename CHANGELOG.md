@@ -35,6 +35,12 @@ push 后 `.github/workflows/release.yml` 会自动：跑检查 → 写 `package.
 
 ## [Unreleased]
 
+### 排查
+
+- `/api/state` 的 `runtime` 里加上 `build`（version / buildId / commit）：
+  部署后 Worker 与 Durable Object 可能短暂不同步（旧 isolate 还在跑，新接口会 404），
+  对比 `/api/version` 与 `runtime.build.buildId` 就能立刻判断是不是这种情况
+
 ### 新增
 
 - **批量删除任务**：任务页「批量删除」进入选择模式，每行出现复选框，底部操作条可以

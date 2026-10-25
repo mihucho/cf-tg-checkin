@@ -64,6 +64,7 @@ import { messageTargetHint, usernameFromLink, type MessageLike, type MessageTarg
 import type { Env } from "./env";
 import { bucketDaily } from "./events";
 import { applyTargetPatch, normalizeTaskInput, shouldAutoRename, taskFingerprint, taskToExport } from "./task";
+import { BUILD } from "./version";
 import { redactSettings, shouldAutoFillAdminId } from "./settings";
 
 interface Credentials {
@@ -2581,6 +2582,9 @@ export class TgAgent implements DurableObject {
         throttled: Boolean(item.throttled),
       })),
       runtime: {
+        // DO 自己的构建信息：Worker 与 DO 可能短暂不同步（部署后旧 isolate 还在跑），
+        // 排查「接口 404 但 /api/version 是新的」时看这里
+        build: BUILD,
         storage: this.storageUsage(),
         colo: this.store.getKv("runtime:colo"),
         locationHint: this.env.DO_LOCATION_HINT ?? null,

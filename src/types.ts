@@ -213,6 +213,8 @@ export interface AgentState {
   };
   /** 运行时信息：最近一次请求来自哪个 colo、DO 创建区域提示 */
   runtime?: {
+    /** DO 自己的构建信息（用于判断 Worker 与 DO 是否同步更新） */
+    build?: { version: string; buildId: string; commit: string };
     /** 存储用量（字节 / 估算上限 / 百分比） */
     storage?: { bytes: number; limitBytes: number; percent: number };
     colo: string | null;
