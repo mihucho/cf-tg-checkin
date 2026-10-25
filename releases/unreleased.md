@@ -76,6 +76,8 @@ title: v0.18.0 — 回复识别、类型标记与设置页改版
   只有这个文件变化才触发；自动 bump 版本、插 CHANGELOG、归档、打 annotated tag、建 Release、触发部署
 - 单测 145 → **147**，端到端 **48** 项（真起 `wrangler dev` 打 Worker → DO → SQLite）
 - 审计报告：`deliverables/audits/audit-0.10.0.md`（26 项发现，P0/P1 已全部修复）
+- 发布流水线：`git tag` 步骤补上提交者身份（release-only 模式会跳过版本提交那步，
+  之前因此报 `empty ident name`）
 
 ## 升级注意
 

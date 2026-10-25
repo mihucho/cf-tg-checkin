@@ -31,6 +31,13 @@ jobs:
           node-version: 22
           cache: npm
 
+      # 身份必须在这里配：release-only 模式会跳过「提交版本号」那一步，
+      # 但 `git tag -a` 同样需要 committer 身份（不然报 empty ident name）
+      - name: 配置 git 身份
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       - name: 解析发布文档
         id: prepare
         run: node scripts/release.mjs
@@ -61,8 +68,6 @@ jobs:
           NOTES_FILE: ${{ steps.prepare.outputs.notes_file }}
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json package-lock.json CHANGELOG.md releases
           if git diff --cached --quiet; then
             echo "没有需要提交的改动（可能已经发过这个版本）"
