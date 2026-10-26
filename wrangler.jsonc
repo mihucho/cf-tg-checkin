@@ -29,9 +29,11 @@
       "new_sqlite_classes": ["TgAgent"]
     }
   ],
+  // 关闭 Workers Logs（可观测性采集）：排障请看管理界面的「日志」页，
+  // 那是我们自己写进 DO SQLite 的执行记录；Worker 平台的日志按请求采样，
+  // 免费额度下既不便宜也没必要。
   "observability": {
-    "enabled": true,
-    "head_sampling_rate": 1
+    "enabled": false
   },
   // 兜底：正常调度靠 DO alarm，这里只是保险（例如 alarm 丢失时补一次）
   "triggers": {

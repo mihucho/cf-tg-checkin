@@ -35,6 +35,12 @@ push 后 `.github/workflows/release.yml` 会自动：跑检查 → 写 `package.
 
 ## [Unreleased]
 
+### 工程
+
+- **关闭 Workers Logs**（`wrangler.jsonc` 的 `observability.enabled: false`）：平台侧按请求采样，
+  免费额度下既不便宜也没必要；排障请看管理界面的「日志」页（那是我们写进 DO SQLite 的执行记录，
+  不受这个开关影响）
+
 ### 修复
 
 - **脱敏符号统一成 `****`**：之前手机号用 `*`、id / Webhook 用 `…`，同一个页面里两种写法。
