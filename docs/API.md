@@ -10,6 +10,7 @@
 | 方法 | 路径 | 请求体 | 响应 |
 | --- | --- | --- | --- |
 | GET | `/api/session` | – | `{ authenticated: boolean, needsSetup: boolean }` |
+| GET | `/api/update-check` | – | `{ current, latest, hasUpdate, url }`（查 GitHub 最新 Release，缓存 6 小时） |
 | GET | `/api/version` | – | `{ version: "0.1.0", commit: "bbc176b", buildId: "2026-10-24T01:51:59Z", worker }`（**公开**，无需登录） |
 | POST | `/api/login` | `{ password: string }` | `{ ok: true }`（同时下发 HttpOnly Cookie） |
 | POST | `/api/logout` | – | `{ ok: true }` |

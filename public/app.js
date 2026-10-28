@@ -51,6 +51,7 @@ const state = {
   logLevel: "", // "" | "ok" | "fail"
   logTaskId: "", // "" = 全部任务
   logQuery: "", // 关键字搜索
+  updateInfo: null, // 新版本检查结果 { current, latest, hasUpdate, url }
   taskSearch: "", // 任务页搜索关键字
   taskSelectMode: false, // 任务页「选择」模式（批量删除用）
   taskSelection: new Set(), // 选中的任务 id
@@ -317,6 +318,7 @@ async function enterApp() {
   paint({ force: true });
   tick();
   void migrateLocalTemplates();
+  void checkUpdate();
 }
 
 async function onLoginSubmit(event) {
@@ -3408,6 +3410,7 @@ function renderSettings() {
           { class: "about-build" },
           `出口机房 ${runtime.colo || "未记录"}` + (runtime.locationHint ? ` · 部署区域 ${runtime.locationHint}` : ""),
         ),
+        updateNotice(),
         usagePanel(),
         el(
           "div",
@@ -3588,6 +3591,60 @@ function notifyExtras(id, settings) {
   }
 
   return null;
+}
+
+/** 查一次有没有新版本（失败就静默，不打扰） */
+async function checkUpdate() {
+  try {
+    const info = await api("/api/update-check");
+    state.updateInfo = info || null;
+    if (state.view === "settings") paint({ force: true });
+  } catch {
+    state.updateInfo = null;
+  }
+}
+
+/** 关于页的「版本检查」一行 */
+function updateNotice() {
+  const info = state.updateInfo;
+  if (!info) return el("div", { class: "about-build muted" }, "版本检查：读取中…");
+  if (info.hasUpdate && info.latest) {
+    return el(
+      "div",
+      { class: "update-notice is-new" },
+      icon("bolt", { size: 14 }),
+      el("span", {}, `有新版本 ${info.latest}（当前 ${info.current}）`),
+      info.url
+        ? el("a", { class: "link", href: info.url, target: "_blank", rel: "noopener noreferrer" }, "查看更新")
+        : null,
+      el(
+        "button",
+        {
+          class: "link link-sm",
+          type: "button",
+          onclick: (event) => withLoading(event.currentTarget, () => checkUpdate()),
+        },
+        "重新检查",
+      ),
+    );
+  }
+  if (!info.latest) {
+    return el(
+      "div",
+      { class: "about-build muted" },
+      "版本检查：没查到最新版本（网络或频率限制）",
+      el(
+        "button",
+        {
+          class: "link link-sm",
+          type: "button",
+          onclick: (event) => withLoading(event.currentTarget, () => checkUpdate()),
+        },
+        "重试",
+      ),
+    );
+  }
+  return el("div", { class: "about-build muted" }, `已是最新版本（${info.current}）`);
 }
 
 /** 发送测试通知：把两个通道的真实结果列出来 */

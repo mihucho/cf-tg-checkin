@@ -2791,6 +2791,33 @@ input[type="radio"] {
   color: var(--text-2, rgba(255, 255, 255, 0.75));
 }
 
+.update-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+
+.update-notice.is-new {
+  border: 1px solid rgba(92, 200, 189, 0.4);
+  background: rgba(92, 200, 189, 0.08);
+  color: var(--accent, #5cc8bd);
+}
+
+.update-notice .link,
+.update-notice .link-sm {
+  appearance: none;
+  background: none;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .about-links {
   display: flex;
   flex-wrap: wrap;

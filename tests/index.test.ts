@@ -19,5 +19,6 @@ import "./release-doc.test.ts";
 import "./peer.test.ts";
 import "./executor-reply.test.ts";
 import "./copy.test.ts";
+import "./version.test.ts";
 
 void runAll();

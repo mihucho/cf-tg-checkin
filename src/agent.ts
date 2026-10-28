@@ -65,6 +65,7 @@ import type { Env } from "./env";
 import { bucketDaily } from "./events";
 import { applyTargetPatch, normalizeTaskInput, shouldAutoRename, taskFingerprint, taskToExport } from "./task";
 import { BUILD } from "./version";
+import { isNewerVersion } from "./util/version";
 import { redactSettingsForClient, redactState, shouldAutoFillAdminId } from "./settings";
 
 interface Credentials {
@@ -582,6 +583,47 @@ export class TgAgent implements DurableObject {
       if (path === "/logs/clear" && method === "POST") {
         this.store.clearLogs();
         return json({ ok: true });
+      }
+
+      if (path === "/update-check" && method === "GET") {
+        const current = BUILD.version;
+        const repo = (this.env.GITHUB_REPO ?? "mihucho/cf-tg-checkin").trim() || "mihucho/cf-tg-checkin";
+        const cached = this.store.getJson<{
+          at: number;
+          latest: string | null;
+          url: string | null;
+        } | null>("cache:updateCheck", null);
+        if (cached && Date.now() - cached.at < 6 * 3600_000) {
+          return json({
+            current,
+            latest: cached.latest,
+            hasUpdate: cached.latest ? isNewerVersion(cached.latest, current) : false,
+            url: cached.url,
+          });
+        }
+
+        let latest: string | null = null;
+        let url: string | null = null;
+        try {
+          const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+            headers: { "user-agent": "cf-tg-checkin", accept: "application/vnd.github+json" },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (res.ok) {
+            const data = (await res.json()) as { tag_name?: string; html_url?: string };
+            latest = String(data.tag_name ?? "").trim() || null;
+            url = data.html_url ?? null;
+          }
+        } catch {
+          /* 拿不到就当没有新版本（不打扰用户） */
+        }
+        this.store.setJson("cache:updateCheck", { at: Date.now(), latest, url });
+        return json({
+          current,
+          latest,
+          hasUpdate: latest ? isNewerVersion(latest, current) : false,
+          url,
+        });
       }
 
       if (path === "/auth/turnstile" && method === "GET") {
