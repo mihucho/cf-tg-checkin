@@ -859,7 +859,7 @@ function renderTasks() {
       const rail = taskGroupRail(groups, activeKey);
       const table = el("div", { class: "card table-card" }, el("div", { class: "table-wrap" },
         visible.length
-          ? taskTable(visible)
+          ? taskList(visible)
           : emptyState({
               iconName: "list",
               title: "这个分组还没有任务",
@@ -934,8 +934,8 @@ function tasksInGroup(tasks, key) {
 }
 
 /** 任务行的通用点击行为（点空白处打开详情） */
-function taskRowClickable(task) {
-  const row = taskRow(task, { selecting: state.taskSelectMode });
+function taskCardClickable(task) {
+  const row = taskCard(task, { selecting: state.taskSelectMode });
   row.classList.add("is-clickable");
   if (state.taskSelectMode) {
     if (state.taskSelection.has(task.id)) row.classList.add("is-selected");
@@ -1067,34 +1067,11 @@ async function openGroupRename(item) {
   });
 }
 
-function taskTable(tasks) {
-  const selecting = state.taskSelectMode;
-  return el(
-    "table",
-    { class: `table tasks-table${selecting ? " is-selecting" : ""}` },
-    el(
-      "thead",
-      {},
-      el(
-        "tr",
-        {},
-        selecting ? el("th", { class: "th-select" }, "") : null,
-        el("th", {}, "任务"),
-        el("th", {}, "目标"),
-        el("th", {}, "调度"),
-        el("th", {}, "动作"),
-        el("th", {}, "下次执行"),
-        el("th", {}, "最近结果"),
-        el("th", { class: "th-actions" }, "操作"),
-      ),
-    ),
-    el(
-      "tbody",
-      {},
-      tasks.map((task) => taskRowClickable(task)),
-    ),
-  );
+/** 卡片列表（一个任务一张卡片） */
+function taskList(tasks) {
+  return el("div", { class: "task-cards", role: "list" }, ...tasks.map((task) => taskCardClickable(task)));
 }
+
 
 /** 选择模式下的复选框单元格 */
 function taskSelectCell(task) {
@@ -1202,81 +1179,50 @@ function isInteractiveClick(event) {
   return Boolean(target.closest("button, a, input, select, textarea, label, [data-no-row-click]"));
 }
 
-function taskRow(task, { selecting = false } = {}) {
+/**
+ * 一个任务一张卡片。
+ *
+ * 表格塞 7 列在窄屏下什么都看不清，改成卡片后每行只放一张，字段按"重要 → 次要"排：
+ * 第一行：状态点 + 任务名 + 徽章 + 操作按钮
+ * 第二行：#编号 · 目标（带类型徽章）· 多目标
+ * 第三行：调度 · 下次执行 · 最近结果
+ * 第四行：动作摘要
+ */
+function taskCard(task, { selecting = false } = {}) {
   const target = task.target || {};
-  const enabledText = task.enabled ? "已启用" : "已停用";
-  const subParts = [`#${task.id}`];
-  if (task.source === "trigger") subParts.push("由指令创建");
-  if (task.threadId) subParts.push(`话题 ${task.threadId}`);
-
   const nextRunAt = toMillis(task.nextRunAt);
-  const nextCell = task.enabled
+  const extraTargets = (task.targets?.length ?? 0) > 1 ? `${task.targets.length - 1} 个附加目标` : "";
+
+  const nextText = task.enabled
     ? nextRunAt
       ? el(
           "span",
           { class: "num", title: formatFullTime(nextRunAt) },
-          el(
-            "span",
-            { dataset: { countdown: String(nextRunAt) } },
-            formatCountdown(nextRunAt - serverNow()),
-          ),
+          "下次 ",
+          el("span", { dataset: { countdown: String(nextRunAt) } }, formatCountdown(nextRunAt - serverNow())),
         )
-      : el("span", { class: "muted" }, "—")
+      : el("span", { class: "muted" }, "未排期")
     : el("span", { class: "muted" }, "已停用");
 
   return el(
-    "tr",
-    { class: task.enabled ? "" : "is-disabled", dataset: { id: String(task.id) } },
-    selecting ? taskSelectCell(task) : null,
+    "article",
+    {
+      class: `task-card${task.enabled ? "" : " is-disabled"}${state.taskSelectMode && state.taskSelection.has(task.id) ? " is-selected" : ""}`,
+      dataset: { id: String(task.id) },
+    },
     el(
-      "td",
-      { dataset: { label: "任务" } },
+      "div",
+      { class: "task-card-head" },
+      selecting ? taskSelectCell(task) : null,
+      el("span", { class: `dot ${task.enabled ? "ok" : "idle"}`, title: task.enabled ? "已启用" : "已停用" }),
+      el("span", { class: "task-card-name" }, task.name || `任务 #${task.id}`),
+      task.source === "trigger" ? el("span", { class: "tag" }, "指令创建") : null,
+      peerKindLabel(target.peerKind)
+        ? el("span", { class: `tag tag-peer is-${target.peerKind}` }, peerKindLabel(target.peerKind))
+        : null,
       el(
         "div",
-        { class: "cell-main" },
-        el("span", { class: `dot ${task.enabled ? "ok" : "idle"}`, title: enabledText }),
-        el("span", { class: "task-name cell-text" }, task.name || `任务 #${task.id}`),
-        task.source === "trigger" ? el("span", { class: "tag" }, "指令创建") : null,
-      ),
-      el("div", { class: "cell-sub" }, subParts.join(" · ")),
-    ),
-    el(
-      "td",
-      { dataset: { label: "目标" } },
-      el(
-        "div",
-        { class: "cell-main", title: targetLabel(target) },
-        peerKindLabel(target.peerKind)
-          ? el("span", { class: `tag tag-peer is-${target.peerKind}` }, peerKindLabel(target.peerKind))
-          : null,
-        el("span", { class: "cell-text" }, targetLabel(target)),
-        task.targets && task.targets.length > 1 ? el("span", { class: "tag" }, `+${task.targets.length - 1}`) : null,
-      ),
-      el(
-        "div",
-        { class: "cell-sub" },
-        // 主行已经显示了 @username 时就别再重复，退回显示数字 id
-        target.username && targetLabel(target) !== `@${target.username}`
-          ? `@${target.username}`
-          : target.id
-            ? String(target.id)
-            : "—",
-      ),
-    ),
-    el("td", { dataset: { label: "调度" } }, el("span", { class: "cell-nowrap" }, describeSchedule(task.schedule))),
-    el(
-      "td",
-      { dataset: { label: "动作" } },
-      el("span", { class: "cell-trunc cell-steps", title: describeSteps(task.steps) }, describeSteps(task.steps)),
-    ),
-    el("td", { dataset: { label: "下次执行" } }, nextCell),
-    el("td", { dataset: { label: "最近结果" } }, resultCell(task)),
-    el(
-      "td",
-      { dataset: { label: "操作" }, class: "cell-actions" },
-      el(
-        "div",
-        { class: "row-actions", "data-no-row-click": "" },
+        { class: "task-card-actions", "data-no-row-click": "" },
         iconButton("play", "立即执行", (event) => runTask(task, event.currentTarget)),
         iconButton("power", task.enabled ? "停用" : "启用", (event) => toggleTask(task, event.currentTarget), {
           className: task.enabled ? "is-on" : "",
@@ -1285,8 +1231,30 @@ function taskRow(task, { selecting = false } = {}) {
         iconButton("trash", "删除", () => deleteTask(task), { className: "is-danger" }),
       ),
     ),
+    el(
+      "div",
+      { class: "task-card-meta" },
+      el("span", { class: "task-card-id" }, `#${task.id}`),
+      el("span", { class: "task-card-target", title: targetLabel(target) }, targetLabel(target)),
+      extraTargets ? el("span", { class: "tag" }, `+${task.targets.length - 1}`) : null,
+      task.threadId ? el("span", { class: "task-card-thread" }, `话题 ${task.threadId}`) : null,
+    ),
+    el(
+      "div",
+      { class: "task-card-foot" },
+      el("span", { class: "task-card-schedule" }, describeSchedule(task.schedule)),
+      nextText,
+      el("span", { class: "task-card-result" }, resultCell(task)),
+    ),
+    el(
+      "div",
+      { class: "task-card-steps", title: describeSteps(task.steps) },
+      describeSteps(task.steps),
+    ),
   );
 }
+
+
 
 function resultCell(task) {
   if (!task.lastResult) {
