@@ -3017,11 +3017,12 @@ input[type="radio"] {
   position: sticky;
   bottom: 12px;
   z-index: 2;
+  /* 计数在上、按钮居中在下，整条不偏向左或右 */
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
   margin-top: 10px;
   padding: 10px 12px;
   border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
@@ -3037,6 +3038,8 @@ input[type="radio"] {
 
 .selection-actions {
   display: flex;
+  align-items: center;
+  justify-content: center;
   gap: 8px;
   flex-wrap: wrap;
 }
@@ -3051,7 +3054,7 @@ input[type="radio"] {
   }
 
   .selection-actions .btn {
-    flex: 1 1 0;
+    flex: 1 1 auto;
   }
 }
 

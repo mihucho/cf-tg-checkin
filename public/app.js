@@ -53,7 +53,7 @@ const state = {
   logQuery: "", // 关键字搜索
   updateInfo: null, // 新版本检查结果 { current, latest, hasUpdate, url }
   taskSearch: "", // 任务页搜索关键字
-  taskSelectMode: false, // 任务页「选择」模式（批量删除用）
+  taskSelectMode: false, // 任务页「选择」模式（批量操作用）
   taskSelection: new Set(), // 选中的任务 id
   expandedLogs: new Set(),
   refreshing: false,
@@ -821,7 +821,7 @@ function renderTasks() {
               iconName: "bolt",
               onClick: (event) => runAll(event.currentTarget, activeKey, activeLabel),
             }),
-            btn(state.taskSelectMode ? "退出选择" : "批量删除", {
+            btn(state.taskSelectMode ? "退出选择" : "批量操作", {
               variant: "subtle",
               iconName: "trash",
               onClick: () => {
