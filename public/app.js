@@ -836,7 +836,8 @@ function renderTasks() {
             }),
             btn(state.taskSelectMode ? "退出选择" : "批量操作", {
               variant: "subtle",
-              iconName: "trash",
+              // 批量操作是"多选"而不是"删除"，用清单图标；退出选择也用同一个，语义是"切换模式"
+              iconName: state.taskSelectMode ? "x" : "list",
               onClick: () => {
                 state.taskSelectMode = !state.taskSelectMode;
                 if (!state.taskSelectMode) state.taskSelection.clear();
@@ -1997,6 +1998,13 @@ async function runTask(task, button) {
 
 /** 复制一个任务（副本默认停用，改完再启用） */
 async function cloneTask(task, button) {
+  const confirmed = await confirmDialog({
+    title: "复制这个任务？",
+    message: `会以「${task.name}」为模板建一个副本（名字加「副本」），默认停用，方便你改完时间和目标再启用。`,
+    confirmLabel: "复制任务",
+  });
+  if (!confirmed) return;
+
   await withLoading(button, async () => {
     try {
       const res = await api(`/api/tasks/${encodeURIComponent(task.id)}/clone`, { method: "POST" });

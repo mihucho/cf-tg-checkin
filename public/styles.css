@@ -2869,6 +2869,51 @@ input[type="radio"] {
   word-break: break-word;
 }
 
+/* 图标按钮的即时提示（原生 title 要等一秒，且样式不可控） */
+.btn-icon[data-tip] {
+  position: relative;
+}
+
+.btn-icon[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%) translateY(2px);
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
+  border-radius: 6px;
+  background: var(--panel, #12151a);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+  color: var(--text, #fff);
+  font-size: 11.5px;
+  line-height: 1.4;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 100ms ease, transform 100ms ease;
+  z-index: 5;
+}
+
+.btn-icon[data-tip]:hover::after,
+.btn-icon[data-tip]:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* 卡片上的提示朝下更不容易被顶部裁掉 */
+.task-card-actions .btn-icon[data-tip]::after {
+  bottom: auto;
+  top: calc(100% + 6px);
+}
+
+/* 触屏没有 hover，别让提示卡住 */
+@media (hover: none) {
+  .btn-icon[data-tip]::after {
+    display: none;
+  }
+}
+
 /* 任务列表：一行一张卡片 */
 .task-cards {
   display: grid;

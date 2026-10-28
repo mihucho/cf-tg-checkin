@@ -523,7 +523,9 @@ export function iconButton(name, label, onClick, { className = "", size = 15 } =
     {
       class: `btn btn-icon${className ? ` ${className}` : ""}`,
       type: "button",
+      // data-tip 给 CSS 做即时悬浮提示；title 留作读屏与原生兜底
       title: label,
+      "data-tip": label,
       "aria-label": label,
       onclick: onClick,
     },
