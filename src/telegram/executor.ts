@@ -761,34 +761,43 @@ export async function executeTask(
     };
   }
 
-  // ---------- 最后一步之后：等对方的第一条回复 ----------
-  // 机器人签到多数只回**文本**（不点按钮），所以这里必须单独等一次，
-  // 而且群组/普通用户也要能拿到"最后一步之后别人回的第一条"。
+  // ---------- 最后一步之后的回复 ----------
+  // 三步走：① 点完按钮后机器人可能已经发了新消息（新菜单或文字结果）→ 直接用它
+  //         ② 否则轮询「对方的第一条消息」（关键词判定 / 文本类最后一步都用这条）
+  //         ③ 最后一步是点击、又没有关键词时，也短暂补抓一次，别让多步骤任务"看不到回复"
   const lastStep = task.steps[task.steps.length - 1];
-  const expectsReply =
-    Boolean(task.successKeywords?.length) ||
-    lastStep === undefined ||
-    lastStep.type === "text" ||
-    lastStep.type === "random" ||
-    lastStep.type === "number";
+  const wantsKeyword = Boolean(task.successKeywords?.length);
+  const textLikeLastStep =
+    lastStep === undefined || lastStep.type === "text" || lastStep.type === "random" || lastStep.type === "number";
 
   let replyText: string | null = null;
   let replyId: number | null = null;
-  if (expectsReply) {
-    const found = await waitForPeerReply(
-      client,
-      entity,
-      cursorId,
-      Math.min(interactiveDeadline(), stepWaitDeadline()),
-      hooks,
-      { pollIntervalMs },
-    );
+
+  // ① 交互消息里已经有对方的文本（点击后机器人发来的新菜单/结果）
+  //    条件里用 cursorId 而不是 baseline：点击失败时 interactive 还停在被点的那条菜单上，
+  //    那不是"最后一步之后的回复"。
+  if (interactive && interactive.message.id > Math.max(baseline, cursorId)) {
+    const text = (interactive.message.message ?? "").trim();
+    if (text) {
+      replyId = interactive.message.id;
+      replyText = oneLine(text);
+      note("info", `收到${peerLabel}回复 #${replyId}：${replyText}`);
+    }
+  }
+
+  if (!replyId) {
+    // ② 文本类最后一步 / 配了关键词：等到超时为止；③ 纯点击收尾：短补抓 3 秒
+    const fullDeadline = Math.min(interactiveDeadline(), stepWaitDeadline());
+    const shortDeadline = Math.min(fullDeadline, Date.now() + Math.min(3_000, stepDelayMs + 2_000));
+    const deadline = textLikeLastStep || wantsKeyword ? fullDeadline : shortDeadline;
+
+    const found = await waitForPeerReply(client, entity, cursorId, deadline, hooks, { pollIntervalMs });
     if (found) {
       // 原始回复可能有多行，存进日志前压成一行（否则一条日志被拆成好几行）
       replyText = oneLine(found.text) || "（无文本内容）";
       replyId = found.id;
       note("info", `收到${peerLabel}回复 #${found.id}：${replyText}`);
-    } else if (task.successKeywords?.length) {
+    } else if (wantsKeyword) {
       note("warn", `等待 ${Math.round((options.stepWaitMs ?? 30_000) / 1000)}s 没等到回复`);
     }
   }

@@ -108,3 +108,57 @@ test("执行器：自己的消息不算回复", async () => {
   assert.equal(outcome.replyText, null);
   assert.equal(outcome.message, "执行完成");
 });
+
+/* ---------- 多步骤：点完按钮之后的回复 ---------- */
+
+/**
+ * 假 client：模拟真实时序 —— 发文本之后机器人才回菜单，点完按钮再回文字结果。
+ * 注意菜单必须出现在我们的消息之后，否则执行器（正确地）会把它当成过期菜单忽略。
+ */
+function multiStepClient(resultText: string) {
+  const history: Array<{ id: number; out: boolean; message: string; replyMarkup?: unknown }> = [
+    { id: 100, out: false, message: "旧消息" },
+  ];
+  return {
+    async getMessages() {
+      return history.slice();
+    },
+    async sendMessage(_entity: unknown, params: { message: string }) {
+      history.push({ id: 102, out: true, message: params.message });
+      // 机器人回一条带按钮的菜单
+      history.push({
+        id: 103,
+        out: false,
+        message: "请选择要签到的账号",
+        replyMarkup: { rows: [{ buttons: [{ text: "个人资料", data: Buffer.from("x") }] }] },
+      });
+      return { id: 102 };
+    },
+    async invoke() {
+      history.push({ id: 104, out: false, message: resultText });
+      return {};
+    },
+    async getInputEntity() {
+      return { id: 1 };
+    },
+    async deleteMessages() {
+      return undefined;
+    },
+    get connected() {
+      return true;
+    },
+  };
+}
+
+test("多步骤：最后一步是点击时也能拿到回复（点完机器人发的消息）", async () => {
+  const client = multiStepClient("签到成功，明天再来");
+  const outcome = await executeTask(client as never, makeTask({ steps: [{ type: "text", text: "/sign" }, { type: "click", text: "个人资料" }] }), {
+    entity: { id: 1, username: "bot", className: "User", bot: true } as never,
+    hooks: { log: () => undefined },
+    pollIntervalMs: 500,
+    stepWaitMs: 1500,
+  });
+  assert.equal(outcome.replyText, "签到成功，明天再来", "多步骤任务也要显示最后一步之后的回复");
+  assert.ok(outcome.replyId && outcome.replyId >= 103);
+  assert.match(outcome.detail, /收到机器人回复 #10\d：签到成功/);
+});
