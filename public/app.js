@@ -1223,6 +1223,16 @@ function taskCard(task, { selecting = false } = {}) {
       el(
         "div",
         { class: "task-card-actions", "data-no-row-click": "" },
+        el(
+          "button",
+          {
+            // 沿用表格时代的文字按钮样式（无背景、无强调色，hover 才变）
+            class: "link link-sm result-detail-btn task-card-detail",
+            type: "button",
+            onclick: () => openTaskDetail(task),
+          },
+          "详情",
+        ),
         iconButton("play", "立即执行", (event) => runTask(task, event.currentTarget)),
         iconButton("power", task.enabled ? "停用" : "启用", (event) => toggleTask(task, event.currentTarget), {
           className: task.enabled ? "is-on" : "",
@@ -1244,7 +1254,7 @@ function taskCard(task, { selecting = false } = {}) {
       { class: "task-card-foot" },
       el("span", { class: "task-card-schedule" }, describeSchedule(task.schedule)),
       nextText,
-      el("span", { class: "task-card-result" }, resultCell(task)),
+      el("span", { class: "task-card-result" }, resultCell(task, { withDetail: false })),
     ),
     el(
       "div",
@@ -1256,17 +1266,19 @@ function taskCard(task, { selecting = false } = {}) {
 
 
 
-function resultCell(task) {
+function resultCell(task, { withDetail = true } = {}) {
   if (!task.lastResult) {
-    return el(
-      "button",
-      {
-        class: "link link-sm result-detail-btn muted",
-        type: "button",
-        onclick: () => openTaskDetail(task),
-      },
-      "详情",
-    );
+    return withDetail
+      ? el(
+          "button",
+          {
+            class: "link link-sm result-detail-btn muted",
+            type: "button",
+            onclick: () => openTaskDetail(task),
+          },
+          "详情",
+        )
+      : el("span", { class: "muted" }, "还没执行过");
   }
   const ok = task.lastResult === "ok";
   return el(
@@ -1283,15 +1295,17 @@ function resultCell(task) {
       el("span", { class: `dot ${ok ? "ok" : "fail"}` }),
       el("span", {}, ok ? "成功" : "失败"),
     ),
-    el(
-      "button",
-      {
-        class: "link link-sm result-detail-btn",
-        type: "button",
-        onclick: () => openTaskDetail(task),
-      },
-      "详情",
-    ),
+    withDetail
+      ? el(
+          "button",
+          {
+            class: "link link-sm result-detail-btn",
+            type: "button",
+            onclick: () => openTaskDetail(task),
+          },
+          "详情",
+        )
+      : null,
   );
 }
 

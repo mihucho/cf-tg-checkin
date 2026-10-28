@@ -2850,10 +2850,13 @@ input[type="radio"] {
 
 .task-card-actions {
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
   margin-left: auto;
   flex: none;
 }
+
+
 
 .task-card-meta,
 .task-card-foot {
