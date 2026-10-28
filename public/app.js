@@ -51,6 +51,7 @@ const state = {
   logLevel: "", // "" | "ok" | "fail"
   logTaskId: "", // "" = 全部任务
   logQuery: "", // 关键字搜索
+  taskSearch: "", // 任务页搜索关键字
   taskSelectMode: false, // 任务页「选择」模式（批量删除用）
   taskSelection: new Set(), // 选中的任务 id
   expandedLogs: new Set(),
@@ -774,6 +775,25 @@ function renderTasks() {
   const activeKey = groups.items.some((item) => item.key === storedGroup) ? storedGroup : "";
   const activeLabel = groups.items.find((item) => item.key === activeKey)?.label || "全部";
   const scopedCount = tasksInGroup(tasks, activeKey).length;
+  /** 搜索命中：任务名 / 目标 / 分组 / 动作文本 / 编号 */
+  const matchesSearch = (task) => {
+    const query = state.taskSearch.trim().toLowerCase();
+    if (!query) return true;
+    const haystack = [
+      task.name,
+      task.group,
+      `#${task.id}`,
+      task.target?.username,
+      task.target?.id,
+      task.target?.title,
+      ...(task.targets ?? []).flatMap((item) => [item.username, item.id, item.title]),
+      describeSteps(task.steps),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(query);
+  };
 
   const header = pageHead({
     title: "任务",
@@ -855,16 +875,28 @@ function renderTasks() {
         )
       : null,
     (() => {
-      const visible = tasksInGroup(tasks, activeKey);
+      const visible = tasksInGroup(tasks, activeKey).filter(matchesSearch);
       const rail = taskGroupRail(groups, activeKey);
       const table = el("div", { class: "card table-card" }, el("div", { class: "table-wrap" },
         visible.length
           ? taskList(visible)
           : emptyState({
               iconName: "list",
-              title: "这个分组还没有任务",
-              text: "在编辑器里给任务填上分组名，它就会出现在这里。",
-              actions: [newTaskBtn("primary", "新建任务")],
+              title: state.taskSearch.trim() ? "没有匹配的任务" : "这个分组还没有任务",
+              text: state.taskSearch.trim()
+                ? `试试别的关键字，或者把「${state.taskSearch.trim()}」清掉。`
+                : "在编辑器里给任务填上分组名，它就会出现在这里。",
+              actions: state.taskSearch.trim()
+                ? [
+                    btn("清空搜索", {
+                      variant: "subtle",
+                      onClick: () => {
+                        state.taskSearch = "";
+                        paint({ force: true });
+                      },
+                    }),
+                  ]
+                : [newTaskBtn("primary", "新建任务")],
             }),
       ));
 
@@ -875,11 +907,25 @@ function renderTasks() {
 
       if (!rail) return withSelection;
 
+      const searchBox = el("input", {
+        class: "input task-search",
+        type: "search",
+        placeholder: "搜索任务名 / 目标 / 分组 / 动作",
+        "aria-label": "搜索任务",
+        value: state.taskSearch,
+        oninput: (event) => {
+          const value = event.currentTarget.value;
+          state.taskSearch = value;
+          clearTimeout(searchBox._timer);
+          searchBox._timer = setTimeout(() => paint({ force: true }), 200);
+        },
+      });
+
       return el(
         "div",
         { class: "tasks-layout" },
         rail,
-        el("div", { class: "tasks-main" }, withSelection),
+        el("div", { class: "tasks-main" }, el("div", { class: "tasks-toolbar" }, searchBox), withSelection),
       );
     })(),
   );
@@ -1118,6 +1164,36 @@ function taskSelectionBar(visibleTasks) {
       el(
         "button",
         {
+          class: "btn btn-sm",
+          type: "button",
+          disabled: count ? undefined : true,
+          onclick: () => batchSetGroup(),
+        },
+        "设为分组…",
+      ),
+      el(
+        "button",
+        {
+          class: "btn btn-sm",
+          type: "button",
+          disabled: count ? undefined : true,
+          onclick: () => batchToggleEnabled(true),
+        },
+        "全部启用",
+      ),
+      el(
+        "button",
+        {
+          class: "btn btn-sm",
+          type: "button",
+          disabled: count ? undefined : true,
+          onclick: () => batchToggleEnabled(false),
+        },
+        "全部停用",
+      ),
+      el(
+        "button",
+        {
           class: "btn btn-sm btn-danger",
           type: "button",
           disabled: count ? undefined : true,
@@ -1140,6 +1216,86 @@ function taskSelectionBar(visibleTasks) {
       ),
     ),
   );
+}
+
+/** 批量修改（启用/停用、分组）；成功后清空选择 */
+async function batchUpdate(body, successText) {
+  const ids = [...state.taskSelection];
+  if (!ids.length) return;
+  try {
+    await api("/api/tasks/batch-update", { method: "POST", body: { ids, ...body } });
+    state.taskSelection.clear();
+    toast(successText, { kind: "ok" });
+    await refreshState({ silent: true });
+    paint({ force: true });
+  } catch (error) {
+    toast(error.message || "批量修改失败", { kind: "error" });
+  }
+}
+
+/** 把选中的任务设成同一个分组（含「未分组」和新建） */
+async function batchSetGroup() {
+  const groups = window.__taskGroups?.() || [];
+  const select = el(
+    "select",
+    { class: "input", id: "batch-group-select" },
+    el("option", { value: "" }, "未分组"),
+    ...groups.map((name) => el("option", { value: name }, name)),
+    el("option", { value: "__new" }, "＋ 新建分组…"),
+  );
+  const newInput = el("input", {
+    class: "input",
+    placeholder: "新分组名，例如：日常签到",
+    maxlength: "20",
+    hidden: true,
+  });
+  select.addEventListener("change", () => {
+    newInput.hidden = select.value !== "__new";
+    if (!newInput.hidden) newInput.focus();
+  });
+
+  openModal({
+    title: `把 ${state.taskSelection.size} 个任务设为同一分组`,
+    body: el("div", { class: "stack-sm" }, field({ id: "batch-group", label: "分组", control: select }), newInput),
+    footer: el(
+      "div",
+      { class: "dialog-actions" },
+      el("button", { class: "btn", type: "button", onclick: () => closeModal() }, "取消"),
+      el(
+        "button",
+        {
+          class: "btn btn-primary",
+          type: "button",
+          onclick: async (event) => {
+            const group = select.value === "__new" ? newInput.value.trim() : select.value;
+            if (select.value === "__new" && !group) {
+              toast("请填写新分组名", { kind: "error" });
+              return;
+            }
+            await withLoading(event.currentTarget, async () => {
+              await batchUpdate({ group }, `已把所选任务设为「${group || "未分组"}」`);
+              closeModal();
+            });
+          },
+        },
+        "应用",
+      ),
+    ),
+  });
+}
+
+/** 批量启用 / 停用 */
+async function batchToggleEnabled(enabled) {
+  const count = state.taskSelection.size;
+  const confirmed = await confirmDialog({
+    title: enabled ? `启用这 ${count} 个任务？` : `停用这 ${count} 个任务？`,
+    message: enabled
+      ? "启用后会按各自的排期执行。"
+      : "停用后它们不再按计划执行，配置和历史日志都保留。",
+    confirmLabel: enabled ? "全部启用" : "全部停用",
+  });
+  if (!confirmed) return;
+  await batchUpdate({ enabled }, enabled ? `已启用 ${count} 个任务` : `已停用 ${count} 个任务`);
 }
 
 /** 批量删除（带二次确认） */
@@ -1237,6 +1393,7 @@ function taskCard(task, { selecting = false } = {}) {
         iconButton("power", task.enabled ? "停用" : "启用", (event) => toggleTask(task, event.currentTarget), {
           className: task.enabled ? "is-on" : "",
         }),
+        iconButton("copy", "复制", (event) => cloneTask(task, event.currentTarget)),
         iconButton("pencil", "编辑", () => openEditor(task)),
         iconButton("trash", "删除", () => deleteTask(task), { className: "is-danger" }),
       ),
@@ -1261,6 +1418,14 @@ function taskCard(task, { selecting = false } = {}) {
       { class: "task-card-steps", title: describeSteps(task.steps) },
       describeSteps(task.steps),
     ),
+    task.lastDetail
+      ? el(
+          "details",
+          { class: "task-card-log", "data-no-row-click": "" },
+          el("summary", {}, "本次步骤日志"),
+          el("pre", { class: "task-card-log-body" }, task.lastDetail),
+        )
+      : null,
   );
 }
 
@@ -1824,6 +1989,20 @@ async function runTask(task, button) {
       await refreshState({ silent: true });
     } catch (error) {
       toast(error.message || "执行失败", { kind: "error" });
+    }
+  });
+}
+
+/** 复制一个任务（副本默认停用，改完再启用） */
+async function cloneTask(task, button) {
+  await withLoading(button, async () => {
+    try {
+      const res = await api(`/api/tasks/${encodeURIComponent(task.id)}/clone`, { method: "POST" });
+      toast(`已复制为 #${res.task.id}「${res.task.name}」（默认停用）`, { kind: "ok" });
+      await refreshState({ silent: true });
+      paint({ force: true });
+    } catch (error) {
+      toast(error.message || "复制失败", { kind: "error" });
     }
   });
 }

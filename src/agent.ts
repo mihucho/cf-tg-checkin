@@ -292,6 +292,41 @@ export class TgAgent implements DurableObject {
         });
       }
 
+      if (path === "/tasks/batch-update" && method === "POST") {
+        const body = (await request.json()) as { ids?: number[]; enabled?: boolean; group?: string | null };
+        const ids = Array.isArray(body.ids)
+          ? [...new Set(body.ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))].slice(0, 200)
+          : [];
+        if (!ids.length) return jsonError("没有选中任务", 400);
+        const patch: Partial<TaskInput> = {};
+        if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
+        if (body.group !== undefined) patch.group = String(body.group ?? "").trim().slice(0, 20);
+        if (!Object.keys(patch).length) return jsonError("没有要修改的内容", 400);
+
+        let updated = 0;
+        for (const id of ids) {
+          if (!this.store.getTask(id)) continue;
+          this.updateTask(id, patch);
+          updated += 1;
+        }
+        await this.scheduleNextAlarm();
+        const bits = [
+          patch.enabled === undefined ? "" : patch.enabled ? "启用" : "停用",
+          patch.group === undefined ? "" : `分组改为「${patch.group || "未分组"}」`,
+        ].filter(Boolean);
+        this.store.addLog({
+          taskId: null,
+          taskName: null,
+          at: Date.now(),
+          ok: true,
+          level: "info",
+          message: `批量修改任务：${updated} 个（${bits.join("，")}）`,
+          detail: null,
+          source: "system",
+        });
+        return json({ ok: true, updated });
+      }
+
       if (path === "/tasks/delete-batch" && method === "POST") {
         const body = (await request.json()) as { ids?: number[] };
         const ids = Array.isArray(body.ids)
@@ -374,13 +409,35 @@ export class TgAgent implements DurableObject {
         return json(result);
       }
 
-      const taskMatch = /^\/tasks\/(\d+)(\/run|\/logs|\/command)?$/.exec(path);
+      const taskMatch = /^\/tasks\/(\d+)(\/run|\/logs|\/command|\/clone)?$/.exec(path);
       if (taskMatch) {
         const id = Number(taskMatch[1]);
         const suffix = taskMatch[2];
         const task = this.store.getTask(id);
         if (!task) return jsonError("任务不存在", 404);
 
+        if (suffix === "/clone" && method === "POST") {
+          const base = taskToExport(task);
+          const clone = this.createTask({
+            ...base,
+            name: `${task.name} 副本`,
+            // 副本默认停用：复制出来通常还要改时间和目标，避免复制完立刻跑一遍
+            enabled: false,
+            nameAuto: false,
+          });
+          await this.scheduleNextAlarm();
+          this.store.addLog({
+            taskId: clone.task.id,
+            taskName: clone.task.name,
+            at: Date.now(),
+            ok: true,
+            level: "info",
+            message: `从任务 #${task.id} 复制出 #${clone.task.id}（默认停用）`,
+            detail: null,
+            source: "system",
+          });
+          return json({ task: clone.task });
+        }
         if (suffix === "/run" && method === "POST") {
           const log = await this.serialize(() => this.runTasks([task], undefined, { manual: true }));
           await this.scheduleNextAlarm();

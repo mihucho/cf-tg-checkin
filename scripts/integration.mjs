@@ -409,6 +409,31 @@ async function main() {
       JSON.stringify({ processed: batch.processed, remaining: batch.remaining, nextOffset: batch.nextOffset }),
     );
 
+    // ---------- 复制 / 批量修改 ----------
+    const cloned = await post(`/api/tasks/${task.id}/clone`, {});
+    check(
+      "复制任务：名字加「副本」、默认停用、沿用分组",
+      cloned.task?.id !== task.id && cloned.task?.name === `${task.name} 副本` && cloned.task?.enabled === false,
+      JSON.stringify({ id: cloned.task?.id, name: cloned.task?.name, enabled: cloned.task?.enabled }),
+    );
+
+    const bulkEdited = await post("/api/tasks/batch-update", {
+      ids: [cloned.task.id],
+      group: "批量改组",
+      enabled: true,
+    });
+    check("批量修改分组 + 启用", bulkEdited.updated === 1, JSON.stringify(bulkEdited));
+    const afterBulkEdit = await get("/api/state");
+    const editedTask = afterBulkEdit.tasks.find((item) => item.id === cloned.task.id);
+    check(
+      "批量修改生效",
+      editedTask?.group === "批量改组" && editedTask?.enabled === true,
+      JSON.stringify({ group: editedTask?.group, enabled: editedTask?.enabled }),
+    );
+    const emptyBulkEdit = await post("/api/tasks/batch-update", { ids: [] });
+    check("批量修改空选择被拒（400）", emptyBulkEdit.status === 400, `status=${emptyBulkEdit.status}`);
+    await request("DELETE", `/api/tasks/${cloned.task.id}`);
+
     // ---------- 批量删除 ----------
     const bulkA = await post("/api/tasks", { ...taskA, name: "批量删除-甲" });
     const bulkB = await post("/api/tasks", { ...taskA, name: "批量删除-乙" });

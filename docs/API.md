@@ -143,6 +143,8 @@
 | DELETE | `/api/tasks/:id` | – | `{ ok: true }` |
 | POST | `/api/tasks/:id/run` | – | `{ ok: boolean, log: LogEntry }` |
 | GET | `/api/tasks/:id/command` | – | `{ command: string }`（把这个任务转成指令文本） |
+| POST | `/api/tasks/:id/clone` | – | `{ task }`（复制一份，名字加「副本」、默认停用） |
+| POST | `/api/tasks/batch-update` | `{ ids: number[], enabled?: boolean, group?: string }` | `{ ok, updated }`（一次改多个任务的启停/分组） |
 | POST | `/api/tasks/delete-batch` | `{ ids: number[] }`（最多 200 个） → `{ ok, deleted }` |
 | POST | `/api/tasks/group-rename` | `{ from: string, to: string }`（`from` 为空 = 未分组） → `{ ok, updated }` |
 | GET | `/api/tasks/export` | `group`（可选：分组名；`__ungrouped` = 未分组；不传 = 全部） | `{ format, version, exportedAt, tasks: TaskInput[] }`（去掉运行态字段，可备份/迁移） |
