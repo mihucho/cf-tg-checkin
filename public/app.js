@@ -758,6 +758,19 @@ function renderTasks() {
     btn(label, { variant, iconName: "plus", onClick: () => openEditor(null) });
   const newBtn = newTaskBtn();
 
+  const searchBox = el("input", {
+    class: "input task-search",
+    type: "search",
+    placeholder: "搜索任务",
+    "aria-label": "搜索任务",
+    value: state.taskSearch,
+    oninput: (event) => {
+      state.taskSearch = event.currentTarget.value;
+      clearTimeout(searchBox._timer);
+      searchBox._timer = setTimeout(() => paint({ force: true }), 200);
+    },
+  });
+
   // 检出重复任务（同目标 + 同调度 + 同动作）：它们会同时触发，看起来像"连发好几次"
   const buckets = new Map();
   for (const task of tasks) {
@@ -802,7 +815,7 @@ function renderTasks() {
     description: (() => {
       if (!tasks.length) return "还没有任务，先建一个。";
       if (!activeKey) {
-        return `${tasks.length} 个任务 · ${enabled} 个启用 · ${tasks.length - enabled} 个停用 · 「立即执行」只是手动跑一次，不影响定时`;
+        return `${tasks.length} 个任务 · ${enabled} 个启用 · ${tasks.length - enabled} 个停用`;
       }
       const scoped = tasksInGroup(tasks, activeKey);
       const scopedEnabled = scoped.filter((task) => task.enabled).length;
@@ -833,6 +846,7 @@ function renderTasks() {
           ]
         : []),
       newBtn,
+      searchBox,
     ],
   });
 
@@ -909,25 +923,11 @@ function renderTasks() {
 
       if (!rail) return withSelection;
 
-      const searchBox = el("input", {
-        class: "input task-search",
-        type: "search",
-        placeholder: "搜索任务名 / 目标 / 分组 / 动作",
-        "aria-label": "搜索任务",
-        value: state.taskSearch,
-        oninput: (event) => {
-          const value = event.currentTarget.value;
-          state.taskSearch = value;
-          clearTimeout(searchBox._timer);
-          searchBox._timer = setTimeout(() => paint({ force: true }), 200);
-        },
-      });
-
       return el(
         "div",
         { class: "tasks-layout" },
         rail,
-        el("div", { class: "tasks-main" }, el("div", { class: "tasks-toolbar" }, searchBox), withSelection),
+        el("div", { class: "tasks-main" }, withSelection),
       );
     })(),
   );
