@@ -1,18 +1,21 @@
 ---
-version: 0.20.1
-title: v0.20.1 — 手动执行实时日志
+version: 0.0.0
+title: v0.0.0 — 未命名发布
 ---
 
-## 实时执行日志
+<!--
+在这里写这一次发布的说明，写完后 push 到 main 就会自动发版。
 
-- 任务卡片与任务详情的「立即执行」打开实时日志弹窗，逐步显示执行输出、已运行时间与最终结果。
-- DO 在每一步写入 `live:<taskId>` 状态，前端通过 `GET /api/tasks/:id/live` 轮询；结束后状态保留 5 分钟。
-- 并发手动执行返回 409；定时任务或触发器正在执行时，弹窗直接展示当前实时进度。
-- 上一轮执行与本次执行隔离；弹窗被外部关闭或会话失效时停止轮询。
-- 多目标任务按真实执行时长展示；实例回收时明确标记「执行中断」。
-- 网关 524/504 时提示任务可能仍在后台，并继续等待实时结果。
-
-## 工程
-
-- 集成测试新增实时状态检查（73 项）；单测 185 例。
-- `docs/API.md` 补充 `/api/tasks/:id/live` 与 `POST /api/tasks/:id/run` 的 409 行为。
+规则：
+1. 把上面 front matter 里的 version 改成新的版本号（必须严格大于 package.json 里的当前版本）
+   —— 只修 bug 用最后一位，新增用户可见能力加中间一位；和 title 一起改。
+2. 分隔线 `---` 以下的内容就是 Release notes 正文（Markdown），会写进 CHANGELOG.md
+   对应版本段和 releases/archive/vX.Y.Z.md；打 tag 时同时作为 Release 说明与 tag 注释。
+3. 不是每个版本都必须打 tag：在 front matter 加 `tag: false`，版本号、CHANGELOG、归档与部署照常，
+   跳过 tag 与 GitHub Release。retro / revoke / 只补发布仍然需要 tag。
+4. 只有这个文件被改动才会触发发布；发布完成后会归档到 releases/archive/vX.Y.Z.md 并重置成模板。
+5. 想补改／脱敏一个**已经打 tag** 的版本：把 version 写成那个版本号并加上 `retro: true`，
+   工作流只会更新它的 Release 说明，不动代码、不重新打 tag。
+6. 版本号保持 0.0.0（模板）不会触发任何发布。
+7. 示例、日志、截图里一律用占位符（example_bot / 示例机器人 / 123456789），不要贴真实账号。
+-->
