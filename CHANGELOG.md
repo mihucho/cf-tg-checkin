@@ -35,6 +35,10 @@ push 后 `.github/workflows/release.yml` 会自动：跑检查 → 写 `package.
 
 ## [Unreleased]
 
+### 日志
+
+- 按钮列表按真实行分组，同一行的列用 ` | ` 分隔，保留 `[行,列]`；超过 20 个按钮时截断并显示总数。
+
 ### 版本检查
 
 - 最新版本改为读取 GitHub `main` 的 `package.json`，未打 tag 的版本也能提示；最新 Release 存在时使用其链接，否则指向 CHANGELOG。

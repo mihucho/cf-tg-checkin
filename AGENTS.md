@@ -22,7 +22,7 @@ MTProto 走 `cloudflare:sockets`（`src/telegram/`），调度靠 DO alarm，数
 | 命令 | 作用 |
 | --- | --- |
 | `npm run typecheck` | `tsc --noEmit`（覆盖 `src/**`，`strict: true`；`build.mjs` 是 `.mjs`，不参与类型检查） |
-| `npm test` | `build.mjs --test` 打包 `tests/index.test.ts` → 在 Node 里跑（当前 187 例，几秒） |
+| `npm test` | `build.mjs --test` 打包 `tests/index.test.ts` → 在 Node 里跑（当前 189 例，几秒） |
 | `npm run check` | typecheck → test → build → 检查产物导出（提 PR 前跑这个） |
 | `npm run dev` | `wrangler dev`（`build.command` 会先跑一遍 esbuild） |
 | `npm run test:integration` | 真起 `wrangler dev`（随机端口 + 临时目录），HTTP 打通 Worker→DO→SQLite，73 项；约 45 秒，带 180 秒看门狗 |
@@ -257,7 +257,7 @@ title: v0.18.0 — 一句话标题
 
 ## 提交前检查清单
 
-- [ ] `npm run check` 通过（typecheck + 187 例单测 + build + 产物导出检查）
+- [ ] `npm run check` 通过（typecheck + 189 例单测 + build + 产物导出检查）
 - [ ] 改了路由 / DO 行为 / 数据读写 → `npm run test:integration` 通过
 - [ ] 改了 `dsl.ts` 或 `command.ts` → 往返用例已补
 - [ ] 改了 schema → 老数据能升级（`ALTER TABLE` 幂等）

@@ -340,13 +340,25 @@ export function selectButton(buttons: ButtonInfo[], step: Step): ButtonInfo | nu
   return buttons.find((button) => button.row === row && button.column === column) ?? null;
 }
 
-export function describeButtons(buttons: ButtonInfo[]): string {
-  return buttons
-    .map((button) => {
-      const meta = [button.kind, button.typeClassName ?? button.className].filter(Boolean).join(",");
-      return `[${button.row},${button.column}] ${button.text || "(无文本)"} (${meta})`;
-    })
-    .join(" / ");
+export function describeButtons(buttons: ButtonInfo[], limit = 20): string {
+  if (!buttons.length) return "（无按钮）";
+  const rows = new Map<number, ButtonInfo[]>();
+  for (const button of buttons.slice(0, limit)) {
+    const list = rows.get(button.row) ?? [];
+    list.push(button);
+    rows.set(button.row, list);
+  }
+  const lines = [...rows.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, items]) => {
+      const cells = items
+        .slice()
+        .sort((a, b) => a.column - b.column)
+        .map((button) => `[${button.row},${button.column}] ${button.text || "(无文本)"}`);
+      return `  ${cells.join(" | ")}`;
+    });
+  if (buttons.length > limit) lines.push(`  …（共 ${buttons.length} 个）`);
+  return lines.join("\n");
 }
 
 /** 把原始 replyMarkup 压成一行短文本，用于日志排查 */

@@ -171,7 +171,7 @@ test("buttonSignature：菜单没变时指纹相同，变了则不同", () => {
   assert.notEqual(buttonSignature(before), buttonSignature(changed));
 });
 
-test("describeButtons：带类型与类名，便于排查", () => {
+test("describeButtons：按行列逐行列出按钮文本，不附带类型元数据", () => {
   const buttons = flattenButtons(
     msg({
       className: "ReplyKeyboardMarkup",
@@ -180,6 +180,37 @@ test("describeButtons：带类型与类名，便于排查", () => {
   );
   const text = describeButtons(buttons);
   assert.match(text, /\[0,0\] 个人资料/);
-  assert.match(text, /text/);
-  assert.match(text, /ButtonTypeDefault/);
+  assert.doesNotMatch(text, /ButtonTypeDefault|KeyboardButton|callback/);
+});
+
+test("describeButtons：按真实按钮行分组，同一行用 | 分隔", () => {
+  const buttons = [
+    { row: 0, column: 0, text: "Verify SheerID", kind: "callback" as const },
+    { row: 1, column: 0, text: "商店", kind: "callback" as const },
+    { row: 1, column: 1, text: "VPN Free", kind: "callback" as const },
+    { row: 2, column: 0, text: "充值", kind: "callback" as const },
+    { row: 3, column: 0, text: "个人资料", kind: "callback" as const },
+    { row: 3, column: 1, text: "语言", kind: "callback" as const },
+  ];
+  const lines = describeButtons(buttons).split("\n");
+  assert.equal(lines.length, 4);
+  assert.match(lines[0], /\[0,0\] Verify SheerID$/);
+  assert.match(lines[1], /\[1,0\] 商店 \| \[1,1\] VPN Free$/);
+  assert.match(lines[2], /\[2,0\] 充值$/);
+  assert.match(lines[3], /\[3,0\] 个人资料 \| \[3,1\] 语言$/);
+  assert.doesNotMatch(lines.join("\n"), /callback/);
+});
+
+test("describeButtons：超过 20 个按钮截断并显示总数", () => {
+  const buttons = Array.from({ length: 25 }, (_, index) => ({
+    row: Math.floor(index / 2),
+    column: index % 2,
+    text: `按钮${index}`,
+    kind: "callback" as const,
+  }));
+  const text = describeButtons(buttons);
+  assert.match(text, /\[0,0\] 按钮0 \| \[0,1\] 按钮1/);
+  assert.match(text, /共 25 个/);
+  assert.equal(text.split("\n").length, 11);
+  assert.doesNotMatch(text, /callback/);
 });
