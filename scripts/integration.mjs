@@ -223,6 +223,15 @@ async function main() {
     );
     await request("DELETE", `/api/tasks/${clearable.task.id}`);
 
+    // ---------- 实时执行日志 ----------
+    await post(`/api/tasks/${task.id}/run`, {});
+    const live = await get(`/api/tasks/${task.id}/live`);
+    check(
+      "手动执行后能读到实时状态与步骤事件",
+      live.running === false && live.ok === false && Array.isArray(live.events) && live.events.length > 0,
+      JSON.stringify({ running: live.running, ok: live.ok, events: live.events?.length }),
+    );
+
     // ---------- 指令往返 ----------
     const command = await get(`/api/tasks/${task.id}/command`);
     check("任务可导出为指令", typeof command.command === "string" && command.command.includes("到:@a_bot|@b_bot"), command.command);

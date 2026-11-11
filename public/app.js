@@ -1462,7 +1462,7 @@ function taskCard(task, { selecting = false } = {}) {
           },
           "详情",
         ),
-        iconButton("play", "立即执行", (event) => runTask(task, event.currentTarget)),
+        iconButton("play", "立即执行", () => runTask(task)),
         iconButton("power", task.enabled ? "停用" : "启用", (event) => toggleTask(task, event.currentTarget), {
           className: task.enabled ? "is-on" : "",
         }),
@@ -1653,19 +1653,8 @@ async function openTaskDetail(task) {
         {
           class: "btn btn-primary",
           type: "button",
-          onclick: async (event) => {
-            await withLoading(event.currentTarget, async () => {
-              try {
-                const res = await api(`/api/tasks/${encodeURIComponent(task.id)}/run`, { method: "POST" });
-                toast(res.ok ? "执行成功" : "执行失败", { kind: res.ok ? "ok" : "error" });
-                await renderTaskRuns(task, runsBox);
-                await refreshState({ silent: true });
-                paint({ force: true });
-              } catch (error) {
-                if (isGatewayTimeout(error)) toastGatewayTimeout();
-                else toast(error.message || "执行失败", { kind: "error" });
-              }
-            });
+          onclick: () => {
+            openLiveRun(task);
           },
         },
         "立即执行",
@@ -2043,28 +2032,211 @@ function openEditor(task) {
   });
 }
 
-async function runTask(task, button) {
+async function runTask(task) {
   const confirmed = await confirmDialog({
     title: "立即执行这个任务？",
     message: `会用「${task.name}」当前配置真实执行一次：发消息、点按钮都会真的发到 Telegram。手动执行不打乱原来的定时。`,
     confirmLabel: "立即执行",
   });
   if (!confirmed) return;
+  openLiveRun(task);
+}
 
-  await withLoading(button, async () => {
-    try {
-      const res = await api(`/api/tasks/${encodeURIComponent(task.id)}/run`, { method: "POST" });
-      const log = res && res.log;
-      const ok = res.ok !== false && (!log || log.ok !== false);
-      const message = log && log.message ? log.message : ok ? "任务已执行" : "任务执行失败";
-      toast(`${ok ? "成功" : "失败"} · ${message}`, { kind: ok ? "ok" : "error" });
-      await refreshState({ silent: true });
-    } catch (error) {
-      if (isGatewayTimeout(error)) toastGatewayTimeout();
-      else toast(error.message || "执行失败", { kind: "error" });
-      await refreshState({ silent: true });
-    }
+/**
+ * 实时执行日志：打开弹窗后启动任务，轮询 /api/tasks/:id/live 逐步渲染。
+ * POST /run 仍会返回最终日志；即使网关等待超时，轮询也会继续到任务结束。
+ */
+function openLiveRun(task) {
+  let stopped = false;
+  let timer = null;
+  let notified = false;
+  let lastLive = null;
+  let previousStartedAt = null;
+  let allowExisting = false;
+  // 时间基线兜底：新一轮的 startedAt 一定晚于这次点击
+  const baseline = serverNow() - 1_000;
+
+  const status = el("p", { class: "live-run-status" }, "正在启动…");
+  const lines = el("div", { class: "live-log", role: "log", "aria-live": "polite" });
+  const modal = openModal({
+    title: `执行任务 · ${task.name}`,
+    size: "md",
+    body: el("div", { class: "stack-sm" }, status, lines),
+    footer: el(
+      "div",
+      { class: "dialog-actions" },
+      el(
+        "a",
+        {
+          class: "btn",
+          href: "#/logs",
+          onclick: () => modal?.close(),
+        },
+        "查看全部日志",
+      ),
+      el(
+        "button",
+        {
+          class: "btn btn-primary",
+          type: "button",
+          onclick: () => {
+            if (lastLive && lastLive.running) {
+              toast("任务在后台继续执行，完成后可在日志页查看", { kind: "info" });
+            }
+            modal?.close();
+          },
+        },
+        "关闭",
+      ),
+    ),
+    onClose: () => stopPolling(),
   });
+
+  function stopPolling() {
+    stopped = true;
+    if (timer !== null) clearInterval(timer);
+    timer = null;
+  }
+
+  function accept(live) {
+    if (allowExisting) return true;
+    // 没有开始时间 = 这次还没产生实时状态
+    if (!live || !live.startedAt) return true;
+    // 打开弹窗前已有的那一轮（含刚结束的）不是这次执行
+    if (previousStartedAt !== null && live.startedAt === previousStartedAt) return false;
+    return live.startedAt >= baseline;
+  }
+
+  function render(live) {
+    lastLive = live;
+    const events = Array.isArray(live?.events) ? live.events : [];
+    const running = Boolean(live?.running);
+    const nearBottom = lines.scrollHeight - lines.scrollTop - lines.clientHeight < 40;
+    if (running) {
+      const elapsed = live.startedAt ? Math.max(0, Math.round((serverNow() - live.startedAt) / 1000)) : 0;
+      status.textContent = `执行中… 已运行 ${elapsed}s`;
+    } else if (live?.ok === true) {
+      status.textContent = `执行完成${live.message ? ` · ${live.message}` : ""}`;
+    } else if (live?.ok === false) {
+      status.textContent = `执行失败${live.message ? ` · ${live.message}` : ""}`;
+    } else {
+      status.textContent = "正在启动…";
+    }
+
+    lines.replaceChildren(
+      ...events.map((event) =>
+        el(
+          "div",
+          { class: `live-log-line is-${event.level || "info"}` },
+          el("span", { class: "live-log-time" }, formatClock(event.at, tzOffset())),
+          el("span", { class: "live-log-msg" }, event.message || ""),
+        ),
+      ),
+    );
+    if (!events.length) lines.append(el("p", { class: "hint" }, "等待任务输出…"));
+    if (nearBottom) lines.scrollTop = lines.scrollHeight;
+
+    if (!running && live?.startedAt) finish(live);
+  }
+
+  function finish(live) {
+    if (notified) return;
+    notified = true;
+    stopPolling();
+    const ok = live?.ok === true;
+    toast(ok ? `执行完成 · ${live.message || task.name}` : `执行失败 · ${live?.message || task.name}`, {
+      kind: ok ? "ok" : "error",
+    });
+    void refreshState({ silent: true });
+  }
+
+  async function poll() {
+    if (stopped || !status.isConnected) {
+      stopPolling();
+      return;
+    }
+    try {
+      const live = await api(`/api/tasks/${encodeURIComponent(task.id)}/live`);
+      if (stopped || !accept(live)) return;
+      render(live);
+    } catch (error) {
+      if (stopped) return;
+      if (error.status === 401) {
+        stopPolling();
+        return;
+      }
+      if (error.status === 404) {
+        status.textContent = "任务已不存在";
+        stopPolling();
+        return;
+      }
+      status.textContent = `读取进度失败：${error.message || "未知错误"}`;
+    }
+  }
+
+  async function begin() {
+    // 先记录当前 live 的 startedAt，用来区分这次执行与上一轮残留
+    try {
+      const current = await api(`/api/tasks/${encodeURIComponent(task.id)}/live`);
+      previousStartedAt = current && typeof current.startedAt === "number" ? current.startedAt : null;
+    } catch {
+      /* 拿不到就只用时间基线 */
+    }
+    if (stopped || !status.isConnected) return;
+
+    timer = setInterval(() => void poll(), 1_000);
+    void poll();
+
+    api(`/api/tasks/${encodeURIComponent(task.id)}/run`, { method: "POST" })
+      .then((res) => {
+        if (stopped) return;
+        void poll().then(() => {
+          // 实时状态不可用时，用最终日志兜底渲染
+          if (stopped || (lastLive && lastLive.startedAt)) return;
+          const log = res && res.log;
+          const events = log && log.detail
+            ? String(log.detail)
+                .split("\n")
+                .filter(Boolean)
+                .map((message) => ({ at: Date.now(), level: "info", message }))
+            : [];
+          render({
+            taskId: task.id,
+            taskName: task.name,
+            startedAt: Date.now(),
+            finishedAt: Date.now(),
+            running: false,
+            ok: log ? log.ok : res?.ok !== false,
+            message: log ? log.message : null,
+            events,
+          });
+        });
+      })
+      .catch((error) => {
+        if (stopped) return;
+        if (error.status === 409) {
+          // 任务已在执行（定时、触发器或另一个标签页）：展示当前的实时进度
+          allowExisting = true;
+          status.textContent = "任务正在执行中，显示当前实时进度…";
+          void poll();
+          return;
+        }
+        if (error.status === 401) {
+          stopPolling();
+          return;
+        }
+        if (isGatewayTimeout(error)) {
+          status.textContent = "请求超过网关等待时间，任务可能仍在后台执行；继续等待实时结果…";
+          toastGatewayTimeout();
+          return;
+        }
+        status.textContent = `执行请求失败：${error.message || "未知错误"}`;
+        stopPolling();
+        toast(error.message || "执行失败", { kind: "error" });
+      });
+  }
+
+  void begin();
 }
 
 /** 复制一个任务（副本默认停用，改完再启用） */

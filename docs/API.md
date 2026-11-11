@@ -176,7 +176,8 @@
 | POST | `/api/tasks` | Task（无 id） | `{ task }` |
 | PATCH | `/api/tasks/:id` | 任意 Task 字段子集 | `{ task }` |
 | DELETE | `/api/tasks/:id` | – | `{ ok: true }` |
-| POST | `/api/tasks/:id/run` | – | `{ ok: boolean, log: LogEntry }` |
+| POST | `/api/tasks/:id/run` | – | `{ ok: boolean, log: LogEntry }`；任务正在执行时返回 409 |
+| GET | `/api/tasks/:id/live` | – | 实时执行状态：`{ taskId, taskName, startedAt, finishedAt, running, ok, message, events: [{ at, level, message }] }` |
 | GET | `/api/tasks/:id/command` | – | `{ command: string }`（把这个任务转成指令文本） |
 | POST | `/api/tasks/:id/clone` | – | `{ task }`（复制一份，名字加「副本」、默认停用） |
 | POST | `/api/tasks/batch-update` | `{ ids: number[], enabled?: boolean, group?: string }` | `{ ok, updated }`（一次改多个任务的启停/分组） |
@@ -186,6 +187,15 @@
 | POST | `/api/tasks/import` | `{ tasks: TaskInput[], group?: string }`（`group` = 没分组的任务落到哪个分组） | `{ ok, created, ids, skipped: [{name, reason}] }`（重复任务自动跳过） |
 | POST | `/api/tasks/run-all?limit=8&offset=0&group=名称` | –（`__ungrouped` = 只跑未分组） | `{ ok, logs, processed, remaining, nextOffset }`（分批执行，前端按 `nextOffset` 续跑） |
 | GET | `/api/tasks/:id/logs?limit=20&before=<id>` | – | `{ logs: [LogEntry] }` |
+
+### 实时执行日志
+
+`POST /api/tasks/:id/run` 启动执行后，`GET /api/tasks/:id/live` 返回当前进度：
+
+- `running`：是否仍在执行；
+- `events`：按时间排列的步骤输出（`info` / `warn` / `error`），最多保留 200 条；
+- `ok` / `message`：执行结束后的最终结果；
+- 执行结束后状态保留 5 分钟；实例被回收时状态标记为「执行中断」。
 
 ## 日志
 

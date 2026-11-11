@@ -3569,6 +3569,54 @@ input[type="radio"] {
   color: var(--text-2, rgba(255, 255, 255, 0.7));
 }
 
+/* 手动执行时的实时日志 */
+.live-run-status {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.live-log {
+  max-height: 46vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.live-log-line {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.live-log-time {
+  flex: 0 0 auto;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-log-msg {
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.live-log-line.is-warn .live-log-msg {
+  color: var(--warn);
+}
+
+.live-log-line.is-error .live-log-msg {
+  color: var(--fail);
+}
+
 /* 最近一次运行的步骤日志（弹窗） */
 .run-detail {
   display: grid;

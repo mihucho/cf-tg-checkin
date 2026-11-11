@@ -84,6 +84,28 @@ interface PendingLogin {
   at: number;
 }
 
+/** 手动执行的实时进度（按任务保存，前端轮询读取） */
+interface LiveEvent {
+  at: number;
+  level: "info" | "warn" | "error";
+  message: string;
+}
+
+interface LiveRun {
+  taskId: number;
+  taskName: string;
+  startedAt: number;
+  finishedAt: number | null;
+  running: boolean;
+  ok: boolean | null;
+  message: string | null;
+  events: LiveEvent[];
+}
+
+/** 实时进度保留时间（结束后仍可被前端读取） */
+const LIVE_KEEP_MS = 5 * 60_000;
+const LIVE_MAX_EVENTS = 200;
+
 const KV_SESSION = "account:session";
 const KV_ME = "account:me";
 const KV_CREDS = "account:creds";
@@ -192,6 +214,10 @@ export class TgAgent implements DurableObject {
   private connected = false;
   /** 正在进行的 withClient 操作数：空闲计时器不能在这时候掐连接 */
   private activeOps = 0;
+  /** 手动执行的实时进度（与 kv 同步，读请求可以直接拿到最新状态） */
+  private liveRuns = new Map<number, LiveRun>();
+  /** 已受理但还没轮到执行的手动任务（防止连接建立前重复提交） */
+  private pendingManualRuns = new Set<number>();
 
   constructor(
     private readonly ctx: DurableObjectState,
@@ -422,7 +448,7 @@ export class TgAgent implements DurableObject {
         return json(result);
       }
 
-      const taskMatch = /^\/tasks\/(\d+)(\/run|\/logs|\/command|\/clone)?$/.exec(path);
+      const taskMatch = /^\/tasks\/(\d+)(\/run|\/logs|\/command|\/clone|\/live)?$/.exec(path);
       if (taskMatch) {
         const id = Number(taskMatch[1]);
         const suffix = taskMatch[2];
@@ -452,9 +478,31 @@ export class TgAgent implements DurableObject {
           return json({ task: clone.task });
         }
         if (suffix === "/run" && method === "POST") {
-          const log = await this.serialize(() => this.runTasks([task], undefined, { manual: true }));
-          await this.scheduleNextAlarm();
-          return json({ ok: log[0]?.ok ?? false, log: log[0] });
+          if (this.pendingManualRuns.has(id) || this.liveOf(id)?.running) {
+            return jsonError("任务正在执行中，请等待当前执行结束", 409);
+          }
+          this.pendingManualRuns.add(id);
+          try {
+            const log = await this.serialize(() => this.runTasks([task], undefined, { manual: true }));
+            await this.scheduleNextAlarm();
+            return json({ ok: log[0]?.ok ?? false, log: log[0] });
+          } finally {
+            this.pendingManualRuns.delete(id);
+          }
+        }
+        if (suffix === "/live" && method === "GET") {
+          return json(
+            this.liveOf(id) ?? {
+              taskId: id,
+              taskName: task.name,
+              startedAt: null,
+              finishedAt: null,
+              running: false,
+              ok: null,
+              message: null,
+              events: [],
+            },
+          );
         }
         if (suffix === "/command" && method === "GET") {
           const settings = this.store.getSettings();
@@ -2176,6 +2224,88 @@ export class TgAgent implements DurableObject {
     return this.store.updateTask(id, { ...normalized, target, targets, nextRunAt }, Date.now());
   }
 
+  // ---------------------------------------------------------------- 实时进度
+
+  private liveKey(taskId: number): string {
+    return `live:${taskId}`;
+  }
+
+  /** 实时状态只用于展示，写入失败不能影响任务执行 */
+  private persistLive(taskId: number, run: LiveRun): void {
+    try {
+      this.store.setJson(this.liveKey(taskId), run);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** 当前任务的实时进度；结束超过保留期或实例被回收的执行会被清理 */
+  private liveOf(taskId: number): LiveRun | null {
+    const inMemory = this.liveRuns.get(taskId);
+    let run = inMemory ?? this.store.getJson<LiveRun | null>(this.liveKey(taskId), null);
+    if (!run) return null;
+    // 内存里没有但存储里还是 running：上一个实例已经回收，这次执行不会再有后续事件
+    if (run.running && !inMemory) {
+      const at = Date.now();
+      const stale: LiveEvent = { at, level: "error", message: "执行中断（实例被回收）" };
+      run = {
+        ...run,
+        running: false,
+        finishedAt: at,
+        ok: false,
+        message: stale.message,
+        events: [...run.events, stale].slice(-LIVE_MAX_EVENTS),
+      };
+      this.liveRuns.set(taskId, run);
+      this.persistLive(taskId, run);
+    }
+    if (!run.running && run.finishedAt && Date.now() - run.finishedAt > LIVE_KEEP_MS) {
+      this.liveRuns.delete(taskId);
+      this.store.deleteKv(this.liveKey(taskId));
+      return null;
+    }
+    return run;
+  }
+
+  private startLive(task: Task): void {
+    const now = Date.now();
+    const run: LiveRun = {
+      taskId: task.id,
+      taskName: task.name,
+      startedAt: now,
+      finishedAt: null,
+      running: true,
+      ok: null,
+      message: null,
+      events: [{ at: now, level: "info", message: "开始执行" }],
+    };
+    this.liveRuns.set(task.id, run);
+    this.persistLive(task.id, run);
+  }
+
+  private appendLive(taskId: number, level: LiveEvent["level"], message: string): void {
+    const run = this.liveRuns.get(taskId) ?? this.store.getJson<LiveRun | null>(this.liveKey(taskId), null);
+    if (!run || !run.running) return;
+    run.events.push({ at: Date.now(), level, message });
+    if (run.events.length > LIVE_MAX_EVENTS) run.events.splice(0, run.events.length - LIVE_MAX_EVENTS);
+    this.liveRuns.set(taskId, run);
+    this.persistLive(taskId, run);
+  }
+
+  private finishLive(taskId: number, ok: boolean, message: string): void {
+    const run = this.liveRuns.get(taskId) ?? this.store.getJson<LiveRun | null>(this.liveKey(taskId), null);
+    if (!run) return;
+    const now = Date.now();
+    run.running = false;
+    run.finishedAt = now;
+    run.ok = ok;
+    run.message = message;
+    run.events.push({ at: now, level: ok ? "info" : "error", message: ok ? "执行完成" : "执行失败" });
+    if (run.events.length > LIVE_MAX_EVENTS) run.events.splice(0, run.events.length - LIVE_MAX_EVENTS);
+    this.liveRuns.set(taskId, run);
+    this.persistLive(taskId, run);
+  }
+
   /**
    * @param options.manual 手动触发（界面按钮 / Telegram 命令）。
    *   手动跑一次不应该打乱定时：只有「已经到期」或「本来就没排期」的任务才重算 nextRunAt，
@@ -2201,8 +2331,12 @@ export class TgAgent implements DurableObject {
       const message = errorMessage(error);
       // 这时还没进到 runSingleTask，通知得在这里发，否则「手动执行失败」永远不通知
       await this.notifyConnectionProblem(null, message);
-      return tasks.map((task) =>
-        this.store.addLog({
+      return tasks.map((task) => {
+        // 连接级失败没有进入 runSingleTask，这里补一条实时状态，前端能看到失败原因
+        this.startLive(task);
+        this.appendLive(task.id, "error", message);
+        this.finishLive(task.id, false, message);
+        return this.store.addLog({
           taskId: task.id,
           taskName: task.name,
           at: Date.now(),
@@ -2211,8 +2345,8 @@ export class TgAgent implements DurableObject {
           message,
           detail: null,
           source: options.manual ? "manual" : "auto",
-        }),
-      );
+        });
+      });
     }
   }
 
@@ -2327,7 +2461,8 @@ export class TgAgent implements DurableObject {
   ): Promise<LogEntry> {
     const settings = this.store.getSettings();
     const sentKey = `task:${task.id}:sent`;
-    const hooks: ExecHooks = { log: () => undefined };
+    this.startLive(task);
+    const hooks: ExecHooks = { log: (level, message) => this.appendLive(task.id, level, message) };
 
     const triggerSource: LogSource = options.manual ? "manual" : "auto";
     const startedAt = Date.now();
@@ -2344,6 +2479,11 @@ export class TgAgent implements DurableObject {
         const effective = prepared.target;
         const targetKey = (effective.username || effective.id || target.username || target.id || "").toLowerCase();
         const previousForTarget = this.store.getJson<number[]>(`${sentKey}:${targetKey}`, []);
+        this.appendLive(
+          task.id,
+          "info",
+          `目标 ${effective.username ? `@${effective.username}` : effective.title || effective.id}`,
+        );
         const outcome = await executeTask(client, { ...prepared.task, target: effective }, {
           previousSent: previousForTarget,
           hooks,
@@ -2443,6 +2583,8 @@ export class TgAgent implements DurableObject {
         durationMs: Date.now() - startedAt,
       });
     }
+
+    if (log) this.finishLive(task.id, log.ok, log.message);
 
     if (log) this.store.recordEvent(`run_finished:${log.ok ? "ok" : "fail"}`);
 

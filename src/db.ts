@@ -457,6 +457,7 @@ export class Store {
     // 通知节流的 key 形如 notify:<事件>:<任务 id>:at（见 agent.ts 的 notifyEvent）。
     this.sql.exec("DELETE FROM kv WHERE key LIKE ?", `task:${id}:sent:%`);
     this.sql.exec("DELETE FROM kv WHERE key LIKE ?", `notify:%:${id}:at`);
+    this.deleteKv(`live:${id}`);
   }
 
   dueTasks(now: number, limit = 20): Task[] {
