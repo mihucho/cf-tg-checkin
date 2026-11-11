@@ -7,6 +7,7 @@
  */
 import { TgAgent } from "./agent";
 import { BUILD } from "./version";
+import { checkUpdate } from "./update";
 import type { Env } from "./env";
 
 export { TgAgent };
@@ -413,6 +414,11 @@ export default {
     // 状态变更类请求的跨站防护（SameSite=Lax 之外再加一层）
     if (request.method !== "GET" && request.method !== "HEAD" && originRejected(request, url)) {
       return json({ error: "请求来源不被允许" }, 403);
+    }
+
+    // 版本检查只依赖 Worker 自己的构建信息，不经过 DO（见 src/update.ts 顶部说明）
+    if (path === "/api/update-check" && request.method === "GET") {
+      return json(await checkUpdate(env, url.searchParams.get("refresh") === "1"));
     }
 
     try {

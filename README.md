@@ -324,7 +324,7 @@ node scripts/release.mjs --dry-run
 ```bash
 cp .dev.vars.example .dev.vars   # 填 ADMIN_PASSWORD
 npm run dev                      # wrangler dev（自定义构建自动打包 + watch src/）
-npm test                         # 189 个单测（纯函数 + 执行器假 client）
+npm test                         # 197 个单测（纯函数 + 执行器假 client）
 npm run test:integration         # 端到端集成测试：真起 wrangler dev，打 Worker → DO → SQLite
 npm run check                    # typecheck + test + build + 产物导出自检
 ```
@@ -350,7 +350,7 @@ src/
 ├── index.ts              Worker 入口：登录 Cookie、/api 路由、Cron 兜底
 ├── agent.ts              Durable Object：session、调度、触发器、执行、API
 ├── db.ts                 内嵌 SQLite：tasks / logs / kv / 登录限速 / 延迟删除
-├── types.ts env.ts version.ts settings.ts task.ts events.ts
+├── types.ts env.ts version.ts settings.ts task.ts events.ts update.ts
 ├── telegram/             socket / transport / client / executor / targets
 ├── schedule/             time.ts（调度计算）dsl.ts / command.ts（触发语法与指令往返）guard.ts
 ├── notify/               webhook / digest / rate / events / test（通知渠道与日报）

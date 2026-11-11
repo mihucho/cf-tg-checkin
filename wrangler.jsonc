@@ -20,7 +20,11 @@
     "run_worker_first": ["/api/*"]
   },
   "durable_objects": {
-    "bindings": [{ "name": "TG_AGENT", "class_name": "TgAgent" }]
+    "bindings": [{ "name": "TG_AGENT", "class_name": "TgAgent" }],
+    // 部署后立刻让 DO 切到新代码。Cloudflare 默认是 deferred（活跃对象最多拖 5 分钟），
+    // 这段时间 Worker 已经是新版本、DO 还在跑旧构建，管理界面会看到版本不一致。
+    // 代价：部署瞬间正在执行的签到可能被中断（日志记为「执行中断」），下一轮调度会继续。
+    "code_update_strategy": { "mode": "immediate" }
   },
   // 首次部署时创建 SQLite 版 Durable Object（session / 任务 / 日志都在里面）
   "migrations": [

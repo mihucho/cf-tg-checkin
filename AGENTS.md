@@ -22,7 +22,7 @@ MTProto 走 `cloudflare:sockets`（`src/telegram/`），调度靠 DO alarm，数
 | 命令 | 作用 |
 | --- | --- |
 | `npm run typecheck` | `tsc --noEmit`（覆盖 `src/**`，`strict: true`；`build.mjs` 是 `.mjs`，不参与类型检查） |
-| `npm test` | `build.mjs --test` 打包 `tests/index.test.ts` → 在 Node 里跑（当前 189 例，几秒） |
+| `npm test` | `build.mjs --test` 打包 `tests/index.test.ts` → 在 Node 里跑（当前 197 例，几秒） |
 | `npm run check` | typecheck → test → build → 检查产物导出（提 PR 前跑这个） |
 | `npm run dev` | `wrangler dev`（`build.command` 会先跑一遍 esbuild） |
 | `npm run test:integration` | 真起 `wrangler dev`（随机端口 + 临时目录），HTTP 打通 Worker→DO→SQLite，73 项；约 45 秒，带 180 秒看门狗 |
@@ -202,6 +202,10 @@ title: v0.18.0 — 一句话标题
 27. 任务行的点击守卫用 `event.target instanceof Element` + `closest("button, a, input, ...")`
     （SVG `<path>` 不是 `HTMLElement`，v0.12.1 的坑）。`.row-actions` 带 `data-no-row-click`。
 28. 界面上任何数字/状态都从服务端来，前端不 mock、不自己算下一个运行时间（`describeSchedule`/`formatCountdown` 只做格式化）。
+29. **版本检查（`/api/update-check`）必须在 Worker（`src/update.ts`），不要放回 DO**：Cloudflare 对 DO
+    的代码更新默认延迟（deferred），旧 DO 会把「当前版本」报成旧值，前端误报有新版本。
+    DO 自己的构建只通过 `/api/state` 的 `runtime.build` 暴露，仅用于排查；
+    `wrangler.jsonc` 固定 `durable_objects.code_update_strategy: immediate`，部署后 DO 立即切换，别删。
 
 ---
 
@@ -216,6 +220,7 @@ title: v0.18.0 — 一句话标题
 | `src/task.ts` | 纯函数：`normalizeTaskInput` / `taskFingerprint` / `applyTargetPatch` / `taskToExport` | 好测，逻辑尽量往这里放 |
 | `src/settings.ts` | 纯函数：`redactSettings` / `redactState` / `shouldAutoFillAdminId` | 脱敏只在这里做 |
 | `src/events.ts` | 埋点计数分桶（7 天趋势） | 纯函数；60 秒缓存写在 `agent.ts` 的 `usageTrend()` |
+| `src/update.ts` | 版本检查（Worker 侧，Cache API 缓存） | 用 Worker 自己的构建当「当前版本」；不要挪回 DO |
 | `src/env.ts` | Worker 绑定类型（`Env`） | 新增 secret/变量同步这里与 `docs/DEPLOY.md` |
 | `src/version.ts` | 构建注入的 version / buildId / commit | 不手改，`build.mjs` 注入 |
 | `src/notify/*` | 通知渠道（webhook）/ 日报周报（digest）/ 成功率（rate）/ 事件目录 / 测试消息 | 渠道包体与节流窗口都在这里，改文案同步 `docs/API.md` |
@@ -257,7 +262,7 @@ title: v0.18.0 — 一句话标题
 
 ## 提交前检查清单
 
-- [ ] `npm run check` 通过（typecheck + 189 例单测 + build + 产物导出检查）
+- [ ] `npm run check` 通过（typecheck + 197 例单测 + build + 产物导出检查）
 - [ ] 改了路由 / DO 行为 / 数据读写 → `npm run test:integration` 通过
 - [ ] 改了 `dsl.ts` 或 `command.ts` → 往返用例已补
 - [ ] 改了 schema → 老数据能升级（`ALTER TABLE` 幂等）

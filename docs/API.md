@@ -11,7 +11,7 @@
 | 方法 | 路径 | 请求体 | 响应 |
 | --- | --- | --- | --- |
 | GET | `/api/session` | – | `{ authenticated: boolean, needsSetup: boolean, turnstileSiteKey: string \| null }` |
-| GET | `/api/update-check?refresh=1` | – | `{ current, latest, hasUpdate, url }`（读取 GitHub `main` 的 `package.json` 作为最新版本，含未打 tag 的版本；附带最新 Release 链接；缓存 6 小时，构建 ID 变化自动失效，`refresh=1` 强制刷新） |
+| GET | `/api/update-check?refresh=1` | – | `{ current, latest, hasUpdate, url }`（由 **Worker** 用自己的构建版本回答，避免 DO 代码更新延迟导致误报；读取 GitHub `main` 的 `package.json` 与最新 Release，取较新者；Cache API 缓存 6 小时，构建 ID 变化自动失效，`refresh=1` 强制刷新） |
 | GET | `/api/version` | – | `{ version: "0.19.2", commit: "e0d50af", buildId: "2026-10-25T01:51:59Z", worker: "cf-tg-checkin" }`（**公开**，无需登录） |
 | POST | `/api/login` | `{ password: string, turnstileToken?: string }` | `{ ok: true }`（同时下发 HttpOnly Cookie）；失败可能返回 429 + `Retry-After` |
 | POST | `/api/logout` | – | `{ ok: true }`（清除 Cookie；跨站 Origin 会被 403 拒绝） |

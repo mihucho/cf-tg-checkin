@@ -69,7 +69,7 @@ const state = {
   logLevel: "", // "" | "ok" | "fail"
   logTaskId: "", // "" = 全部任务
   logQuery: "", // 关键字搜索
-  updateInfo: null, // 新版本检查结果 { current, latest, hasUpdate, url }
+  updateInfo: undefined, // 新版本检查结果 { current, latest, hasUpdate, url }；null = 请求失败
   taskSearch: "", // 任务页搜索关键字
   taskSelectMode: false, // 任务页「选择」模式（批量操作用）
   taskSelection: new Set(), // 选中的任务 id
@@ -187,6 +187,31 @@ function formatBuild(info) {
     parts.push(String(info.buildId).replace("T", " ").replace("Z", " UTC"));
   }
   return parts.length ? parts.join(" · ") : "dev";
+}
+
+/**
+ * 执行节点（DO）与页面（Worker）的构建关系。
+ * 页面版本是唯一展示的版本号；这里只说明执行节点是否已经跟上，
+ * 正常情况下部署后立刻同步（wrangler.jsonc 配了 immediate）。
+ */
+function describeNodeBuild(page, node) {
+  if (!node) return { text: "执行节点状态未知", muted: true };
+  if (!page) return { text: "执行节点已连接", muted: true };
+
+  const versionSame = !page.version || !node.version || page.version === node.version;
+  const commitSame = !page.commit || !node.commit || page.commit === node.commit;
+  if (versionSame && commitSame) return { text: "执行节点已同步", muted: true };
+
+  const pageAt = Date.parse(page.buildId || "");
+  const nodeAt = Date.parse(node.buildId || "");
+  if (Number.isFinite(pageAt) && Number.isFinite(nodeAt)) {
+    if (nodeAt > pageAt) return { text: "执行节点构建比页面新，请刷新页面", muted: false };
+    if (pageAt - nodeAt > 5 * 60_000) return { text: "执行节点仍是旧构建，请重新部署", muted: false };
+  }
+
+  const from = node.version ? `v${node.version}` : "旧构建";
+  const to = page.version ? `v${page.version}` : "新构建";
+  return { text: `执行节点正在切换（${from} → ${to}）…`, muted: false };
 }
 
 function paintBuildInfo() {
@@ -3615,25 +3640,16 @@ function renderSettings() {
       el(
         "div",
         { class: "stack-sm" },
-        el("div", { class: "about-build", id: "about-build" }, state.build ? "" : "读取中…"),
-        runtime.build
-          ? el("div", { class: "about-build" }, `执行节点 ${formatBuild(runtime.build)}`)
-          : null,
-        runtime.build &&
-        state.build &&
-        ((runtime.build.commit &&
-          state.build.commit &&
-          runtime.build.commit !== state.build.commit) ||
-          (runtime.build.version &&
-            state.build.version &&
-            runtime.build.version !== state.build.version))
-          ? el("div", { class: "about-build muted" }, "执行节点与页面构建不一致，重新部署后会自动更新")
-          : null,
-        el(
-          "div",
-          { class: "about-build" },
-          `出口机房 ${runtime.colo || "未记录"}` + (runtime.locationHint ? ` · 部署区域 ${runtime.locationHint}` : ""),
-        ),
+        el("div", { class: "about-build", id: "about-build" }, state.build ? formatBuild(state.build) : "读取中…"),
+        (() => {
+          const node = describeNodeBuild(state.build, runtime.build);
+          return el(
+            "div",
+            { class: `about-build${node.muted ? " muted" : ""}` },
+            `${node.text} · 出口机房 ${runtime.colo || "未记录"}` +
+              (runtime.locationHint ? ` · 部署区域 ${runtime.locationHint}` : ""),
+          );
+        })(),
         el("div", { id: "about-update" }, updateNotice()),
         usagePanel(),
         el(
@@ -3836,8 +3852,24 @@ function paintUpdateNotice() {
 /** 关于页的「版本检查」一行 */
 function updateNotice() {
   const info = state.updateInfo;
-  if (!info) return el("div", { class: "about-build muted" }, "版本检查：读取中…");
-  if (info.hasUpdate && info.latest) {
+  if (info === undefined) return el("div", { class: "about-build muted" }, "版本检查：读取中…");
+  if (!info || !info.latest) {
+    return el(
+      "div",
+      { class: "about-build muted" },
+      "版本检查：没查到最新版本（网络或频率限制）",
+      el(
+        "button",
+        {
+          class: "link link-sm",
+          type: "button",
+          onclick: (event) => withLoading(event.currentTarget, () => checkUpdate({ refresh: true })),
+        },
+        "重试",
+      ),
+    );
+  }
+  if (info.hasUpdate) {
     // 只接受 GitHub 的 https 地址（服务端来自 Release 的 html_url，仍做一层协议白名单）
     const url = /^https:\/\/github\.com\//i.test(String(info.url || "")) ? info.url : "";
     return el(
@@ -3856,22 +3888,6 @@ function updateNotice() {
           onclick: (event) => withLoading(event.currentTarget, () => checkUpdate({ refresh: true })),
         },
         "重新检查",
-      ),
-    );
-  }
-  if (!info.latest) {
-    return el(
-      "div",
-      { class: "about-build muted" },
-      "版本检查：没查到最新版本（网络或频率限制）",
-      el(
-        "button",
-        {
-          class: "link link-sm",
-          type: "button",
-          onclick: (event) => withLoading(event.currentTarget, () => checkUpdate({ refresh: true })),
-        },
-        "重试",
       ),
     );
   }

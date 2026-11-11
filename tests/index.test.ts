@@ -21,5 +21,6 @@ import "./executor-reply.test.ts";
 import "./executor-failure.test.ts";
 import "./copy.test.ts";
 import "./version.test.ts";
+import "./update.test.ts";
 
 void runAll();

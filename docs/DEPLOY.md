@@ -149,7 +149,7 @@ npm run deploy                           # 打包 + 部署（wrangler 会先跑 
 cp .dev.vars.example .dev.vars    # 填 ADMIN_PASSWORD
 npm install
 npm run dev                       # = wrangler dev（自定义构建会自动打包并 watch src/）
-npm test                          # 189 个单测（调度 / 触发语法 / 执行器判定 / 通知渲染 / 脱敏）
+npm test                          # 197 个单测（调度 / 触发语法 / 执行器判定 / 通知渲染 / 脱敏）
 npm run typecheck
 ```
 
@@ -317,6 +317,17 @@ curl -s https://cf-tg-checkin.<你的子域>.workers.dev/api/version
 版本号只在 `package.json` 里维护（发版时由 `releases/unreleased.md` 驱动，**不要手跑 `npm version`**），构建时注入。
 排查「改了没生效」时先看这里：如果 commit 不是你刚推的那一个，说明部署没成功
 （一键部署 / Workers Builds 看构建日志，CLI 看 `npm run deploy` 的输出）。
+
+### 执行节点与页面版本
+
+DO 的代码更新默认由 Cloudflare 延后（deferred，活跃对象最多 5 分钟），这段时间 Worker 已经是新版本、
+DO 还在跑旧构建。仓库的 `wrangler.jsonc` 配了
+`durable_objects.code_update_strategy: { mode: "immediate" }`，部署完成后 DO 会立刻切到新构建；
+「设置 → 关于」只显示页面版本，并标注「执行节点已同步」。
+
+如果显示「执行节点正在切换」，通常几秒内会消失；超过 5 分钟仍是旧构建，说明这次部署没有把新代码
+传到 DO（看部署日志，或重新执行 `npm run deploy`）。代价是部署瞬间正在执行的签到可能被中断
+（日志页会记录「执行中断」），下一轮调度会继续。
 
 ---
 
