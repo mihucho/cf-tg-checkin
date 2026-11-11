@@ -747,7 +747,7 @@ export async function executeTask(
           interactive = candidate;
           note(
             "info",
-            `步骤${stepNo} 消息 #${candidate.message.id} 上有 ${candidate.buttons.length} 个按钮：${describeButtons(candidate.buttons)}`,
+            `步骤${stepNo} 消息 #${candidate.message.id} 上有 ${candidate.buttons.length} 个按钮：\n${describeButtons(candidate.buttons)}`,
           );
           let button = selectButton(candidate.buttons, step);
           let buttonMessage = candidate.message;
@@ -776,7 +776,7 @@ export async function executeTask(
             break;
           }
           const click = await clickButton(client, entity, buttonMessage, button);
-          note("info", `步骤${stepNo} 点击「${button.text}」（${button.kind}）`);
+          note("info", `步骤${stepNo} 点击「${button.text}」`);
           if (click.note) note("info", `步骤${stepNo} ${click.note}`);
           if (click.callbackText) callbackReplies.push(click.callbackText);
           cursorId = Math.max(cursorId, buttonMessage.id, candidate.message.id);
