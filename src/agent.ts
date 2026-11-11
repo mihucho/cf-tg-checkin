@@ -657,13 +657,19 @@ export class TgAgent implements DurableObject {
 
       if (path === "/update-check" && method === "GET") {
         const current = BUILD.version;
-        const repo = (this.env.GITHUB_REPO ?? "mihucho/cf-tg-checkin").trim() || "mihucho/cf-tg-checkin";
+        const repoRaw = (this.env.GITHUB_REPO ?? "mihucho/cf-tg-checkin").trim() || "mihucho/cf-tg-checkin";
+        const repo = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repoRaw) ? repoRaw : "mihucho/cf-tg-checkin";
+        // 手动「重新检查」强制绕过缓存
+        const refresh = url.searchParams.get("refresh") === "1";
         const cached = this.store.getJson<{
           at: number;
           latest: string | null;
           url: string | null;
+          buildId?: string;
         } | null>("cache:updateCheck", null);
-        if (cached && Date.now() - cached.at < 6 * 3600_000) {
+        // 构建变化后旧结果立即失效，避免部署后仍显示上一版的检查结果
+        const sameBuild = cached?.buildId === BUILD.buildId;
+        if (!refresh && sameBuild && cached && Date.now() - cached.at < 6 * 3600_000) {
           return json({
             current,
             latest: cached.latest,
@@ -673,7 +679,22 @@ export class TgAgent implements DurableObject {
         }
 
         let latest: string | null = null;
-        let url: string | null = null;
+        let link: string | null = null;
+        // 1) main 的 package.json：包含未打 tag 的版本
+        try {
+          const res = await fetch(`https://raw.githubusercontent.com/${repo}/main/package.json`, {
+            headers: { "user-agent": "cf-tg-checkin", accept: "application/json" },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (res.ok) {
+            const pkg = (await res.json()) as { version?: string };
+            latest = String(pkg.version ?? "").trim() || null;
+            if (latest) link = `https://github.com/${repo}/blob/main/CHANGELOG.md`;
+          }
+        } catch {
+          /* 拿不到就回退到 Release */
+        }
+        // 2) 最新 Release：提供更准确的链接；release tag 更新时也以它为准
         try {
           const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
             headers: { "user-agent": "cf-tg-checkin", accept: "application/vnd.github+json" },
@@ -681,18 +702,23 @@ export class TgAgent implements DurableObject {
           });
           if (res.ok) {
             const data = (await res.json()) as { tag_name?: string; html_url?: string };
-            latest = String(data.tag_name ?? "").trim() || null;
-            url = data.html_url ?? null;
+            const tag = String(data.tag_name ?? "").trim().replace(/^v/i, "");
+            if (tag && (!latest || isNewerVersion(tag, latest))) {
+              latest = tag;
+              link = data.html_url ?? link;
+            } else if (tag && tag === latest && data.html_url) {
+              link = data.html_url;
+            }
           }
         } catch {
-          /* 拿不到就当没有新版本（不打扰用户） */
+          /* 拿不到就用 package.json 的结果 */
         }
-        this.store.setJson("cache:updateCheck", { at: Date.now(), latest, url });
+        this.store.setJson("cache:updateCheck", { at: Date.now(), latest, url: link, buildId: BUILD.buildId });
         return json({
           current,
           latest,
           hasUpdate: latest ? isNewerVersion(latest, current) : false,
-          url,
+          url: link,
         });
       }
 

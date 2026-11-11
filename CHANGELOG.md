@@ -35,6 +35,12 @@ push 后 `.github/workflows/release.yml` 会自动：跑检查 → 写 `package.
 
 ## [Unreleased]
 
+### 版本检查
+
+- 最新版本改为读取 GitHub `main` 的 `package.json`，未打 tag 的版本也能提示；最新 Release 存在时使用其链接，否则指向 CHANGELOG。
+- 检查结果缓存绑定构建 ID，重新构建/部署后自动失效；「重新检查」与「重试」强制刷新。
+- 关于页显示执行节点构建，与页面构建不一致时提示重新部署。
+
 ## [0.20.2] - 2026-11-11
 
 ## 执行结果

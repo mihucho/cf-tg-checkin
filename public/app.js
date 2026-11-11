@@ -3616,6 +3616,19 @@ function renderSettings() {
         "div",
         { class: "stack-sm" },
         el("div", { class: "about-build", id: "about-build" }, state.build ? "" : "读取中…"),
+        runtime.build
+          ? el("div", { class: "about-build" }, `执行节点 ${formatBuild(runtime.build)}`)
+          : null,
+        runtime.build &&
+        state.build &&
+        ((runtime.build.commit &&
+          state.build.commit &&
+          runtime.build.commit !== state.build.commit) ||
+          (runtime.build.version &&
+            state.build.version &&
+            runtime.build.version !== state.build.version))
+          ? el("div", { class: "about-build muted" }, "执行节点与页面构建不一致，重新部署后会自动更新")
+          : null,
         el(
           "div",
           { class: "about-build" },
@@ -3802,10 +3815,10 @@ function notifyExtras(id, settings) {
   return null;
 }
 
-/** 查一次有没有新版本（失败就静默，不打扰） */
-async function checkUpdate() {
+/** 查一次有没有新版本（失败就静默，不打扰）；refresh=true 强制绕过服务端缓存 */
+async function checkUpdate({ refresh = false } = {}) {
   try {
-    const info = await api("/api/update-check");
+    const info = await api(`/api/update-check${refresh ? "?refresh=1" : ""}`);
     state.updateInfo = info || null;
   } catch {
     state.updateInfo = null;
@@ -3840,7 +3853,7 @@ function updateNotice() {
         {
           class: "link link-sm",
           type: "button",
-          onclick: (event) => withLoading(event.currentTarget, () => checkUpdate()),
+          onclick: (event) => withLoading(event.currentTarget, () => checkUpdate({ refresh: true })),
         },
         "重新检查",
       ),
@@ -3856,7 +3869,7 @@ function updateNotice() {
         {
           class: "link link-sm",
           type: "button",
-          onclick: (event) => withLoading(event.currentTarget, () => checkUpdate()),
+          onclick: (event) => withLoading(event.currentTarget, () => checkUpdate({ refresh: true })),
         },
         "重试",
       ),
