@@ -8,6 +8,7 @@ import {
   detectWebhookKind,
   dingtalkSign,
   parseWebhookResult,
+  usableWebhookToken,
 } from "../src/notify/webhook.ts";
 
 const message = { title: "⚠️ 任务「每日签到」执行失败", text: "未匹配到关键词", at: 1761000000000 };
@@ -37,7 +38,7 @@ test("buildWebhookBody：各渠道包体结构", () => {
 
   const generic = JSON.parse(buildWebhookBody("generic", { ...message, taskId: 7, taskName: "每日签到" }));
   assert.equal(generic.taskId, 7);
-  assert.equal(generic.ok, false);
+  assert.equal(generic.ok, true);
   assert.equal(generic.message, message.text);
   assert.equal(generic.text, `${message.title}\n${message.text}`);
 });
@@ -190,7 +191,7 @@ test("卡片：没有执行记录时也给一句人话（不留空白）", () =>
 
 test("卡片：通用 JSON 不用卡片，仍发扁平字段", () => {
   const body = JSON.parse(buildWebhookBody("generic", { ...message, card: digestCard }));
-  assert.equal(body.ok, false);
+  assert.equal(body.ok, true);
   assert.equal(body.text, `${message.title}\n${message.text}`);
   assert.equal(body.msgtype, undefined);
 });
@@ -200,7 +201,7 @@ test("卡片：通用 JSON 不用卡片，仍发扁平字段", () => {
 import { normalizeWebhookUrl } from "../src/notify/webhook.ts";
 
 test("normalizeWebhookUrl：裸 token 按渠道补成完整地址", () => {
-  const token = "76296f3669f0c48fab916ed96cc183cc9f17e8a5a063447e065555538e114acd";
+  const token = "example-token-0123456789abcdef0123456789abcdef";
   assert.equal(
     normalizeWebhookUrl(token, "dingtalk"),
     `https://oapi.dingtalk.com/robot/send?access_token=${token}`,
@@ -285,8 +286,8 @@ import { maskWebhookUrl } from "../src/notify/webhook.ts";
 
 test("maskWebhookUrl：保留域名，token 只露首尾", () => {
   assert.equal(
-    maskWebhookUrl("https://oapi.dingtalk.com/robot/send?access_token=76296f3669f0c48fab916ed96cc183cc"),
-    "https://oapi.dingtalk.com/robot/send?access_token=7629****83cc",
+    maskWebhookUrl("https://oapi.dingtalk.com/robot/send?access_token=example-token-abcdef123456"),
+    "https://oapi.dingtalk.com/robot/send?access_token=exam****3456",
   );
   assert.equal(
     maskWebhookUrl("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdefghijkl"),
@@ -295,6 +296,25 @@ test("maskWebhookUrl：保留域名，token 只露首尾", () => {
 });
 
 test("maskWebhookUrl：填的不是地址时别套 https://", () => {
-  assert.equal(maskWebhookUrl("76296f3669f0c48fab916ed996cc183cc"), "76296f****");
+  assert.equal(maskWebhookUrl("example-token-123456"), "exampl****");
   assert.equal(maskWebhookUrl(""), "");
+});
+
+test("buildWebhookBody：通用 JSON 的 ok 跟随通知类型（失败提醒为 false）", () => {
+  const failure = JSON.parse(
+    buildWebhookBody("generic", { title: "失败", text: "x", at: 1, ok: false }),
+  );
+  assert.equal(failure.ok, false);
+  const digest = JSON.parse(
+    buildWebhookBody("generic", { title: "日报", text: "x", at: 1 }),
+  );
+  assert.equal(digest.ok, true);
+});
+
+test("usableWebhookToken：空值与 **** 脱敏值都表示「不修改」", () => {
+  assert.equal(usableWebhookToken(""), null);
+  assert.equal(usableWebhookToken("   "), null);
+  assert.equal(usableWebhookToken("abcd****cdef"), null);
+  assert.equal(usableWebhookToken("integration-token-1"), "integration-token-1");
+  assert.equal(usableWebhookToken("https://oapi.dingtalk.com/robot/send?access_token=real-1"), "https://oapi.dingtalk.com/robot/send?access_token=real-1");
 });

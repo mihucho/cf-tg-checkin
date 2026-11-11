@@ -21,6 +21,11 @@ export interface WebhookMessage {
   title: string;
   text: string;
   at: number;
+  /**
+   * 这次通知是不是「出问题」。
+   * 通用 JSON 渠道的 ok 字段表示通知类型：失败提醒为 false，其余为 true。
+   */
+  ok?: boolean;
   /** 日报/周报的卡片内容：钉钉、飞书、企业微信会渲染成 Markdown / 卡片 */
   card?: DigestCard;
 }
@@ -68,6 +73,17 @@ export const WEBHOOK_TEMPLATES: Record<Exclude<WebhookKind, "generic">, WebhookT
     tokenHint: "飞书群 → 设置 → 群机器人 → 自定义机器人 → Webhook 地址最后那一段。",
   },
 };
+
+/**
+ * 可写入的 Webhook Token。
+ *
+ * 空值与脱敏值（含 `****`）都表示「不修改」。
+ */
+export function usableWebhookToken(raw: unknown): string | null {
+  const token = String(raw ?? "").trim();
+  if (!token || token.includes("****")) return null;
+  return token;
+}
 
 /** 用固定模板 + token 拼出地址（token 里如果是一整个 URL，会先把 token 抠出来） */
 export function webhookUrlFromToken(kind: WebhookKind, rawToken: string): string {
@@ -287,7 +303,7 @@ export function buildWebhookBody(kind: WebhookKind, message: WebhookMessage): st
       return JSON.stringify({
         taskId: message.taskId ?? null,
         taskName: message.taskName ?? null,
-        ok: false,
+        ok: message.ok ?? true,
         message: message.text,
         text: content,
         at: message.at,

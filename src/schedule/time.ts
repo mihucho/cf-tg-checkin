@@ -6,6 +6,8 @@ import type { Schedule, Task } from "../types";
 
 const MINUTE = 60_000;
 const DAY = 86_400_000;
+/** interval 的上限：7 天（与任务编辑器/归一化保持一致） */
+export const MAX_INTERVAL_MINUTES = 7 * 24 * 60;
 
 export interface LocalParts {
   year: number;
@@ -107,7 +109,8 @@ export function nextDaily(time: string, now: number, timezone: number): number {
   const parsed = parseTimeOfDay(time) ?? { hour: 9, minute: 0 };
   let dayStart = localDayStart(now, timezone);
   let target = atTimeOfDay(dayStart, parsed.hour, parsed.minute);
-  while (target <= now + 5_000) {
+  // 目标时刻已过才顺延到次日。
+  while (target <= now) {
     dayStart += DAY;
     target = atTimeOfDay(dayStart, parsed.hour, parsed.minute);
   }
@@ -179,7 +182,7 @@ export function computeNextRun(
 
   switch (schedule.kind) {
     case "interval": {
-      const minutes = Math.max(1, Math.min(24 * 60, schedule.intervalMinutes ?? 60));
+      const minutes = Math.max(1, Math.min(MAX_INTERVAL_MINUTES, schedule.intervalMinutes ?? 60));
       return now + minutes * MINUTE + jitter;
     }
     case "window": {

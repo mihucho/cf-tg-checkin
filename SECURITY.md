@@ -26,7 +26,7 @@
 | 4 | 篡改签名末位 / 篡改 exp（不改签名） | 401 | 401 | ✅ |
 | 5 | 路径绕过：`/api/../api/state`、`/api//state`、`/api/%73tate`、`/api/state/` | 401 | 401 | ✅ |
 | 6 | `/API/state`（大写） | 落到静态资源（SPA fallback），不泄露数据 | 200 = index.html | ✅（只是页面） |
-| 7 | 公开端点泄露 | 只有版本信息 | `/api/version` 仅 `version/commit/buildId` | ✅ |
+| 7 | 公开端点泄露 | 只有版本信息 | `/api/version` 仅 `version/commit/buildId/worker` | ✅ |
 | 8 | `XSS`：任务名/目标名/步骤文本塞 `<img onerror>` `<script>` | 纯文本渲染 | DOM 里 0 个 img/script，无 alert | ✅ |
 | 9 | SQL 注入：`?limit=abc` / `?limit=1 OR 1=1` / `?limit[]=1` | 不报错、不泄露 SQL | 参数非法时回落默认值 | ✅（已修） |
 | 10 | 登录爆破：错误密码 ×20 | 触发限速 | 第 10 次起 429 + `Retry-After` | ✅（已修） |

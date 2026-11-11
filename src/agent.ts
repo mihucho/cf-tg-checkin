@@ -35,7 +35,7 @@ import {
 } from "./notify/digest";
 import { describeLowRate, pickLowRateTasks, taskRates } from "./notify/rate";
 import { buildTestMessage } from "./notify/test";
-import { NOTIFY_EVENTS, isNotifyEventId, isThrottledEvent, normalizeNotifyEvents } from "./notify/events";
+import { NOTIFY_EVENTS, isFailureEvent, isNotifyEventId, isThrottledEvent, normalizeNotifyEvents, throttleWindowMs } from "./notify/events";
 import type { NotifyEventId } from "./notify/events";
 import {
   WEBHOOK_TEMPLATES,
@@ -44,6 +44,7 @@ import {
   maskWebhookUrl,
   normalizeWebhookUrl,
   parseWebhookResult,
+  usableWebhookToken,
   webhookUrlFromToken,
 } from "./notify/webhook";
 import { createTgClient, createTgClientOnDc, errorMessage, isConnectionError, migrateDcFromError } from "./telegram/client";
@@ -63,7 +64,7 @@ import {
 import { messageTargetHint, usernameFromLink, type MessageLike, type MessageTargetHint } from "./telegram/targets";
 import type { Env } from "./env";
 import { bucketDaily } from "./events";
-import { applyTargetPatch, normalizeTaskInput, shouldAutoRename, taskFingerprint, taskToExport } from "./task";
+import { applyTargetPatch, normalizeTaskInput, preserveTargetMeta, shouldAutoRename, taskFingerprint, taskToExport } from "./task";
 import { BUILD } from "./version";
 import { isNewerVersion } from "./util/version";
 import { redactSettingsForClient, redactState, shouldAutoFillAdminId } from "./settings";
@@ -94,8 +95,10 @@ const KV_TRIGGER_TARGET = "trigger:target";
 /** 触发消息单批拉取条数 / 最多回溯几批（多了会拖慢轮询，少了会丢指令） */
 const TRIGGER_FETCH_BATCH = 100;
 const TRIGGER_FETCH_BATCHES = 5;
-/** run-all 每次处理的批大小：8 个任务 × 单任务预算，仍在网关超时以内 */
+/** run-all 单批默认任务数（前端也可以自己传 limit） */
 const RUN_ALL_BATCH = 8;
+/** run-all 单批最多占用的时间：超过就交给前端下一轮 */
+const RUN_ALL_BATCH_BUDGET_MS = 80_000;
 /**
  * 实体缓存（[markedId, accessHash, username, phone, name]）。
  * teleproto 把这份缓存放在 session 对象里，StringSession.save() 不会带上它，
@@ -247,10 +250,13 @@ export class TgAgent implements DurableObject {
           // 明确清空过就别再自动回填
           this.store.setKv("adminId:autoFilled", "1");
         }
-        // 固定渠道（钉钉/企微/飞书）只要 token，地址由模板生成
+        // 固定渠道（钉钉/企微/飞书）只提交 token，地址由模板生成；空值与脱敏值表示保持不变。
         if (notifyWebhookToken !== undefined) {
-          const kind = (patch.notifyWebhookKind ?? this.store.getSettings().notifyWebhookKind ?? "generic") as WebhookKind;
-          patch.notifyWebhook = webhookUrlFromToken(kind, notifyWebhookToken);
+          const token = usableWebhookToken(notifyWebhookToken);
+          if (token) {
+            const kind = (patch.notifyWebhookKind ?? this.store.getSettings().notifyWebhookKind ?? "generic") as WebhookKind;
+            patch.notifyWebhook = webhookUrlFromToken(kind, token);
+          }
         }
         if (clearTurnstileSecret) patch.turnstileSecretKey = "";
         const before = this.store.getSettings();
@@ -270,7 +276,13 @@ export class TgAgent implements DurableObject {
 
       if (path === "/tasks" && method === "POST") {
         const body = (await request.json()) as TaskInput;
-        const { task, created } = this.createTask(body);
+        let result: { task: Task; created: boolean };
+        try {
+          result = this.createTask(body);
+        } catch (error) {
+          return jsonError(error, 400);
+        }
+        const { task, created } = result;
         if (!created) return json({ task, error: `已存在相同任务 #${task.id}` }, 409);
         await this.scheduleNextAlarm();
         return json({ task });
@@ -460,7 +472,12 @@ export class TgAgent implements DurableObject {
         }
         if (!suffix && (method === "PATCH" || method === "PUT")) {
           const patch = (await request.json()) as Partial<TaskInput>;
-          const updated = this.updateTask(id, patch);
+          let updated: Task | null;
+          try {
+            updated = this.updateTask(id, patch);
+          } catch (error) {
+            return jsonError(error, 400);
+          }
           await this.scheduleNextAlarm();
           return json({ task: updated });
         }
@@ -502,12 +519,17 @@ export class TgAgent implements DurableObject {
         const stored = this.store.getSettings();
         const merged = { ...stored, ...sanitizeSettings(overlay) };
         const overlayKind = (merged.notifyWebhookKind ?? "generic") as WebhookKind;
-        const overlayToken = String((overlay as { notifyWebhookToken?: string }).notifyWebhookToken ?? "");
+        const overlayToken = usableWebhookToken((overlay as { notifyWebhookToken?: string }).notifyWebhookToken);
+        // 空值与脱敏值表示沿用已保存的地址。
+        const overlayUrl = String(overlay.notifyWebhook ?? "").trim();
         const settings: Settings = {
           ...merged,
           notifyWebhook: overlayToken
             ? webhookUrlFromToken(overlayKind, overlayToken)
-            : normalizeWebhookUrl(String(overlay.notifyWebhook ?? stored.notifyWebhook ?? ""), overlayKind),
+            : normalizeWebhookUrl(
+                overlayUrl && !overlayUrl.includes("****") ? overlayUrl : String(stored.notifyWebhook ?? ""),
+                overlayKind,
+              ),
           // 密钥留空表示沿用已保存的（和保存设置的语义一致）
           notifyWebhookSecret: String(overlay.notifyWebhookSecret ?? "").trim() || stored.notifyWebhookSecret,
         };
@@ -1557,6 +1579,13 @@ export class TgAgent implements DurableObject {
       }
     }
     await this.dropClient();
+    // 管理员 ID 与当前账号相同时一并清空，便于切换账号后重新回填。
+    const me = this.store.getJson<AccountInfo["me"]>(KV_ME, null);
+    const settings = this.store.getSettings();
+    if (me?.id && settings.adminUserId && settings.adminUserId === me.id) {
+      this.store.saveSettings({ adminUserId: "" });
+      this.store.deleteKv("adminId:autoFilled");
+    }
     this.store.deleteKv(KV_SESSION);
     this.store.deleteKv(KV_ME);
     this.store.deleteKv(KV_PENDING);
@@ -2026,7 +2055,7 @@ export class TgAgent implements DurableObject {
       anyEntity.title ||
       [anyEntity.firstName, anyEntity.lastName].filter(Boolean).join(" ").trim() ||
       undefined;
-    const title = displayName && displayName !== `@${anyEntity.username ?? ""}` ? displayName : displayName;
+    const title = displayName;
     const accessHash = anyEntity.accessHash;
     return {
       kind,
@@ -2099,6 +2128,10 @@ export class TgAgent implements DurableObject {
     const settings = this.store.getSettings();
     const now = Date.now();
     const normalized = normalizeTaskInput(input);
+    // 空目标无法执行，创建时直接拒绝。
+    if (!normalized.target.id && !normalized.target.username) {
+      throw new Error("任务目标不能为空（填 @username / 数字 id，或先用「解析」确认）");
+    }
 
     const duplicate = this.store.findDuplicateTask(normalized);
     if (duplicate) {
@@ -2126,6 +2159,13 @@ export class TgAgent implements DurableObject {
     if (!current) return null;
     const merged = { ...current, ...patch } as Task;
     const normalized = normalizeTaskInput(merged);
+    if (!normalized.target.id && !normalized.target.username) {
+      throw new Error("任务目标不能为空（填 @username / 数字 id，或先用「解析」确认）");
+    }
+    // 按句柄/话题从现有目标补齐 accessHash 等元信息。
+    const known = [current.target, ...(current.targets ?? [])];
+    const target = preserveTargetMeta(normalized.target, known);
+    const targets = normalized.targets?.map((item) => preserveTargetMeta(item, known));
     const scheduleChanged =
       JSON.stringify(current.schedule) !== JSON.stringify(normalized.schedule) || current.enabled !== normalized.enabled;
     const nextRunAt = normalized.enabled
@@ -2133,7 +2173,7 @@ export class TgAgent implements DurableObject {
         ? computeNextRun(normalized.schedule, Date.now(), settings.timezone)
         : current.nextRunAt
       : null;
-    return this.store.updateTask(id, { ...normalized, nextRunAt }, Date.now());
+    return this.store.updateTask(id, { ...normalized, target, targets, nextRunAt }, Date.now());
   }
 
   /**
@@ -2188,7 +2228,13 @@ export class TgAgent implements DurableObject {
       return group === "__ungrouped" ? !name : name === group;
     };
     const tasks = this.store.listTasks().filter((task) => task.enabled && inGroup(task));
-    const batch = tasks.slice(offset, offset + limit);
+    const startedAt = Date.now();
+    // 单批按时间封顶，剩余任务交给下一轮；每轮至少执行一个任务。
+    const batch: Task[] = [];
+    for (const task of tasks.slice(offset, offset + limit)) {
+      if (batch.length > 0 && Date.now() - startedAt > RUN_ALL_BATCH_BUDGET_MS) break;
+      batch.push(task);
+    }
     const logs = batch.length ? await this.runTasks(batch, undefined, { manual: true }) : [];
     const nextOffset = offset + batch.length;
     return {
@@ -2334,11 +2380,16 @@ export class TgAgent implements DurableObject {
 
       const passed = outcomes.filter((item) => item.outcome.ok).length;
       const firstOk = outcomes.find((item) => item.outcome.ok);
+      // 多目标全部成功才算任务成功。
+      const ok = passed === targets.length;
       const outcome = {
-        ok: passed > 0,
-        message:
-          targets.length > 1
+        ok,
+        message: ok
+          ? targets.length > 1
             ? `${passed}/${targets.length} 个目标成功` + (firstOk ? `（例：${firstOk.outcome.message}）` : "")
+            : outcomes[0].outcome.message
+          : targets.length > 1
+            ? `${passed}/${targets.length} 个目标成功（有目标失败）` + (firstOk ? `（例：${firstOk.outcome.message}）` : "")
             : outcomes[0].outcome.message,
         detail: outcomes
           .map((item) => `▶ ${item.target.username || item.target.id}\n${item.outcome.detail}`)
@@ -2358,7 +2409,14 @@ export class TgAgent implements DurableObject {
 
       this.store.setJson(sentKey, outcome.sent);
       // 回复已经作为「收到机器人回复 #id：…」记在 detail 里了，这里不要再追加一遍
-      this.store.recordRun(task.id, outcome.ok ? "ok" : "fail", outcome.message, outcome.detail || null, Date.now());
+      this.store.recordRun(
+        task.id,
+        outcome.ok ? "ok" : "fail",
+        outcome.message,
+        outcome.detail || null,
+        Date.now(),
+        options.manual ? "manual" : "auto",
+      );
       log = this.store.addLog({
         taskId: task.id,
         taskName: task.name,
@@ -2372,7 +2430,7 @@ export class TgAgent implements DurableObject {
       });
     } catch (error) {
       const message = errorMessage(error);
-      this.store.recordRun(task.id, "fail", message, null, Date.now());
+      this.store.recordRun(task.id, "fail", message, null, Date.now(), options.manual ? "manual" : "auto");
       log = this.store.addLog({
         taskId: task.id,
         taskName: task.name,
@@ -2475,7 +2533,7 @@ export class TgAgent implements DurableObject {
     const throttleKey = `notify:${type}:${payload.task?.id ?? "global"}:at`;
     if (isThrottledEvent(type)) {
       const last = Number(this.store.getKv(throttleKey) ?? 0);
-      if (Date.now() - last < 60 * 60_000) return;
+      if (Date.now() - last < throttleWindowMs(type)) return;
     }
     this.store.setKv(throttleKey, String(Date.now()));
 
@@ -2494,6 +2552,7 @@ export class TgAgent implements DurableObject {
       taskName: payload.task?.name ?? null,
       title: payload.title,
       text: payload.text,
+      ok: !isFailureEvent(type),
     });
   }
 
@@ -2530,6 +2589,8 @@ export class TgAgent implements DurableObject {
       taskName?: string | null;
       title: string;
       text: string;
+      /** 是不是「出问题」的通知（通用 Webhook 的 ok 字段） */
+      ok?: boolean;
       card?: import("./notify/digest").DigestCard;
     },
   ): Promise<{ ok: boolean; kind: WebhookKind; error?: string }> {
@@ -2605,8 +2666,18 @@ export class TgAgent implements DurableObject {
       try {
         const entity = await resolveEntity(client, deletion.chat);
         await client.deleteMessages(entity as never, deletion.msgIds, { revoke: true });
-      } catch {
-        /* 删除失败无所谓 */
+      } catch (error) {
+        // 删除失败写入日志，保留聊天与消息 id。
+        this.store.addLog({
+          taskId: null,
+          taskName: null,
+          at: Date.now(),
+          ok: false,
+          level: "warn",
+          message: `延迟删除失败：${errorMessage(error)}`,
+          detail: `聊天 ${deletion.chat} · 消息 ${deletion.msgIds.join(", ")}`,
+          source: "system",
+        });
       }
       this.store.deleteDeletion(deletion.id);
     }

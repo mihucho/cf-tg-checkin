@@ -22,13 +22,13 @@ test("flattenButtons：layer 232 inline 按钮（KeyboardInlineButton + type）"
           buttons: [
             {
               className: "KeyboardInlineButton",
-              text: "✅ Verify SheerID",
+              text: "✅ 验证账号",
               type: { className: "InlineButtonTypeCallback", data: new Uint8Array([1, 2, 3]) },
             },
             {
               className: "KeyboardInlineButton",
               text: "🌐 频道",
-              type: { className: "InlineButtonTypeUrl", url: "https://t.me/sheeridvn" },
+              type: { className: "InlineButtonTypeUrl", url: "https://t.me/example_channel" },
             },
           ],
         },
@@ -53,14 +53,14 @@ test("flattenButtons：layer 232 inline 按钮（KeyboardInlineButton + type）"
   assert.deepEqual(
     buttons.map((b) => [b.row, b.column, b.kind, b.text]),
     [
-      [0, 0, "callback", "✅ Verify SheerID"],
+      [0, 0, "callback", "✅ 验证账号"],
       [0, 1, "url", "🌐 频道"],
       [1, 0, "webview", "📄 文档"],
       [1, 1, "switch", "🔎 分享"],
     ],
   );
   assert.deepEqual([...buttons[0].data!], [1, 2, 3]);
-  assert.equal(buttons[1].url, "https://t.me/sheeridvn");
+  assert.equal(buttons[1].url, "https://t.me/example_channel");
   assert.equal(buttons[3].query, "hi");
 });
 

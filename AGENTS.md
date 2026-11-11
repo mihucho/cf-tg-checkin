@@ -21,11 +21,11 @@ MTProto 走 `cloudflare:sockets`（`src/telegram/`），调度靠 DO alarm，数
 
 | 命令 | 作用 |
 | --- | --- |
-| `npm run typecheck` | `tsc --noEmit`（覆盖 `src/**` + `build.mjs`，`strict: true`） |
-| `npm test` | `build.mjs --test` 打包 `tests/index.test.ts` → 在 Node 里跑（当前 140 例，几秒） |
+| `npm run typecheck` | `tsc --noEmit`（覆盖 `src/**`，`strict: true`；`build.mjs` 是 `.mjs`，不参与类型检查） |
+| `npm test` | `build.mjs --test` 打包 `tests/index.test.ts` → 在 Node 里跑（当前 185 例，几秒） |
 | `npm run check` | typecheck → test → build → 检查产物导出（提 PR 前跑这个） |
 | `npm run dev` | `wrangler dev`（`build.command` 会先跑一遍 esbuild） |
-| `npm run test:integration` | 真起 `wrangler dev`（随机端口 + 临时目录），HTTP 打通 Worker→DO→SQLite，48 项；约 45 秒，带 180 秒看门狗 |
+| `npm run test:integration` | 真起 `wrangler dev`（随机端口 + 临时目录），HTTP 打通 Worker→DO→SQLite，72 项；约 45 秒，带 180 秒看门狗 |
 | `npm run smoke` | 用 `wrangler.smoke.jsonc` 起一个不连 Telegram 的最小 Worker（排查部署问题用） |
 | `npm run deploy` | build → `check-bundle` → `wrangler deploy` |
 | `node scripts/release.mjs --dry-run` | 预览「改发布文档」会做哪些改动（不落盘） |
@@ -69,14 +69,15 @@ version: 0.18.0
 title: v0.18.0 — 一句话标题
 ---
 
-正文就是 GitHub Release 的说明（Markdown），同时作为 annotated tag 的注释。
+正文就是发布说明（Markdown）；打 tag 时同时作为 GitHub Release 说明与 annotated tag 的注释。
 ```
 
-| 文档里的 `version` | 行为 |
+| 文档里的 front matter | 行为 |
 | --- | --- |
-| **大于** `package.json` | 跑 typecheck + 单测 + 打包自检 → 写 `package.json`/`package-lock.json` → 把正文插进 `CHANGELOG.md`（`[Unreleased]` 之后）→ 归档到 `releases/archive/vX.Y.Z.md` 并重置模板 → 提交 → 打 annotated tag → 建/更新 GitHub Release → 触发 `deploy.yml` |
-| **等于**当前版本 | 只补 tag / GitHub Release（代码已发、说明写晚了；重复执行安全） |
-| **`0.0.0`**（模板） | 跳过 |
+| **`version` 大于** `package.json` | 跑 typecheck + 单测 + 打包自检 → 写 `package.json`/`package-lock.json` → 把正文插进 `CHANGELOG.md`（`[Unreleased]` 之后）→ 归档到 `releases/archive/vX.Y.Z.md` 并重置模板 → 提交 → 打 annotated tag → 建/更新 GitHub Release → 触发 `deploy.yml` |
+| **`version` 等于**当前版本 | 只补 tag / GitHub Release（代码已发、说明写晚了；重复执行安全） |
+| **`tag: false`**（配合大于当前版本的 `version`） | 版本号、`CHANGELOG.md`、归档与部署照常，跳过 tag 与 GitHub Release；`retro` / `revoke` / 只补发布仍然需要 tag |
+| **`version: 0.0.0`**（模板） | 跳过 |
 | 带 **`retro: true`** | 只改这个已存在 tag 的 **GitHub Release 说明**（版本号可以 ≤ 当前版本），
 不动代码、不打 tag。用途：发布说明写错/需要脱敏时回头修 |
 | 带 **`retro: revoke`** | **撤销发版**：删掉这个版本的 GitHub Release 与 tag，代码改动保留。
@@ -88,11 +89,12 @@ title: v0.18.0 — 一句话标题
   写进 `CHANGELOG.md` 的 `[Unreleased]` 就够；**不要**自己判断"这批改动值得发一版"就动手。
   发布文档保持模板（`0.0.0`）状态，谁都不会误触发
 - **只有 `releases/unreleased.md` 的变化会触发发布**，别的改动走普通 CI；不要在别处手动 bump 版本号
-- 版本号判断口径见上一节（修 bug = `patch`），文档里写错会被脚本拒掉（必须严格递增，非 `x.y.z` 直接报错）
+- 版本号判断口径见上一节（修 bug = `patch`），文档里写错会被脚本拒掉（必须 ≥ 当前版本：大于走完整发版，等于走「只补发布」；小于当前版本直接报错）
+- 发版默认打 tag；不需要 tag 的版本在 front matter 写 `tag: false`，工作流只更新版本号 / CHANGELOG / 归档并部署
 - 正文要有内容（只写 front matter 会报错）；写完先 `node scripts/release.mjs --dry-run` 预览
 - 发完别手动改 `releases/unreleased.md` 的历史内容 —— 归档副本在 `releases/archive/`
-- `GITHUB_TOKEN` push 出去的 commit **不会**触发其它工作流，所以 workflow 里显式 `gh workflow run deploy.yml`；
-  想让它像普通 push 一样级联，在仓库 Secrets 配 `RELEASE_TOKEN`（带 `repo` 的 PAT）
+- 未配置 `RELEASE_TOKEN` 时，workflow 显式执行 `gh workflow run deploy.yml` 触发部署；
+  配置 `RELEASE_TOKEN`（带 `repo` 的 PAT）后由 push 级联触发部署
 - 历史遗留：v0.17.1 及之前的版本是手工 `git tag` 打的，没有 release 文档；从下一个版本起走上面这套
 
 ---
@@ -118,6 +120,14 @@ title: v0.18.0 — 一句话标题
 所以 `scripts/copy-lint.mjs` 已删除。隐私靠提交前 review —— 不确定的东西一律用占位符。
 纯文风规则还在，跑在 `tests/copy.test.ts`（`npm test` 会执行），那份不含任何真实数据。
 
+## 行为反模式警示：拒绝纠错残留
+
+严厉禁止以下“纠偏后残留历史痕迹与自我辩解”的行为模式：
+
+> 用户让做一盘“番茄炒蛋”，Agent 擅自加了“东坡肉”；被指出后虽然去掉了，但提交/PR 时写着「番茄炒蛋（无东坡肉）」，并在注释中大篇幅解释为什么本道菜不需要加东坡肉。
+
+**交付要求**：任何代码、注释、文档、提交信息及回复，都必须直接呈现对齐后的**干净终态设计**（Clean final-state design），严禁包含任何前序错误、自我辩解或“在此删掉某逻辑”的纠错痕迹。
+
 ## 硬约束（都是踩过的坑，别改回去）
 
 ### 构建 / 运行时
@@ -142,7 +152,7 @@ title: v0.18.0 — 一句话标题
    别绕过它并发跑 Telegram 操作。
 6. schema 改动：`CREATE TABLE IF NOT EXISTS ...` + 在 `Store` 初始化里**追加**用 `try/catch` 包住的
    `ALTER TABLE ... ADD COLUMN`（写法见 `src/db.ts` 里已有的几条）。绝不要建新表替代老表。
-   任务删除时要一并清理关联 kv（`task:<id>:sent:<target>`、`notify:<id>:at`）。
+   任务删除时要一并清理关联 kv（`task:<id>:sent:<target>`、`notify:<事件>:<id>:at`）。
 7. `logs` 只保留最近 2000 条（`Store` 里插入后裁剪），别加无上限的表。
 
 ### 网络 / 协议
@@ -204,8 +214,12 @@ title: v0.18.0 — 一句话标题
 | `src/db.ts` | DO SQLite 的 `Store`：`kv` / `tasks` / `logs` / `events` / `auth_attempts` / `deletions` | 加列走 `ALTER TABLE` 迁移；`rows()` 统一 `.toArray()` |
 | `src/types.ts` | 前后端共享类型 + `DEFAULT_SETTINGS`（唯一默认值来源） | 契约文档同步 `docs/API.md` |
 | `src/task.ts` | 纯函数：`normalizeTaskInput` / `taskFingerprint` / `applyTargetPatch` / `taskToExport` | 好测，逻辑尽量往这里放 |
-| `src/settings.ts` | 纯函数：`redactSettings` / `shouldAutoFillAdminId` | 脱敏只在这里做 |
-| `src/events.ts` | 埋点计数分桶（7 天趋势） | 有 60 秒缓存 |
+| `src/settings.ts` | 纯函数：`redactSettings` / `redactState` / `shouldAutoFillAdminId` | 脱敏只在这里做 |
+| `src/events.ts` | 埋点计数分桶（7 天趋势） | 纯函数；60 秒缓存写在 `agent.ts` 的 `usageTrend()` |
+| `src/env.ts` | Worker 绑定类型（`Env`） | 新增 secret/变量同步这里与 `docs/DEPLOY.md` |
+| `src/version.ts` | 构建注入的 version / buildId / commit | 不手改，`build.mjs` 注入 |
+| `src/notify/*` | 通知渠道（webhook）/ 日报周报（digest）/ 成功率（rate）/ 事件目录 / 测试消息 | 渠道包体与节流窗口都在这里，改文案同步 `docs/API.md` |
+| `src/util/version.ts` | 版本号比较（新版本提示） | 纯函数 |
 | `src/schedule/time.ts` | 时间解析、下次运行计算、时区格式化 | 纯函数，`tests/time.test.ts` |
 | `src/schedule/dsl.ts` | 触发消息语法解析（`parseTrigger` / `tokenize` / 前缀 / 目标补全） | 改它必改往返测试 |
 | `src/schedule/command.ts` | 任务 → 指令文本（`taskToCommand`） | 与 `dsl.ts` 互逆 |
@@ -219,7 +233,8 @@ title: v0.18.0 — 一句话标题
 | `src/smoke.ts` | 冒烟 Worker 入口（不连 Telegram） | |
 | `public/*` | 管理界面（纯静态） | 见上面「前端」约定 |
 | `tests/*` | 零依赖测试；`harness.ts` 注册 → `index.test.ts` 汇总 | **新测试文件必须 import 进 `tests/index.test.ts`**，否则不跑 |
-| `scripts/integration.mjs` | 端到端测试（进程组启动/整组 kill） | 动路由或 DO 行为时跑一遍 |
+| `scripts/integration.mjs` | 端到端测试（进程组启动/整组 kill，含 DO SQLite 直读断言） | 动路由或 DO 行为时跑一遍 |
+| `scripts/check-bundle.mjs` | 部署前检查产物导出了 `TgAgent` | `npm run deploy` / CI 自动跑 |
 | `docs/API.md` / `docs/DEPLOY.md` / `docs/UI_COPY.md` | 接口契约 / 部署与排查 / 文案规范 | 改契约同步 API.md |
 | `releases/unreleased.md` | 下一次发布的说明（改它即发版） | 格式与三种模式见「发版」一节 |
 | `scripts/release.mjs` | 解析发布文档、校验版本递增、写 CHANGELOG、归档 | 只管文件改动，git/gh 在 workflow 里 |
@@ -242,7 +257,7 @@ title: v0.18.0 — 一句话标题
 
 ## 提交前检查清单
 
-- [ ] `npm run check` 通过（typecheck + 140 例单测 + build + 产物导出检查）
+- [ ] `npm run check` 通过（typecheck + 185 例单测 + build + 产物导出检查）
 - [ ] 改了路由 / DO 行为 / 数据读写 → `npm run test:integration` 通过
 - [ ] 改了 `dsl.ts` 或 `command.ts` → 往返用例已补
 - [ ] 改了 schema → 老数据能升级（`ALTER TABLE` 幂等）

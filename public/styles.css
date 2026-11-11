@@ -524,6 +524,10 @@ input[type="radio"] {
   color: var(--fail);
 }
 
+.status.is-idle {
+  color: var(--text-3);
+}
+
 /* --------------------------------------------------------------- 按钮 */
 
 .btn {
@@ -1046,26 +1050,9 @@ input[type="radio"] {
   white-space: nowrap;
 }
 
-.cell-nowrap {
-  white-space: nowrap;
-}
-
-.cell-steps {
-  max-width: 250px;
-  color: var(--text-2);
-  font-size: 12px;
-}
-
 .cell-actions {
   width: 1%;
   white-space: nowrap;
-}
-
-.row-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 2px;
 }
 
 .task-name {
@@ -2179,69 +2166,8 @@ input[type="radio"] {
     grid-template-columns: 1fr;
   }
 
-  /* 表格 → 卡片 */
-  .tasks-table thead {
-    display: none;
-  }
-
-  .tasks-table,
-  .tasks-table tbody,
-  .tasks-table tr,
-  .tasks-table td {
-    display: block;
-    width: 100%;
-  }
-
-  .tasks-table tr {
-    padding: 14px 14px;
-    border-top: 1px solid var(--line);
-  }
-
-  .tasks-table tbody tr:first-child {
-    border-top: 0;
-  }
-
-  .tasks-table td {
-    display: grid;
-    grid-template-columns: 76px minmax(0, 1fr);
-    align-items: center;
-    gap: 10px;
-    padding: 3px 0;
-    border: 0;
-  }
-
-  .tasks-table td::before {
-    content: attr(data-label);
-    color: var(--text-3);
-    font-size: 11.5px;
-  }
-
-  .tasks-table td[data-label="任务"] {
-    display: block;
-    padding-bottom: 8px;
-  }
-
-  .tasks-table td[data-label="任务"]::before,
-  .tasks-table td[data-label="操作"]::before {
-    display: none;
-  }
-
-  .tasks-table td[data-label="操作"] {
-    display: block;
-    padding-top: 10px;
-  }
-
-  .cell-trunc,
-  .cell-steps {
+  .cell-trunc {
     max-width: none;
-  }
-
-  .cell-sub {
-    padding-left: 0;
-  }
-
-  .row-actions {
-    justify-content: flex-start;
   }
 
   .log-head {
@@ -2605,11 +2531,6 @@ input[type="radio"] {
   color: var(--text-3, rgba(255, 255, 255, 0.35));
   padding: 0 2px;
   font-size: 12px;
-}
-
-/* 最近结果单元格里的「步骤日志」入口 */
-.tasks-table tbody tr.is-clickable {
-  cursor: pointer;
 }
 
 .result-cell {
@@ -3042,22 +2963,20 @@ input[type="radio"] {
   }
 }
 
-/* 任务页：批量删除（选择模式） */
-.tasks-table .th-select,
-.tasks-table .cell-select {
-  width: 34px;
-  padding-right: 0;
+/* 任务页：批量操作（选择模式） */
+.cell-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  flex: 0 0 auto;
 }
 
-.tasks-table .task-select-box {
+.task-select-box {
   width: 15px;
   height: 15px;
   accent-color: var(--accent, #5cc8bd);
   cursor: pointer;
-}
-
-.tasks-table tr.is-selected {
-  background: rgba(92, 200, 189, 0.08);
 }
 
 .selection-bar {

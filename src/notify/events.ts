@@ -29,6 +29,10 @@ export interface NotifyEventMeta {
   defaultOn?: boolean;
   /** 会被节流成「同类 1 小时内最多一条」 */
   throttled?: boolean;
+  /** 覆盖默认节流窗口（分钟）；不写就是 60 分钟 */
+  throttleMinutes?: number;
+  /** 这是一条「出问题」的通知：通用 Webhook 包体里的 ok 字段用 false */
+  failure?: boolean;
 }
 
 export const NOTIFY_EVENTS: NotifyEventMeta[] = [
@@ -38,12 +42,14 @@ export const NOTIFY_EVENTS: NotifyEventMeta[] = [
     hint: "某个任务跑失败了（同一任务 1 小时内最多一条）",
     defaultOn: true,
     throttled: true,
+    failure: true,
   },
   {
     id: "auto_paused",
     label: "连续失败自动暂停",
     hint: "连续失败达到阈值、任务被自动停用时",
     defaultOn: true,
+    failure: true,
   },
   {
     id: "run_recovered",
@@ -56,6 +62,7 @@ export const NOTIFY_EVENTS: NotifyEventMeta[] = [
     hint: "Telegram 登录失效，需要到「账号」页重新登录",
     defaultOn: true,
     throttled: true,
+    failure: true,
   },
   {
     id: "connection_error",
@@ -63,12 +70,14 @@ export const NOTIFY_EVENTS: NotifyEventMeta[] = [
     hint: "连不上 Telegram（网络/机房问题），整批任务都没跑成",
     defaultOn: true,
     throttled: true,
+    failure: true,
   },
   {
     id: "login_failed",
     label: "登录失败",
     hint: "有人多次输错管理界面口令（被临时锁定时提醒，1 小时最多一次）",
     throttled: true,
+    failure: true,
   },
   {
     id: "run_success",
@@ -91,12 +100,16 @@ export const NOTIFY_EVENTS: NotifyEventMeta[] = [
     label: "存储告警",
     hint: "Durable Object 存储用量超过设定阈值时提醒（每天最多一次）",
     throttled: true,
+    throttleMinutes: 24 * 60,
+    failure: true,
   },
   {
     id: "success_rate_low",
     label: "成功率告警",
     hint: "某任务最近 7 天成功率低于阈值时提醒（每个任务每天最多一条）",
     throttled: true,
+    throttleMinutes: 24 * 60,
+    failure: true,
   },
 ];
 
@@ -123,4 +136,15 @@ export function notifyEventMeta(id: NotifyEventId): NotifyEventMeta {
 /** 某个事件是否需要在推送前做「同类节流」 */
 export function isThrottledEvent(id: NotifyEventId): boolean {
   return Boolean(notifyEventMeta(id).throttled);
+}
+
+/** 节流窗口（毫秒）：默认 1 小时；存储/成功率告警按文案承诺是每天一次 */
+export function throttleWindowMs(id: NotifyEventId): number {
+  const minutes = notifyEventMeta(id).throttleMinutes ?? 60;
+  return Math.max(1, minutes) * 60_000;
+}
+
+/** 这条通知是否属于「出问题」（通用 Webhook 的 ok 字段用 false） */
+export function isFailureEvent(id: NotifyEventId): boolean {
+  return Boolean(notifyEventMeta(id).failure);
 }

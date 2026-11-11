@@ -149,7 +149,7 @@ npm run deploy                           # 打包 + 部署（wrangler 会先跑 
 cp .dev.vars.example .dev.vars    # 填 ADMIN_PASSWORD
 npm install
 npm run dev                       # = wrangler dev（自定义构建会自动打包并 watch src/）
-npm test                          # 调度 + 触发语法 + 按钮解析的单测
+npm test                          # 185 个单测（调度 / 触发语法 / 执行器判定 / 通知渲染 / 脱敏）
 npm run typecheck
 ```
 
@@ -310,11 +310,11 @@ npx wrangler secret put ADMIN_PASSWORD   # 之后再设口令，不会动脚本
 
 ```bash
 curl -s https://cf-tg-checkin.<你的子域>.workers.dev/api/version
-# {"version":"0.1.0","commit":"bbc176b","buildId":"2026-10-24T01:51:59Z","worker":"cf-tg-checkin"}
+# {"version":"0.19.2","commit":"e0d50af","buildId":"2026-10-25T01:51:59Z","worker":"cf-tg-checkin"}
 ```
 
 登录页底部、主界面页脚和「设置 → 关于」也会显示同样的 `v版本 · commit · 构建时间`。
-版本号只在 `package.json` 里维护（`npm version patch` 改它），构建时注入。
+版本号只在 `package.json` 里维护（发版时由 `releases/unreleased.md` 驱动，**不要手跑 `npm version`**），构建时注入。
 排查「改了没生效」时先看这里：如果 commit 不是你刚推的那一个，说明部署没成功
 （一键部署 / Workers Builds 看构建日志，CLI 看 `npm run deploy` 的输出）。
 
@@ -345,14 +345,14 @@ curl -s https://cf-tg-checkin.<你的子域>.workers.dev/api/version
 版本说明写在 `releases/unreleased.md`（front matter 里 `version` + `title`，分隔线下面是 Release notes），
 push 到 `main` 后由 `.github/workflows/release.yml` 自动完成：
 
-| 文档里的 version | 行为 |
+| 文档里的 front matter | 行为 |
 | --- | --- |
-| 大于 `package.json` | 跑检查 → bump 版本 → 插 CHANGELOG → 归档文档 → 打 tag → 建 Release → 触发部署 |
-| 等于当前版本 | 只补 tag / Release（重复执行安全） |
-| `0.0.0`（模板） | 跳过 |
+| `version` 大于 `package.json` | 跑检查 → bump 版本 → 插 CHANGELOG → 归档文档 → 打 tag → 建 Release → 触发部署 |
+| `version` 等于当前版本 | 只补 tag / Release（重复执行安全） |
+| `tag: false`（配合大于当前版本的 version） | bump 版本 → 插 CHANGELOG → 归档文档 → 触发部署；跳过 tag 与 GitHub Release |
+| `version: 0.0.0`（模板） | 跳过 |
 
 本地先看一眼：`node scripts/release.mjs --dry-run`。
 
-> 用默认 `GITHUB_TOKEN` 时，它 push 的 commit **不会**触发其它工作流，所以 workflow 里额外用
-> `gh workflow run deploy.yml` 显式触发部署。想让它像普通 push 一样自动级联，
-> 就在仓库 Secrets 里加 `RELEASE_TOKEN`（带 `repo` 权限的 PAT）。
+> 默认 `GITHUB_TOKEN` 的 push 不会触发其它工作流，workflow 会显式执行 `gh workflow run deploy.yml`。
+> 在仓库 Secrets 配置 `RELEASE_TOKEN`（带 `repo` 权限的 PAT）后，由 push 级联触发部署。

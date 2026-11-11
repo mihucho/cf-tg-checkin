@@ -12,9 +12,24 @@ const MAX_HANDLE = 80;
 const MAX_STEP_TEXT = 500;
 const MAX_KEYWORDS = 20;
 const MAX_GROUP = 20;
+/** interval 上限：7 天（与 time.ts 的 MAX_INTERVAL_MINUTES 保持一致） */
+const MAX_INTERVAL_MINUTES = 7 * 24 * 60;
+/** 执行超时上限：与执行器 taskBudgetMs/executeTask 的 90 秒保持一致 */
+const MAX_TIMEOUT_SECONDS = 90;
+/** 执行后延迟删除的上限：1 小时（与界面一致） */
+const MAX_DELETE_AFTER_SECONDS = 3600;
 
 function clampText(value: unknown, max: number): string {
   return String(value ?? "").slice(0, max);
+}
+
+/**
+ * 数字字段统一收敛：非有限值（"abc"、NaN、Infinity）回落到默认值。
+ */
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
 }
 
 /** 目标去重（按 username / id）并限制数量 */
@@ -57,14 +72,16 @@ export function normalizeTaskInput(input: TaskInput | Task): TaskInput {
     schedule.time = schedule.time || "09:00";
   }
   if (schedule.kind === "window" && !schedule.windowEnd) schedule.windowEnd = schedule.time ?? "10:00";
-  if (schedule.kind === "interval") schedule.intervalMinutes = Math.max(1, Number(schedule.intervalMinutes ?? 60));
-  schedule.jitterSeconds = Math.max(0, Math.min(3600, Number(schedule.jitterSeconds ?? 0)));
+  if (schedule.kind === "interval") {
+    schedule.intervalMinutes = clampNumber(schedule.intervalMinutes, 1, MAX_INTERVAL_MINUTES, 60);
+  }
+  schedule.jitterSeconds = clampNumber(schedule.jitterSeconds, 0, 3600, 0);
 
   const steps = (Array.isArray(input.steps) ? input.steps : [])
     .slice(0, 20)
     .map((step) => {
       if (step.type === "wait") {
-        return { type: "wait" as const, seconds: Math.max(0, Math.min(600, Number(step.seconds ?? 3) || 0)) };
+        return { type: "wait" as const, seconds: clampNumber(step.seconds, 0, 600, 3) };
       }
       if (step.type === "random") {
         return {
@@ -112,9 +129,9 @@ export function normalizeTaskInput(input: TaskInput | Task): TaskInput {
       .slice(0, MAX_KEYWORDS)
       .map((keyword) => clampText(keyword, 60).trim())
       .filter(Boolean),
-    timeoutSeconds: Math.max(5, Math.min(120, Number(input.timeoutSeconds ?? 30))),
-    stepDelaySeconds: Math.max(0, Math.min(60, Number(input.stepDelaySeconds ?? 3))),
-    deleteAfterSeconds: Math.max(0, Math.min(3600, Number(input.deleteAfterSeconds ?? 0))),
+    timeoutSeconds: clampNumber(input.timeoutSeconds, 5, MAX_TIMEOUT_SECONDS, 30),
+    stepDelaySeconds: clampNumber(input.stepDelaySeconds, 0, 60, 3),
+    deleteAfterSeconds: clampNumber(input.deleteAfterSeconds, 0, MAX_DELETE_AFTER_SECONDS, 0),
     cleanupPrevious: input.cleanupPrevious !== false,
     group: clampText(input.group, MAX_GROUP).trim() || undefined,
     source: input.source ?? "ui",
@@ -165,6 +182,24 @@ export function applyTargetPatch(
 export function shouldAutoRename(task: Pick<Task, "name" | "nameAuto" | "target" | "steps">): boolean {
   if (typeof task.nameAuto === "boolean") return task.nameAuto;
   return task.name === defaultName(task.target, "", task.steps ?? []);
+}
+
+/**
+ * 按 `(username || id) + threadId` 合并现有目标的元信息，只补缺、不覆盖新值。
+ */
+export function preserveTargetMeta(next: Target, known: Target[]): Target {
+  const baseKey = (target: Target) => (target?.username || target?.id || "").toLowerCase();
+  const keyOf = (target: Target) => `${baseKey(target)}#${target?.threadId ?? ""}`;
+  // 先按「句柄 + 话题」精确匹配；只改话题时退回到句柄匹配（私有目标仍能找回 accessHash）
+  const match = known.find((item) => item && keyOf(item) === keyOf(next)) ?? known.find((item) => item && baseKey(item) === baseKey(next));
+  if (!match) return next;
+  return {
+    ...next,
+    kind: next.kind === "user" && match.kind !== "user" ? match.kind : next.kind,
+    title: next.title ?? match.title,
+    accessHash: next.accessHash ?? match.accessHash,
+    peerKind: next.peerKind ?? match.peerKind,
+  };
 }
 
 /** 导出的任务：去掉运行态字段，只保留可重建的配置 */

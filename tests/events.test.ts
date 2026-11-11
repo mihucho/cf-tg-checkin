@@ -44,3 +44,20 @@ test("bucketDaily：窗口外的样本被忽略", () => {
     0,
   );
 });
+
+/* ---------- 通知节流窗口 ---------- */
+import { throttleWindowMs, isFailureEvent } from "../src/notify/events.ts";
+
+test("throttleWindowMs：默认 1 小时，存储/成功率告警按每天一次", () => {
+  assert.equal(throttleWindowMs("run_failed"), 60 * 60_000);
+  assert.equal(throttleWindowMs("storage_warning"), 24 * 60 * 60_000);
+  assert.equal(throttleWindowMs("success_rate_low"), 24 * 60 * 60_000);
+});
+
+test("isFailureEvent：失败/告警类为 true，成功/日报为 false", () => {
+  assert.equal(isFailureEvent("run_failed"), true);
+  assert.equal(isFailureEvent("auto_paused"), true);
+  assert.equal(isFailureEvent("storage_warning"), true);
+  assert.equal(isFailureEvent("run_success"), false);
+  assert.equal(isFailureEvent("daily_digest"), false);
+});

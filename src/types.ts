@@ -81,6 +81,14 @@ export interface Task {
   nextRunAt: number | null;
   lastRunAt: number | null;
   lastResult: "ok" | "fail" | null;
+  /**
+   * 最近一次执行是谁触发的。
+   * - `auto`：定时/触发器；
+   * - `manual`：界面「立即执行」或 Telegram 命令。
+   * 手动执行只更新最近结果，不计入「今天已经跑过」。
+   * 缺省值按 `auto` 处理。
+   */
+  lastRunSource?: "auto" | "manual" | null;
   /** 连续失败次数（成功会清零；达到阈值自动暂停任务） */
   failStreak?: number;
   lastMessage: string | null;

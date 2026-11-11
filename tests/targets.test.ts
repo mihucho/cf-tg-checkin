@@ -43,10 +43,10 @@ test("目标推断：只有被回复的消息才看发送者", () => {
 });
 
 test("目标推断：t.me 链接与 @username", () => {
-  assert.equal(usernameFromLink("https://t.me/jerry_bot"), "jerry_bot");
-  assert.equal(usernameFromLink("t.me/jerry_bot?start=1"), "jerry_bot");
-  assert.equal(usernameFromLink("https://telegram.me/jerry_bot"), "jerry_bot");
-  assert.equal(usernameFromLink("@jerry_bot"), "jerry_bot");
+  assert.equal(usernameFromLink("https://t.me/example_bot"), "example_bot");
+  assert.equal(usernameFromLink("t.me/example_bot?start=1"), "example_bot");
+  assert.equal(usernameFromLink("https://telegram.me/example_bot"), "example_bot");
+  assert.equal(usernameFromLink("@example_bot"), "example_bot");
   // 反例：不是聊天链接
   assert.equal(usernameFromLink("https://example.com"), null);
   assert.equal(usernameFromLink("https://t.me/"), null);

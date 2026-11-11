@@ -479,8 +479,7 @@ async function clickWithTeleprotoHelper(
   const wanted = normalizeButtonText(button.text);
   const match =
     flat.find((item) => normalizeButtonText(String(item?.text ?? "")) === wanted) ??
-    (wanted ? flat.find((item) => normalizeButtonText(String(item?.text ?? "")).includes(wanted)) : undefined) ??
-    flat.find((_, index) => index === button.row === undefined);
+    (wanted ? flat.find((item) => normalizeButtonText(String(item?.text ?? "")).includes(wanted)) : undefined);
   const target = match ?? grid[button.row]?.[button.column];
   if (!target || typeof target.click !== "function") return null;
 
@@ -597,7 +596,7 @@ export async function executeTask(
   const chatId = String((entity as { id?: unknown }).id ?? task.target.id);
   const peerKind = classifyPeer(entity);
   const peerLabel = { bot: "机器人", user: "用户", group: "群组", channel: "频道" }[peerKind];
-  const timeoutMs = Math.max(5, Math.min(90, task.timeoutSeconds || 25)) * 1000;
+  const timeoutMs = Math.max(5, Math.min(90, task.timeoutSeconds || 30)) * 1000;
   /** 每等待一次机器人回复的超时时间（从每次等待开始算，不被步骤间隔吃掉） */
   const interactiveDeadline = () => Date.now() + timeoutMs;
   /** 检测间隔 / 单次最长等待（设置里可调，默认 3s 一次、最多 30s） */
@@ -612,6 +611,27 @@ export async function executeTask(
   const budgetMs = taskBudgetMs(task, { pollIntervalMs, stepWaitMs: options.stepWaitMs ?? 30_000 });
   const deadline = Date.now() + budgetMs;
   let budgetExceeded = false;
+  /** 出错或没找到按钮的步骤数（用于判定整体结果） */
+  let stepFailures = 0;
+  let lastStepError = "";
+  const fail = (message: string, level: LogLevel = "error") => {
+    stepFailures += 1;
+    lastStepError = message;
+    note(level, message);
+  };
+
+  if (!task.steps.length) {
+    return {
+      ok: false,
+      message: "没有可执行的步骤",
+      detail: detail.join("\n"),
+      sent,
+      chatId,
+      peerKind,
+      replyText: null,
+      replyId: null,
+    };
+  }
 
   if (task.cleanupPrevious && options.previousSent?.length) {
     try {
@@ -647,7 +667,7 @@ export async function executeTask(
                 ? (step.value ?? "")
                 : pickRandom(step.options ?? []);
           if (!text) {
-            note("warn", `步骤${stepNo} 内容为空，跳过`);
+            fail(`步骤${stepNo} 内容为空，跳过`, "warn");
             break;
           }
           const sentMessage = (await client.sendMessage(entity as never, {
@@ -664,18 +684,34 @@ export async function executeTask(
         }
         case "wait": {
           const seconds = Math.max(0, Math.min(600, step.seconds ?? 3));
-          note("info", `步骤${stepNo} 等待 ${seconds}s`);
-          await sleep(seconds * 1000);
+          const remaining = Math.max(0, deadline - Date.now());
+          const waitMs = Math.min(seconds * 1000, remaining);
+          if (waitMs < seconds * 1000) {
+            // 单步等待受整任务预算约束。
+            budgetExceeded = true;
+            note(
+              "warn",
+              `步骤${stepNo} 等待 ${seconds}s 会超出时间预算，只等 ${Math.round(waitMs / 1000)}s`,
+            );
+          } else {
+            note("info", `步骤${stepNo} 等待 ${seconds}s`);
+          }
+          await sleep(waitMs);
           break;
         }
         case "click": {
           const candidate: InteractiveMessage | null =
             interactive ??
-            (await waitForInteractive(client, entity, cursorId, Math.min(interactiveDeadline(), stepWaitDeadline()), hooks, {
-              pollIntervalMs,
-            }));
+            (await waitForInteractive(
+              client,
+              entity,
+              cursorId,
+              Math.min(interactiveDeadline(), stepWaitDeadline(), deadline),
+              hooks,
+              { pollIntervalMs },
+            ));
           if (!candidate) {
-            note("warn", `步骤${stepNo} 没有等到带按钮的消息`);
+            fail(`步骤${stepNo} 没有等到带按钮的消息`, "warn");
             break;
           }
           interactive = candidate;
@@ -705,7 +741,7 @@ export async function executeTask(
           }
 
           if (!button) {
-            note("warn", `步骤${stepNo} 没找到按钮「${step.text ?? `${step.row},${step.column}`}」`);
+            fail(`步骤${stepNo} 没找到按钮「${step.text ?? `${step.row},${step.column}`}」`, "warn");
             note("warn", `原始 markup：${describeRawMarkup(candidate.message)}`);
             break;
           }
@@ -720,7 +756,7 @@ export async function executeTask(
             client,
             entity,
             cursorId,
-            Math.min(interactiveDeadline(), stepWaitDeadline()),
+            Math.min(interactiveDeadline(), stepWaitDeadline(), deadline),
             hooks,
             {
               pollIntervalMs,
@@ -734,10 +770,10 @@ export async function executeTask(
           break;
         }
         default:
-          note("warn", `未知步骤类型 ${(step as Step).type}`);
+          fail(`未知步骤类型 ${(step as Step).type}`, "warn");
       }
     } catch (error) {
-      note("error", `步骤${stepNo} 失败：${errorMessage(error)}`);
+      fail(`步骤${stepNo} 失败：${errorMessage(error)}`);
     }
 
     // 步骤之间默认停一会儿，给机器人留出响应时间（wait 步骤本身就是等待，不叠加）
@@ -787,11 +823,11 @@ export async function executeTask(
 
   if (!replyId) {
     // ② 文本类最后一步 / 配了关键词：等到超时为止；③ 纯点击收尾：短补抓 3 秒
-    const fullDeadline = Math.min(interactiveDeadline(), stepWaitDeadline());
+    const fullDeadline = Math.min(interactiveDeadline(), stepWaitDeadline(), deadline);
     const shortDeadline = Math.min(fullDeadline, Date.now() + Math.min(3_000, stepDelayMs + 2_000));
-    const deadline = textLikeLastStep || wantsKeyword ? fullDeadline : shortDeadline;
+    const replyDeadline = textLikeLastStep || wantsKeyword ? fullDeadline : shortDeadline;
 
-    const found = await waitForPeerReply(client, entity, cursorId, deadline, hooks, { pollIntervalMs });
+    const found = await waitForPeerReply(client, entity, cursorId, replyDeadline, hooks, { pollIntervalMs });
     if (found) {
       // 原始回复可能有多行，存进日志前压成一行（否则一条日志被拆成好几行）
       replyText = oneLine(found.text) || "（无文本内容）";
@@ -820,6 +856,11 @@ export async function executeTask(
       const preview = texts.slice(-2).join(" | ");
       note("warn", preview ? `${message}；最近回复：${preview.slice(0, 300)}` : message);
     }
+  } else if (stepFailures > 0) {
+    // 没有关键词时，任一步骤出错即视为任务失败。
+    ok = false;
+    message = `执行失败：${stepFailures} 个步骤出错（${lastStepError || "见步骤日志"}）`;
+    note("warn", message);
   } else if (replyText) {
     message = `执行完成 · 收到回复「${oneLine(replyText, 40)}」`;
   }

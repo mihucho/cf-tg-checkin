@@ -18,6 +18,11 @@ concurrency:
 
 jobs:
   release:
+    # 只允许在 main 上发版：workflow_dispatch 可以选分支，
+    # 不加守卫的话会把功能分支 HEAD 直接推到 main 并打 tag。
+    if: github.ref == 'refs/heads/main'
+    env:
+      HAS_RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN != '' }}
     runs-on: ubuntu-latest
     steps:
       # 用 PAT 时，push 出去的 commit 才能触发部署工作流；没有 PAT 就走后面的 gh workflow run
@@ -73,11 +78,12 @@ jobs:
             echo "没有需要提交的改动（可能已经发过这个版本）"
           else
             git commit -m "chore(release): $TITLE"
-            git push origin HEAD:main
+            # 推送前同步 main，确保发布提交落在最新分支上。
+            git push origin HEAD:main || (git pull --rebase origin main && git push origin HEAD:main)
           fi
 
       - name: 打 tag（已存在则跳过）
-        if: steps.prepare.outputs.mode == 'bump' || steps.prepare.outputs.mode == 'release-only'
+        if: (steps.prepare.outputs.mode == 'bump' || steps.prepare.outputs.mode == 'release-only') && steps.prepare.outputs.tag_enabled == 'true'
         env:
           VERSION: ${{ steps.prepare.outputs.version }}
           TAG: ${{ steps.prepare.outputs.tag }}
@@ -124,8 +130,20 @@ jobs:
           gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE"
           echo "已更新 Release $TAG 的说明" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: 提交发布文档复位（retro / revoke）
+        if: steps.prepare.outputs.mode == 'edit-release' || steps.prepare.outputs.mode == 'revoke'
+        run: |
+          set -euo pipefail
+          git add releases/unreleased.md
+          if git diff --cached --quiet; then
+            echo "发布文档没有需要提交的改动"
+          else
+            git commit -m "chore(release): 复位发布文档"
+            git push origin HEAD:main || (git pull --rebase origin main && git push origin HEAD:main)
+          fi
+
       - name: 创建 GitHub Release（已存在则更新说明）
-        if: steps.prepare.outputs.mode != 'edit-release' && steps.prepare.outputs.mode != 'revoke'
+        if: (steps.prepare.outputs.mode == 'bump' || steps.prepare.outputs.mode == 'release-only') && steps.prepare.outputs.tag_enabled == 'true'
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.prepare.outputs.tag }}
@@ -141,8 +159,8 @@ jobs:
           fi
 
       - name: 触发部署（把这一版发到线上）
-        if: steps.prepare.outputs.mode == 'bump'
-        continue-on-error: true
+        # 未配置 RELEASE_TOKEN 时显式触发部署；配置后由 push 级联触发。
+        if: steps.prepare.outputs.mode == 'bump' && env.HAS_RELEASE_TOKEN == 'false'
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         run: gh workflow run deploy.yml --ref main
@@ -153,12 +171,17 @@ jobs:
           MODE: ${{ steps.prepare.outputs.mode }}
           VERSION: ${{ steps.prepare.outputs.version }}
           TAG: ${{ steps.prepare.outputs.tag }}
+          TAG_ENABLED: ${{ steps.prepare.outputs.tag_enabled }}
           TITLE: ${{ steps.prepare.outputs.title }}
         run: |
           {
             echo "### release: $MODE"
             echo ""
-            echo "- tag: \`$TAG\`"
             echo "- version: \`$VERSION\`"
+            if [ "$TAG_ENABLED" = "true" ]; then
+              echo "- tag: \`$TAG\`"
+            else
+              echo "- tag: （本版不打 tag）"
+            fi
             echo "- title: $TITLE"
           } >> "$GITHUB_STEP_SUMMARY"

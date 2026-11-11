@@ -97,3 +97,23 @@ test("decideRun：interval 超过最小间隔后允许跑", () => {
   });
   assert.equal(decideRun(task, now, TZ).run, true);
 });
+
+test("decideRun：手动执行不算「今天已经跑过」，当天定时仍会执行", () => {
+  const task = makeTask({
+    schedule: { kind: "daily", time: "09:00", jitterSeconds: 0 },
+    nextRunAt: now - 1_000,
+    lastRunAt: local(2026, 10, 24, 8, 0),
+    lastRunSource: "manual",
+  });
+  assert.equal(decideRun(task, now, TZ).run, true);
+});
+
+test("decideRun：lastRunSource 缺省时按定时执行处理", () => {
+  const task = makeTask({
+    schedule: { kind: "daily", time: "09:00", jitterSeconds: 0 },
+    nextRunAt: now - 1_000,
+    lastRunAt: local(2026, 10, 24, 9, 0),
+    lastRunSource: null,
+  });
+  assert.equal(decideRun(task, now, TZ).reason, "already-ran-today");
+});

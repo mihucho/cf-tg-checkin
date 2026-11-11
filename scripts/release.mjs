@@ -30,7 +30,7 @@ const dryRun = argv.includes("--dry-run");
 
 /* ------------------------------------------------------------------ 纯函数 */
 
-/** 解析发布文档：front matter（version/title）+ 正文（就是 Release notes） */
+/** 解析发布文档：front matter（version/title/tag）+ 正文（就是 Release notes） */
 export function parseReleaseDoc(raw) {
   const text = String(raw ?? "").replace(/\r\n/g, "\n").trimStart();
   const match = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(text);
@@ -57,7 +57,25 @@ export function parseReleaseDoc(raw) {
   const retroRaw = String(meta.retro ?? "").trim().toLowerCase();
   const retro = retroRaw === "true";
   const revoke = retroRaw === "revoke";
-  return { version, title: String(meta.title ?? "").trim() || `v${version}`, body, retro, revoke };
+  // tag: false → 只更新版本号 / CHANGELOG / 归档并部署，不建 tag 与 GitHub Release
+  const tagRaw = String(meta.tag ?? "").trim().toLowerCase();
+  const tagEnabled = !["false", "no", "0", "off"].includes(tagRaw);
+  return { version, title: String(meta.title ?? "").trim() || `v${version}`, body, retro, revoke, tagEnabled };
+}
+
+/**
+ * tag 开关与发布模式必须兼容：
+ * - retro / revoke 操作的是已存在的 tag；
+ * - 版本号等于当前版本时（只补发布）没有代码改动，只有 tag / Release 可做。
+ */
+export function validateTagOption({ version, current, retro, revoke, tagEnabled }) {
+  if ((retro || revoke) && !tagEnabled) {
+    throw new Error(`retro / revoke 需要对应 tag；版本 ${version} 设置了 tag: false`);
+  }
+  if (version === current && !tagEnabled) {
+    throw new Error("只补发布必须打 tag；跳过 tag 请把 version 改成大于当前版本");
+  }
+  return tagEnabled;
 }
 
 /** a 是否严格大于 b（只比 x.y.z） */
@@ -109,18 +127,20 @@ const TEMPLATE_COMMENT = `<!--
 规则：
 1. 把上面 front matter 里的 version 改成新的版本号（必须严格大于 package.json 里的当前版本）
    —— 只修 bug 用最后一位，新增用户可见能力加中间一位；和 title 一起改。
-2. 分隔线 \`---\` 以下的内容就是 Release notes 正文（Markdown），会同时写进 CHANGELOG.md
-   对应版本段、GitHub Release 说明、以及 annotated tag 的注释。
-3. 只有这个文件被改动才会触发发布；发布完成后会归档到 releases/archive/vX.Y.Z.md 并重置成模板。
-4. 想补改／脱敏一个**已经发布**的版本：把 version 写成那个版本号并加上 \`retro: true\`，
+2. 分隔线 \`---\` 以下的内容就是 Release notes 正文（Markdown），会写进 CHANGELOG.md
+   对应版本段和 releases/archive/vX.Y.Z.md；打 tag 时同时作为 Release 说明与 tag 注释。
+3. 不是每个版本都必须打 tag：在 front matter 加 \`tag: false\`，版本号、CHANGELOG、归档与部署照常，
+   跳过 tag 与 GitHub Release。retro / revoke / 只补发布仍然需要 tag。
+4. 只有这个文件被改动才会触发发布；发布完成后会归档到 releases/archive/vX.Y.Z.md 并重置成模板。
+5. 想补改／脱敏一个**已经打 tag** 的版本：把 version 写成那个版本号并加上 \`retro: true\`，
    工作流只会更新它的 Release 说明，不动代码、不重新打 tag。
-5. 版本号保持 0.0.0（模板）不会触发任何发布。
-6. 示例、日志、截图里一律用占位符（example_bot / 示例机器人 / 123456789），不要贴真实账号。
+6. 版本号保持 0.0.0（模板）不会触发任何发布。
+7. 示例、日志、截图里一律用占位符（example_bot / 示例机器人 / 123456789），不要贴真实账号。
 -->`;
 
 /** 归档文件内容 + 重置后的模板（模板里的说明注释保留） */
-export function buildArchiveAndTemplate({ version, title, body, template }) {
-  const archived = `---\nversion: ${version}\ntitle: ${title}\n---\n\n${body}\n`;
+export function buildArchiveAndTemplate({ version, title, body, template, tagEnabled = true }) {
+  const archived = `---\nversion: ${version}\ntitle: ${title}\n${tagEnabled ? "" : "tag: false\n"}---\n\n${body}\n`;
   const comment = /(<!--[\s\S]*?-->)/.exec(template)?.[1] ?? TEMPLATE_COMMENT;
   const reset = `---\nversion: ${TEMPLATE_VERSION}\ntitle: v0.0.0 — 未命名发布\n---\n\n${comment}\n`;
   return { archived, reset };
@@ -154,18 +174,19 @@ function main() {
 
   if (doc.version === TEMPLATE_VERSION) {
     console.log(`发布文档还是模板（version ${TEMPLATE_VERSION}），跳过`);
-    output({ mode: "skip", skipped: "true", version: current, tag: `v${current}` });
+    output({ mode: "skip", skipped: "true", version: current, tag_enabled: "false" });
     return;
   }
   if (!doc.body) throw new Error("发布说明正文是空的：front matter 之后的 `---` 下面要写内容");
 
   // revoke：撤销发版（删 Release + tag），不动代码
   if (doc.revoke) {
+    validateTagOption({ ...doc, current });
     const tag = `v${doc.version}`;
     if (doc.version === TEMPLATE_VERSION) throw new Error("revoke 也要写清要撤销哪个版本号");
     console.log(`撤销发版：${tag}（会删除 GitHub Release 与 tag，代码改动保留）`);
     if (dryRun) {
-      output({ mode: "revoke", skipped: "false", version: doc.version, tag, title: doc.title, notes_file: NOTES_OUT });
+      output({ mode: "revoke", skipped: "false", version: doc.version, tag, tag_enabled: "true", title: doc.title, notes_file: NOTES_OUT });
       return;
     }
     fs.mkdirSync(path.dirname(NOTES_OUT), { recursive: true });
@@ -177,17 +198,18 @@ function main() {
       template: docText,
     });
     fs.writeFileSync(DOC_PATH, reset);
-    output({ mode: "revoke", skipped: "false", version: doc.version, tag, title: doc.title, notes_file: NOTES_OUT });
+    output({ mode: "revoke", skipped: "false", version: doc.version, tag, tag_enabled: "true", title: doc.title, notes_file: NOTES_OUT });
     return;
   }
 
   // retro：只改已发布 Release 的说明（例如修正措辞、脱敏），版本号可以 <= 当前版本
   if (doc.retro) {
+    validateTagOption({ ...doc, current });
     const tag = `v${doc.version}`;
     console.log(`补改已发布 Release：${tag}（${doc.title}），不改代码`);
     if (dryRun) {
       console.log(`${doc.title}\n\n${doc.body}`);
-      output({ mode: "edit-release", skipped: "false", version: doc.version, tag, title: doc.title, notes_file: NOTES_OUT });
+      output({ mode: "edit-release", skipped: "false", version: doc.version, tag, tag_enabled: "true", title: doc.title, notes_file: NOTES_OUT });
       return;
     }
     fs.mkdirSync(path.dirname(NOTES_OUT), { recursive: true });
@@ -199,7 +221,7 @@ function main() {
       template: docText,
     });
     fs.writeFileSync(DOC_PATH, reset);
-    output({ mode: "edit-release", skipped: "false", version: doc.version, tag, title: doc.title, notes_file: NOTES_OUT });
+    output({ mode: "edit-release", skipped: "false", version: doc.version, tag, tag_enabled: "true", title: doc.title, notes_file: NOTES_OUT });
     return;
   }
 
@@ -210,9 +232,12 @@ function main() {
   }
 
   const mode = doc.version === current ? "release-only" : "bump";
-  const tag = `v${doc.version}`;
+  validateTagOption({ ...doc, current });
+  const archiveTag = `v${doc.version}`;
+  const tag = doc.tagEnabled ? archiveTag : "";
   const date = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
   console.log(`${mode === "bump" ? "发版" : "只补发布"}：${current} → ${doc.version}（${doc.title}）`);
+  if (mode === "bump" && !doc.tagEnabled) console.log("本版不打 tag，也不创建 GitHub Release");
 
   if (dryRun) {
     if (mode === "bump") {
@@ -221,9 +246,17 @@ function main() {
     } else {
       console.log("--- 不改代码，只用文档内容建 tag / Release ---");
     }
-    console.log("--- Release notes（tag 注释同此）---");
+    console.log(doc.tagEnabled ? "--- Release notes（tag 注释同此）---" : "--- 发布说明（只写入 CHANGELOG / 归档）---");
     console.log(`${doc.title}\n\n${doc.body}`);
-    output({ mode, skipped: "false", version: doc.version, tag, title: doc.title, notes_file: NOTES_OUT });
+    output({
+      mode,
+      skipped: "false",
+      version: doc.version,
+      tag,
+      tag_enabled: String(doc.tagEnabled),
+      title: doc.title,
+      notes_file: NOTES_OUT,
+    });
     return;
   }
 
@@ -253,15 +286,27 @@ function main() {
       title: doc.title,
       body: doc.body,
       template: docText,
+      tagEnabled: doc.tagEnabled,
     });
-    fs.writeFileSync(path.join("releases", "archive", `${tag}.md`), archived);
+    fs.writeFileSync(path.join("releases", "archive", `${archiveTag}.md`), archived);
     fs.writeFileSync(DOC_PATH, reset);
-    console.log(`已更新 package.json / package-lock.json / CHANGELOG.md，归档到 releases/archive/${tag}.md`);
+    console.log(
+      `已更新 package.json / package-lock.json / CHANGELOG.md，归档到 releases/archive/${archiveTag}.md` +
+        (doc.tagEnabled ? "" : "（本版不打 tag）"),
+    );
   } else {
     console.log(`版本号与当前一致（${current}）：只补 tag / Release，不改代码`);
   }
 
-  output({ mode, skipped: "false", version: doc.version, tag, title: doc.title, notes_file: NOTES_OUT });
+  output({
+    mode,
+    skipped: "false",
+    version: doc.version,
+    tag,
+    tag_enabled: String(doc.tagEnabled),
+    title: doc.title,
+    notes_file: NOTES_OUT,
+  });
 }
 
 // 直接 `node scripts/release.mjs` 时才执行；被测试 import 时不要跑

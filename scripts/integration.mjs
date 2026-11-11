@@ -9,9 +9,10 @@
  * 用法：node scripts/integration.mjs [--verbose]
  */
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const verbose = process.argv.includes("--verbose");
@@ -31,6 +32,26 @@ function check(name, condition, detail = "") {
   }
   failures.push(`${name}${detail ? `\n    ${detail}` : ""}`);
   console.log(`  ✗ ${name}${detail ? `\n    ${detail}` : ""}`);
+}
+
+/**
+ * 直接读 DO 内嵌 SQLite 里的 settings。
+ * 有些字段（真实 Webhook 地址）接口永远不回传，只能从库里确认没被脱敏值覆盖。
+ */
+function storedSettings() {
+  const doDir = join(persistDir, "v3", "do", "cf-tg-checkin-TgAgent");
+  if (!existsSync(doDir)) return null;
+  for (const file of readdirSync(doDir).filter((name) => name.endsWith(".sqlite"))) {
+    try {
+      const db = new DatabaseSync(join(doDir, file), { readOnly: true });
+      const row = db.prepare("SELECT value FROM kv WHERE key = 'settings'").get();
+      db.close();
+      if (row?.value) return JSON.parse(String(row.value));
+    } catch {
+      /* 可能是 metadata.sqlite 或正被写入，换下一个 */
+    }
+  }
+  return null;
 }
 
 async function main() {
@@ -154,6 +175,35 @@ async function main() {
     const second = await post("/api/tasks", other);
     check("附加目标不同 → 不算重复，能建第二个", second.status === 200 && second.task.id !== task.id, `status=${second.status}`);
 
+    // ---------- 输入边界 ----------
+    const emptyTarget = await post("/api/tasks", {
+      ...taskA,
+      name: "空目标",
+      target: { kind: "user", id: "" },
+      targets: undefined,
+    });
+    check("空目标被拒（400，而不是建出来永远跑不了）", emptyTarget.status === 400, `status=${emptyTarget.status}`);
+
+    const badNumbers = await post("/api/tasks", {
+      ...taskA,
+      name: "非法数字",
+      target: { kind: "user", id: "num_bot", username: "num_bot" },
+      targets: undefined,
+      timeoutSeconds: "abc",
+      stepDelaySeconds: "abc",
+      deleteAfterSeconds: "abc",
+      schedule: { kind: "daily", time: "09:30", jitterSeconds: "abc" },
+    });
+    check(
+      "非法数字回落到默认值",
+      badNumbers.status === 200 &&
+        badNumbers.task?.timeoutSeconds === 30 &&
+        badNumbers.task?.stepDelaySeconds === 3 &&
+        badNumbers.task?.deleteAfterSeconds === 0,
+      JSON.stringify({ status: badNumbers.status, task: badNumbers.task }),
+    );
+    if (badNumbers.task?.id) await request("DELETE", `/api/tasks/${badNumbers.task.id}`);
+
     // ---------- 编辑不丢字段 ----------
     const patched = await request("PATCH", `/api/tasks/${task.id}`, { enabled: false });
     check(
@@ -162,6 +212,16 @@ async function main() {
       JSON.stringify({ enabled: patched.task?.enabled, targets: patched.task?.targets?.length }),
     );
     await request("PATCH", `/api/tasks/${task.id}`, { enabled: true });
+
+    // 清空附加目标：前端发送 targets: []
+    const clearable = await post("/api/tasks", { ...taskA, name: "清空附加目标" });
+    const clearedTargets = await request("PATCH", `/api/tasks/${clearable.task.id}`, { targets: [] });
+    check(
+      "把 targets 传空数组能删掉附加目标",
+      clearedTargets.task?.targets === undefined && clearedTargets.task?.target?.username === "a_bot",
+      JSON.stringify(clearedTargets.task?.targets),
+    );
+    await request("DELETE", `/api/tasks/${clearable.task.id}`);
 
     // ---------- 指令往返 ----------
     const command = await get(`/api/tasks/${task.id}/command`);
@@ -297,6 +357,22 @@ async function main() {
           String(tokenSaved.settings?.notifyWebhook ?? ""),
         ),
       tokenSaved.settings?.notifyWebhook,
+    );
+    // 真实 token 接口永远不回传，只能从 DO 内嵌 SQLite 确认
+    const storedAfterSave = storedSettings();
+    check(
+      "真实 token 确实写进了库里",
+      String(storedAfterSave?.notifyWebhook ?? "").includes("access_token=integration-token-1"),
+      String(storedAfterSave?.notifyWebhook ?? ""),
+    );
+    // 提交脱敏值，真实 token 保持不变
+    await post("/api/settings", { notifyWebhookKind: "dingtalk", notifyWebhookToken: "inte****-1" });
+    const storedAfterMasked = storedSettings();
+    check(
+      "带 **** 的脱敏 token 再次保存不会覆盖真实 token",
+      String(storedAfterMasked?.notifyWebhook ?? "") ===
+        "https://oapi.dingtalk.com/robot/send?access_token=integration-token-1",
+      String(storedAfterMasked?.notifyWebhook ?? ""),
     );
     const fullUrlInToken = await post("/api/settings", {
       notifyWebhookKind: "wecom",
@@ -458,6 +534,8 @@ async function main() {
     check("API 响应带 no-store 与 HSTS", res.headers.get("cache-control") === "no-store" && !!res.headers.get("strict-transport-security"));
 
     // ---------- 登出 ----------
+    res = await post("/api/logout", {}, { origin: "https://evil.example" });
+    check("跨站登出被拒（403）", res.status === 403, `status=${res.status}`);
     res = await post("/api/logout", {});
     check("登出返回 200", res.status === 200);
   } finally {

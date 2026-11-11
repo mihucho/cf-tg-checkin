@@ -130,3 +130,22 @@ test("isSameLocalDay：按本地时区判断，含跨零点", () => {
   // 负时区（-5）
   assert.equal(isSameLocalDay(local(2026, 10, 24, 23, 0, -5), local(2026, 10, 25, 1, 0, -5), -5), false);
 });
+
+test("nextDaily：08:59:58 建 09:00 的任务仍排在今天", () => {
+  const now = local(2026, 10, 24, 8, 59) + 58_000;
+  assert.equal(nextDaily("09:00", now, TZ), local(2026, 10, 24, 9, 0));
+  // 已经过了才顺延到明天
+  assert.equal(nextDaily("09:00", local(2026, 10, 24, 9, 0) + 1_000, TZ), local(2026, 10, 25, 9, 0));
+});
+
+test("computeNextRun：interval 支持到 7 天（与编辑器上限一致）", () => {
+  const now = local(2026, 10, 24, 0);
+  assert.equal(
+    computeNextRun({ kind: "interval", intervalMinutes: 3 * 24 * 60 }, now, TZ, { withoutJitter: true }),
+    now + 3 * 24 * 60 * 60_000,
+  );
+  assert.equal(
+    computeNextRun({ kind: "interval", intervalMinutes: 999_999 }, now, TZ, { withoutJitter: true }),
+    now + 7 * 24 * 60 * 60_000,
+  );
+});

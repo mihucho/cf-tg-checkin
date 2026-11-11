@@ -138,8 +138,8 @@ test("目标优先级：显式 > @here > 转发 > 默认", () => {
   const here: Target = { kind: "channel", id: "-100123", title: "群" };
   assert.equal(parse("9.30 打卡 @here", { sourceChat: here }).task!.target.id, "-100123");
   assert.equal(
-    parse("9.30 打卡 @here @jerry_bot", { sourceChat: here }).task!.target.username,
-    "jerry_bot",
+    parse("9.30 打卡 @here @example_bot", { sourceChat: here }).task!.target.username,
+    "example_bot",
   );
   assert.equal(parse("9.30 打卡", { forwarded: bot }).task!.target.username, "example_bot");
   assert.equal(parse("9.30 打卡", { defaultTarget: "-100999" }).task!.target.id, "-100999");

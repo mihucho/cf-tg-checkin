@@ -1,7 +1,7 @@
 /** 任务输入规范化 + 去重指纹 + 设置脱敏（正反例） */
 import assert from "node:assert/strict";
 import { test } from "./harness.ts";
-import { applyTargetPatch, normalizeTaskInput, shouldAutoRename, taskFingerprint, taskToExport } from "../src/task.ts";
+import { applyTargetPatch, normalizeTaskInput, preserveTargetMeta, shouldAutoRename, taskFingerprint, taskToExport } from "../src/task.ts";
 import { taskToCommand } from "../src/schedule/command.ts";
 import { parseTrigger } from "../src/schedule/dsl.ts";
 import { redactSettings, shouldAutoFillAdminId } from "../src/settings.ts";
@@ -64,7 +64,7 @@ test("normalizeTaskInput：步骤数量/文本/随机选项都被裁剪", () => 
   );
   assert.equal(task.steps.length, 20);
   assert.equal(task.stepDelaySeconds, 60);
-  assert.equal(task.timeoutSeconds, 120);
+  assert.equal(task.timeoutSeconds, 90);
   assert.equal(task.deleteAfterSeconds, 3600);
 
   const longText = normalizeTaskInput(input({ steps: [{ type: "text", text: "x".repeat(2000) }] }));
@@ -363,7 +363,7 @@ test("redactState：手机号 / 自己的 id / api_id / access_hash / Webhook �
       ...DEFAULT_SETTINGS,
       adminUserId: "7654321",
       controlChat: "self",
-      notifyWebhook: "https://oapi.dingtalk.com/robot/send?access_token=76296f36644444b916ed96cc183cc9f",
+      notifyWebhook: "https://oapi.dingtalk.com/robot/send?access_token=example-token-1234567890abcdef",
       notifyWebhookSecret: "SECret",
     },
     tasks: [
@@ -399,14 +399,14 @@ test("redactState：手机号 / 自己的 id / api_id / access_hash / Webhook �
   const text = JSON.stringify(redacted);
 
   // 敏感原文一个都不能出现
-  for (const secret of ["+8613800000000", "76296f36644444b916ed96cc183cc9f", "1234567890123456789", "987654321", "SECret"]) {
+  for (const secret of ["+8613800000000", "example-token-1234567890abcdef", "1234567890123456789", "987654321", "SECret"]) {
     assert.equal(text.includes(secret), false, `泄露了 ${secret}`);
   }
   assert.equal(redacted.account.phone, "+861****0000");
   assert.equal(redacted.account.pendingLogin?.phone, "+861****0000");
   assert.equal(redacted.account.me?.id, "765****321");
   assert.equal(redacted.settings.notifyWebhookConfigured, true);
-  assert.match(redacted.settings.notifyWebhook, /access_token=7629\*\*\*\*cc9f/);
+  assert.match(redacted.settings.notifyWebhook, /access_token=exam\*\*\*\*cdef/);
   assert.equal(redacted.tasks[0].target.accessHash, undefined);
   assert.equal(redacted.tasks[0].targets?.[0].accessHash, undefined);
   // 管理员 ID 也脱敏（见下一个用例），指令来源保持原样
@@ -433,4 +433,56 @@ test("redactState：管理员 ID 也脱敏，只给已配置标记", () => {
   const empty = redactState({ ...state, settings: { ...state.settings, adminUserId: "" } } as never);
   assert.equal(empty.settings.adminUserId, "");
   assert.equal(empty.settings.adminUserIdConfigured, false);
+});
+
+test("normalizeTaskInput：非法数字回落到默认值", () => {
+  const task = normalizeTaskInput(
+    input({
+      timeoutSeconds: "abc" as never,
+      stepDelaySeconds: "abc" as never,
+      deleteAfterSeconds: "abc" as never,
+      schedule: { kind: "daily", time: "09:30", jitterSeconds: "abc" as never },
+    }),
+  );
+  assert.equal(task.timeoutSeconds, 30);
+  assert.equal(task.stepDelaySeconds, 3);
+  assert.equal(task.deleteAfterSeconds, 0);
+  assert.equal(task.schedule.jitterSeconds, 0);
+});
+
+test("normalizeTaskInput：时间/删除/间隔边界与编辑器一致", () => {
+  const task = normalizeTaskInput(
+    input({
+      timeoutSeconds: 999,
+      deleteAfterSeconds: 999_999,
+      schedule: { kind: "interval", intervalMinutes: 999_999, jitterSeconds: 0 },
+    }),
+  );
+  assert.equal(task.timeoutSeconds, 90);
+  assert.equal(task.deleteAfterSeconds, 3600);
+  assert.equal(task.schedule.intervalMinutes, 7 * 24 * 60);
+});
+
+test("preserveTargetMeta：编辑时按句柄补齐 accessHash / peerKind / kind", () => {
+  const known = [
+    { kind: "channel" as const, id: "-100123", username: "example_group", title: "示例群组", accessHash: "999", peerKind: "group" as const, threadId: 12 },
+  ];
+  const next = preserveTargetMeta({ kind: "user", id: "@example_group", username: "example_group", threadId: 12 }, known);
+  assert.equal(next.kind, "channel");
+  assert.equal(next.accessHash, "999");
+  assert.equal(next.peerKind, "group");
+  assert.equal(next.title, "示例群组");
+  // 用户新填的值优先
+  const custom = preserveTargetMeta({ kind: "user", id: "x", username: "example_group", threadId: 12, title: "新名字" }, known);
+  assert.equal(custom.title, "新名字");
+});
+
+test("preserveTargetMeta：只改话题时也能找回 accessHash", () => {
+  const known = [
+    { kind: "channel" as const, id: "-100123", username: "example_group", accessHash: "999", peerKind: "group" as const, threadId: 12 },
+  ];
+  const next = preserveTargetMeta({ kind: "channel", id: "example_group", username: "example_group", threadId: 13 }, known);
+  assert.equal(next.accessHash, "999");
+  assert.equal(next.peerKind, "group");
+  assert.equal(next.threadId, 13);
 });

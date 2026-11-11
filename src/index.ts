@@ -77,6 +77,36 @@ function readCookie(request: Request, name: string): string | null {
   return null;
 }
 
+/**
+ * 按字节流读取请求体并封顶，超出上限立即停止。
+ */
+async function readBodyLimited(request: Request, maxBytes: number): Promise<{ ok: true; body: string } | { ok: false }> {
+  const declared = Number(request.headers.get("content-length") ?? 0);
+  if (Number.isFinite(declared) && declared > maxBytes) return { ok: false };
+  if (!request.body) return { ok: true, body: "" };
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      return { ok: false };
+    }
+    chunks.push(value);
+  }
+  const merged = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { ok: true, body: new TextDecoder().decode(merged) };
+}
+
 async function isAuthenticated(request: Request, env: Env): Promise<boolean> {
   const secret = secretOf(env);
   if (!secret) return false;
@@ -254,15 +284,11 @@ async function proxyToAgent(request: Request, env: Env, url: URL): Promise<Respo
     },
   };
   if (request.method !== "GET" && request.method !== "HEAD") {
-    const declared = Number(request.headers.get("content-length") ?? 0);
-    if (declared > MAX_BODY_BYTES) {
+    const limited = await readBodyLimited(request, MAX_BODY_BYTES);
+    if (!limited.ok) {
       return json({ error: `请求体过大（上限 ${Math.round(MAX_BODY_BYTES / 1024)} KB）` }, 413);
     }
-    const body = await request.text();
-    if (body.length > MAX_BODY_BYTES) {
-      return json({ error: `请求体过大（上限 ${Math.round(MAX_BODY_BYTES / 1024)} KB）` }, 413);
-    }
-    init.body = body;
+    init.body = limited.body;
   }
   const response = await agentStub(env).fetch(target, init);
   const headers = new Headers(response.headers);
@@ -314,9 +340,10 @@ export default {
       }
       let password = "";
       let turnstileToken = "";
+      const limited = await readBodyLimited(request, 4096);
+      if (!limited.ok) return json({ error: "请求体过大" }, 413);
       try {
-        const body = (await request.text()).slice(0, 4096);
-        const parsed = JSON.parse(body) as { password?: string; turnstileToken?: string };
+        const parsed = JSON.parse(limited.body || "{}") as { password?: string; turnstileToken?: string };
         password = String(parsed.password ?? "");
         turnstileToken = String(parsed.turnstileToken ?? "");
       } catch {
@@ -374,6 +401,8 @@ export default {
     }
 
     if (path === "/api/logout" && request.method === "POST") {
+      // 登出也是状态变更（会清 Cookie），同样挡掉跨站来源
+      if (originRejected(request, url)) return json({ error: "请求来源不被允许" }, 403);
       return json({ ok: true }, 200, { "set-cookie": cookieHeader("", 0) });
     }
 
@@ -392,7 +421,9 @@ export default {
       if (url.pathname === "/api/settings") invalidateTurnstileCache();
       return response;
     } catch (error) {
-      return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+      // 对外只返回统一错误文案（约束见 AGENTS.md 第 15 条）。
+      console.error("proxy to agent failed", error);
+      return json({ error: "服务暂时不可用，请稍后重试" }, 502);
     }
   },
 

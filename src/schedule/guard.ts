@@ -53,7 +53,9 @@ export function decideRun(
   }
 
   const oncePerDay = task.schedule.kind !== "interval";
-  if (oncePerDay && task.lastRunAt && isSameLocalDay(task.lastRunAt, now, timezone)) {
+  // 只有定时执行计入「今天已经跑过」；lastRunSource 缺省时按定时处理。
+  const lastScheduledRunAt = task.lastRunSource === "manual" ? null : task.lastRunAt;
+  if (oncePerDay && lastScheduledRunAt && isSameLocalDay(lastScheduledRunAt, now, timezone)) {
     return {
       run: false,
       reason: "already-ran-today",

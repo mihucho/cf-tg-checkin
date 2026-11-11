@@ -15,6 +15,7 @@ import {
   openModal,
   confirmDialog,
   withLoading,
+  copyText,
   setServerNow,
   serverNow,
   formatClock,
@@ -35,6 +36,21 @@ import { openTaskEditor } from "./editor.js";
 
 const VIEWS = ["overview", "tasks", "logs", "account", "settings"];
 
+/** Cloudflare 网关超时（524/504）：任务可能仍在 DO 中执行。 */
+function isGatewayTimeout(error) {
+  return Boolean(error && (error.status === 524 || error.status === 504));
+}
+
+function toastGatewayTimeout() {
+  toast("请求超过网关等待时间，任务可能还在后台执行；稍后到「日志」页确认结果。", { kind: "info" });
+}
+
+/** 设置里的时区偏移（小时）；没有状态数据时回落到默认 +8（Asia/Shanghai） */
+function tzOffset() {
+  const value = Number(state.data && state.data.settings && state.data.settings.timezone);
+  return Number.isFinite(value) ? value : 8;
+}
+
 const state = {
   session: null,
   build: null, // 构建信息（/api/version），用于排查线上版本
@@ -42,6 +58,8 @@ const state = {
   view: "overview",
   logs: null, // 日志 tab 拉取的列表；概览用 state.data.logs（最新 50）
   logsTotal: null, // 当前筛选条件下的总条数
+  logsError: null, // 当前日志请求失败原因
+  logsRequestId: 0, // 日志请求序号
   logPage: 1,
   logPageSize: 20,
   logPages: 1,
@@ -94,6 +112,7 @@ async function init() {
 
   setUnauthorizedHandler(() => {
     const needsSetup = Boolean(state.session && state.session.needsSetup);
+    clearTurnstileToken();
     state.session = { authenticated: false, needsSetup };
     state.data = null;
     state.logs = null;
@@ -224,9 +243,17 @@ async function setupTurnstile() {
   }
   state.turnstileSiteKey = siteKey;
 
-  // 已经渲染过：按当前 token 恢复按钮状态
+  // 已经渲染过：按当前 token 恢复按钮状态；无 token 时重置挂件重新挑战。
   if (state.turnstileWidget !== null) {
-    setLoginEnabled(Boolean(state.turnstileToken));
+    const enabled = Boolean(state.turnstileToken);
+    setLoginEnabled(enabled);
+    if (!enabled && window.turnstile) {
+      try {
+        window.turnstile.reset(state.turnstileWidget);
+      } catch {
+        /* ignore */
+      }
+    }
     return;
   }
 
@@ -251,6 +278,8 @@ async function setupTurnstile() {
     state.turnstileWidget = window.turnstile.render(slot, {
       sitekey: siteKey,
       theme: "dark",
+      // 窄屏（375px）下默认 300px 会溢出登录卡片
+      size: "flexible",
       callback: (token) => {
         state.turnstileToken = token;
         setLoginEnabled(true);
@@ -277,6 +306,18 @@ async function setupTurnstile() {
 function resetTurnstile() {
   state.turnstileToken = "";
   if (state.turnstileSiteKey) setLoginEnabled(false);
+  if (state.turnstileWidget !== null && window.turnstile) {
+    try {
+      window.turnstile.reset(state.turnstileWidget);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/** 清掉已经消费过的 Turnstile token（登录成功 / 登出 / 401 时调用） */
+function clearTurnstileToken() {
+  state.turnstileToken = "";
   if (state.turnstileWidget !== null && window.turnstile) {
     try {
       window.turnstile.reset(state.turnstileWidget);
@@ -347,11 +388,12 @@ async function onLoginSubmit(event) {
       }
       await api("/api/login", { method: "POST", body: payload, auth: false });
       dom.loginPassword.value = "";
+      // token 已经用掉了，留着会在下次回到登录页时被当成有效 token
+      clearTurnstileToken();
       state.session = { authenticated: true, needsSetup: false };
       state.logs = null;
       toast("登录成功", { kind: "ok" });
       await enterApp();
-  if (state.build && dom.footerVersion) dom.footerVersion.textContent = `版本 ${formatBuild(state.build)}`;
     } catch (error) {
       failed = true;
       setLoginError(error.message || "登录失败");
@@ -364,7 +406,8 @@ async function onLoginSubmit(event) {
   // 在里面改按钮状态会被覆盖（aria 和 disabled 不一致）
   if (failed) {
     resetTurnstile();
-    setLoginEnabled(false);
+    // 按钮状态跟随当前是否需要人机验证；未启用时保持可用。
+    setLoginEnabled(!needsTurnstile());
   }
 }
 
@@ -391,6 +434,7 @@ async function onLogout() {
     state.accountStep = 1;
     state.testText = "";
     state.parse = null;
+    clearTurnstileToken();
     closeModal(true);
     showLogin({});
     toast("已退出登录", { kind: "ok" });
@@ -446,12 +490,35 @@ function route() {
 function paint({ force = false } = {}) {
   if (!state.data || !dom.viewRoot || dom.app.hidden) return;
   const active = document.activeElement;
-  if (!force && active instanceof HTMLElement && dom.viewRoot.contains(active)) {
+  const focusInside = active instanceof HTMLElement && dom.viewRoot.contains(active);
+  if (!force && focusInside) {
     const tag = active.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return; // 别打断输入
   }
+  // force 重绘替换整个视图时，把焦点与光标位置恢复到同 id 的新节点。
+  const restore =
+    focusInside && active.id
+      ? {
+          id: active.id,
+          start: "selectionStart" in active ? active.selectionStart : null,
+          end: "selectionEnd" in active ? active.selectionEnd : null,
+        }
+      : null;
   updateTabs();
   dom.viewRoot.replaceChildren(renderView());
+  if (restore) {
+    const next = document.getElementById(restore.id);
+    if (next instanceof HTMLElement) {
+      next.focus({ preventScroll: true });
+      if (typeof next.setSelectionRange === "function" && restore.start !== null && restore.start !== undefined) {
+        try {
+          next.setSelectionRange(restore.start, restore.end ?? restore.start);
+        } catch {
+          /* 某些 input 类型不支持选区 */
+        }
+      }
+    }
+  }
 }
 
 function updateTabs() {
@@ -477,7 +544,7 @@ function updateChrome() {
       ? "查看 Telegram 账号"
       : "还没有登录 Telegram，点击前往账号页";
   }
-  if (dom.clock) dom.clock.textContent = formatClock();
+  if (dom.clock) dom.clock.textContent = formatClock(serverNow(), tzOffset());
 }
 
 function accountLabel(account) {
@@ -598,7 +665,7 @@ function renderOverview() {
   const logs = Array.isArray(data.logs) ? data.logs.slice(0, 5) : [];
   const nextRunAt = toMillis(stats.nextRunAt) || null;
   const lastRunAt = toMillis(stats.lastRunAt);
-  const nextRunHint = nextRunAt ? formatDateTime(nextRunAt) : "新建任务后自动排期";
+  const nextRunHint = nextRunAt ? formatDateTime(nextRunAt, tzOffset()) : "新建任务后自动排期";
 
   const header = pageHead({
     title: "概览",
@@ -656,7 +723,7 @@ function renderOverview() {
         ? el("span", { class: "num", dataset: { countdown: String(nextRunAt) } }, formatCountdown(nextRunAt - serverNow()))
         : "暂无排期",
       foot: nextRunAt
-        ? el("span", { class: "num", title: formatFullTime(nextRunAt) }, nextRunHint)
+        ? el("span", { class: "num", title: formatFullTime(nextRunAt, tzOffset()) }, nextRunHint)
         : nextRunHint,
     }),
     statCard({
@@ -664,12 +731,12 @@ function renderOverview() {
       dot: settings.triggerEnabled ? "ok" : "idle",
       value: settings.triggerEnabled ? "运行中" : "已关闭",
       foot: `来源 ${controlChatLabel(settings)} · 每 ${Number(settings.pollSeconds) || 60} 秒检查一次${
-        runtime && runtime.nextPollAt ? `（下次 ${formatClock(runtime.nextPollAt)}）` : ""
+        runtime && runtime.nextPollAt ? `（下次 ${formatClock(runtime.nextPollAt, tzOffset())}）` : ""
       }`,
       sub:
         runtime && runtime.lastPollAt
           ? `上次检查 ${formatRelative(runtime.lastPollAt)}` +
-            (Date.now() - runtime.lastPollAt > Math.max(180_000, (Number(settings.pollSeconds) || 60) * 3000)
+            (serverNow() - runtime.lastPollAt > Math.max(180_000, (Number(settings.pollSeconds) || 60) * 3000)
               ? " ⚠️ 已超时"
               : "")
           : "登录 Telegram 后开始自动检查",
@@ -679,7 +746,7 @@ function renderOverview() {
               runtime.lastTriggerEvent.at,
             )}）`
           : "最近事件：还没处理过消息指令",
-      sub: `按钮检测 ${Number(settings.stepPollSeconds) || 3}s / 上限 ${Number(settings.stepWaitSeconds) || 30}s`,
+      sub3: `按钮检测 ${Number(settings.stepPollSeconds) || 3}s / 上限 ${Number(settings.stepWaitSeconds) || 30}s`,
     }),
   );
 
@@ -736,7 +803,7 @@ function renderOverview() {
   );
 }
 
-function statCard({ label, dot, value, foot, sub, sub2 }) {
+function statCard({ label, dot, value, foot, sub, sub2, sub3 }) {
   return el(
     "section",
     { class: "card stat" },
@@ -745,6 +812,7 @@ function statCard({ label, dot, value, foot, sub, sub2 }) {
     foot ? el("div", { class: "stat-foot" }, foot) : null,
     sub ? el("div", { class: "stat-foot stat-sub" }, sub) : null,
     sub2 ? el("div", { class: "stat-foot stat-sub stat-muted" }, sub2) : null,
+    sub3 ? el("div", { class: "stat-foot stat-sub stat-muted" }, sub3) : null,
   );
 }
 
@@ -760,6 +828,7 @@ function renderTasks() {
 
   const searchBox = el("input", {
     class: "input task-search",
+    id: "task-search",
     type: "search",
     placeholder: "搜索任务",
     "aria-label": "搜索任务",
@@ -1093,7 +1162,7 @@ async function openGroupRename(item) {
           ? `${item.count} 个任务会一起改名。${isUngrouped ? "改名后它们就不再是「未分组」。" : ""}`
           : "这个分组下暂时没有任务。",
       ),
-      field({ id: "group-rename-field", label: "新分组名", control: input }),
+      field({ id: "group-rename-input", label: "新分组名", control: input }),
     ),
     footer: el(
       "div",
@@ -1137,7 +1206,7 @@ function taskSelectCell(task) {
       paint({ force: true });
     },
   });
-  return el("td", { class: "cell-select", "data-no-row-click": "" }, box);
+  return el("label", { class: "cell-select", "data-no-row-click": "" }, box);
 }
 
 /** 底部操作条：已选 N 个 / 全选本组 / 删除 */
@@ -1259,7 +1328,7 @@ async function batchSetGroup() {
 
   openModal({
     title: `把 ${state.taskSelection.size} 个任务设为同一分组`,
-    body: el("div", { class: "stack-sm" }, field({ id: "batch-group", label: "分组", control: select }), newInput),
+    body: el("div", { class: "stack-sm" }, field({ id: "batch-group-select", label: "分组", control: select }), newInput),
     footer: el(
       "div",
       { class: "dialog-actions" },
@@ -1356,7 +1425,7 @@ function taskCard(task, { selecting = false } = {}) {
     ? nextRunAt
       ? el(
           "span",
-          { class: "num", title: formatFullTime(nextRunAt) },
+          { class: "num", title: formatFullTime(nextRunAt, tzOffset()) },
           "下次 ",
           el("span", { dataset: { countdown: String(nextRunAt) } }, formatCountdown(nextRunAt - serverNow())),
         )
@@ -1368,6 +1437,7 @@ function taskCard(task, { selecting = false } = {}) {
     {
       class: `task-card${task.enabled ? "" : " is-disabled"}${state.taskSelectMode && state.taskSelection.has(task.id) ? " is-selected" : ""}`,
       dataset: { id: String(task.id) },
+      role: "listitem",
     },
     el(
       "div",
@@ -1479,8 +1549,6 @@ function resultCell(task, { withDetail = true } = {}) {
 
 /** 任务详情弹窗：状态 + 最近运行 + 快捷操作，替代原来分散在三处的信息 */
 async function openTaskDetail(task) {
-  const settings = (state.data && state.data.settings) || {};
-  const timezone = Number(settings.timezone ?? 8);
   const runsBox = el("div", { class: "task-runs" }, el("div", { class: "hint" }, "正在读取最近运行…"));
 
   const modal = openModal({
@@ -1523,8 +1591,8 @@ async function openTaskDetail(task) {
               )
             : targetLabel(task.target),
         ),
-        kv("执行时间", describeSchedule(task.schedule, timezone)),
-        kv("下次执行", task.nextRunAt ? formatDateTime(task.nextRunAt) : "—"),
+        kv("执行时间", describeSchedule(task.schedule)),
+        kv("下次执行", task.nextRunAt ? formatDateTime(task.nextRunAt, tzOffset()) : "—"),
         kv("动作", describeSteps(task.steps)),
         task.successKeywords && task.successKeywords.length
           ? kv("成功关键词", task.successKeywords.join(" / "))
@@ -1594,7 +1662,8 @@ async function openTaskDetail(task) {
                 await refreshState({ silent: true });
                 paint({ force: true });
               } catch (error) {
-                toast(error.message || "执行失败", { kind: "error" });
+                if (isGatewayTimeout(error)) toastGatewayTimeout();
+                else toast(error.message || "执行失败", { kind: "error" });
               }
             });
           },
@@ -1636,7 +1705,7 @@ async function renderTaskRuns(task, box) {
               { class: "task-run-head" },
               el("span", { class: `dot ${run.ok ? "ok" : run.level === "warn" ? "warn" : "fail"}` }),
               el("span", { class: "task-run-msg" }, run.message || "（无消息）"),
-              el("span", { class: "task-run-time num", title: formatFullTime(toMillis(run.at)) }, formatRelative(toMillis(run.at))),
+              el("span", { class: "task-run-time num", title: formatFullTime(toMillis(run.at), tzOffset()) }, formatRelative(toMillis(run.at))),
             ),
             run.detail ? el("pre", { class: "task-run-detail" }, String(run.detail)) : null,
           ),
@@ -1802,7 +1871,7 @@ async function removeTemplate(id) {
 }
 
 /** 模板区：内置 + 自定义（自定义可删除） */
-function templateChips({ onSaved } = {}) {
+function templateChips() {
   const custom = loadCustomTemplates();
   return el(
     "div",
@@ -1991,7 +2060,9 @@ async function runTask(task, button) {
       toast(`${ok ? "成功" : "失败"} · ${message}`, { kind: ok ? "ok" : "error" });
       await refreshState({ silent: true });
     } catch (error) {
-      toast(error.message || "执行失败", { kind: "error" });
+      if (isGatewayTimeout(error)) toastGatewayTimeout();
+      else toast(error.message || "执行失败", { kind: "error" });
+      await refreshState({ silent: true });
     }
   });
 }
@@ -2101,7 +2172,9 @@ async function runAll(button, group = "", label = "全部") {
       }
       await refreshState({ silent: true });
     } catch (error) {
-      toast(error.message || "执行失败", { kind: "error" });
+      if (isGatewayTimeout(error)) toastGatewayTimeout();
+      else toast(error.message || "执行失败", { kind: "error" });
+      await refreshState({ silent: true });
     }
   });
 }
@@ -2122,6 +2195,9 @@ async function runTick(button) {
 /* --------------------------------------------------------------- 日志 */
 
 async function loadLogs({ silent = false } = {}) {
+  // 每次请求带序号，只有最新请求的结果生效。
+  const requestId = ++state.logsRequestId;
+  state.logsError = null;
   try {
     const params = new URLSearchParams({ pageSize: String(state.logPageSize), page: String(state.logPage) });
     if (state.logLevel) params.set("level", state.logLevel);
@@ -2129,14 +2205,18 @@ async function loadLogs({ silent = false } = {}) {
     if (state.logQuery) params.set("q", state.logQuery);
     if (state.logSinceHours) params.set("sinceHours", String(state.logSinceHours));
     const res = await api(`/api/logs?${params.toString()}`);
+    if (requestId !== state.logsRequestId) return;
     state.logs = Array.isArray(res && res.logs) ? res.logs : [];
     state.logsTotal = res && typeof res.total === "number" ? res.total : null;
     state.logPages = res && typeof res.pages === "number" ? res.pages : 1;
     state.logPage = res && typeof res.page === "number" ? res.page : 1;
   } catch (error) {
-    if (!silent) toast(error.message || "读取日志失败", { kind: "error" });
+    if (requestId !== state.logsRequestId) return;
+    // 失败时显示错误状态；列表只使用当前筛选结果。
+    state.logsError = error.message || "读取日志失败";
+    if (!silent) toast(state.logsError, { kind: "error" });
   }
-  if (state.view === "logs") paint({ force: true });
+  if (state.view === "logs" && requestId === state.logsRequestId) paint({ force: true });
 }
 
 /** 换筛选条件时回到第 1 页 */
@@ -2147,11 +2227,8 @@ async function reloadLogsFromFirstPage() {
 }
 
 function renderLogs() {
-  const logs = Array.isArray(state.logs)
-    ? state.logs
-    : Array.isArray(state.data.logs)
-      ? state.data.logs
-      : [];
+  // 列表使用当前筛选条件的结果。
+  const logs = Array.isArray(state.logs) ? state.logs : [];
 
   const header = pageHead({
     title: "日志",
@@ -2224,6 +2301,7 @@ function renderLogs() {
     ),
     el("input", {
       class: "input log-search",
+      id: "log-search",
       type: "search",
       placeholder: "搜索日志内容…",
       value: state.logQuery,
@@ -2239,6 +2317,31 @@ function renderLogs() {
       },
     }),
   );
+
+  if (state.logsError) {
+    return frag(
+      header,
+      filters,
+      el(
+        "div",
+        { class: "card card-pad" },
+        emptyState({
+          iconName: "alert",
+          title: "日志读取失败",
+          text: state.logsError,
+          actions: [btn("重试", { iconName: "refresh", onClick: () => loadLogs() })],
+        }),
+      ),
+    );
+  }
+
+  if (state.logs === null) {
+    return frag(
+      header,
+      filters,
+      el("div", { class: "card card-pad" }, el("p", { class: "hint" }, "正在读取日志…")),
+    );
+  }
 
   if (!logs.length) {
     return frag(
@@ -2370,78 +2473,6 @@ function filterSummary() {
   return parts.length ? `（${parts.join(" · ")}）` : "";
 }
 
-/**
- * 复制文本，三种方式依次尝试：
- *  1. navigator.clipboard（需要 HTTPS / localhost）
- *  2. 临时 textarea + document.execCommand("copy")（http、旧浏览器、iframe 里可用）
- *  3. 兜底弹窗，让用户手动选中复制
- */
-async function copyText(text, hint = "已复制") {
-  const value = String(text ?? "");
-  if (!value) return false;
-
-  if (typeof navigator !== "undefined" && navigator.clipboard && window.isSecureContext) {
-    try {
-      await navigator.clipboard.writeText(value);
-      toast(hint, { kind: "ok" });
-      return true;
-    } catch {
-      /* 落到 execCommand */
-    }
-  }
-
-  try {
-    const area = document.createElement("textarea");
-    area.value = value;
-    area.setAttribute("readonly", "");
-    area.style.position = "fixed";
-    area.style.top = "-1000px";
-    area.style.left = "0";
-    area.style.opacity = "0";
-    document.body.append(area);
-
-    const selection = document.getSelection();
-    const previousRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
-    area.select();
-    area.setSelectionRange(0, value.length);
-    const ok = document.execCommand("copy");
-    area.remove();
-    if (previousRange && selection) {
-      selection.removeAllRanges();
-      selection.addRange(previousRange);
-    }
-    if (ok) {
-      toast(hint, { kind: "ok" });
-      return true;
-    }
-  } catch {
-    /* 落到手动弹窗 */
-  }
-
-  // 都失败：给一个可选中的弹窗，比 toast 好用
-  const area = el("textarea", { class: "textarea code-input", rows: "4", readonly: "" });
-  area.value = value;
-  openModal({
-    title: "复制这段内容",
-    body: el(
-      "div",
-      { class: "stack-sm" },
-      el("p", { class: "hint" }, "浏览器不允许自动复制，选中后按 ⌘/Ctrl+C 即可。"),
-      area,
-    ),
-    footer: el(
-      "div",
-      { class: "dialog-actions" },
-      el("button", { class: "btn btn-primary", type: "button", onclick: () => closeModal() }, "关闭"),
-    ),
-  });
-  requestAnimationFrame(() => {
-    area.focus();
-    area.select();
-  });
-  return false;
-}
-
 const LOG_SOURCE_LABEL = { auto: "自动", manual: "手动", trigger: "指令", system: "系统" };
 
 /** 是否是一次真正的执行（排除跳过/登记/调度报警这类系统事件；老日志没有 source 只能按文案判断） */
@@ -2568,7 +2599,7 @@ function logItem(log) {
         "span",
         {
           class: "num",
-          title: formatFullTime(at),
+          title: formatFullTime(at, tzOffset()),
           dataset: { relative: at ? String(at) : "" },
         },
         at ? formatRelative(at) : "—",
@@ -3109,12 +3140,6 @@ function renderSettings() {
     class: "form-grid",
     id: "settings-form",
     onsubmit: saveSettings,
-    oninput: (event) => {
-      event.currentTarget.dataset.dirty = "1";
-    },
-    onchange: (event) => {
-      event.currentTarget.dataset.dirty = "1";
-    },
   });
 
   const meId = account.me && account.me.id ? String(account.me.id) : "";
@@ -3207,7 +3232,7 @@ function renderSettings() {
       id: "settings-defaultTarget",
       label: "默认目标",
       control: textControl("defaultTarget", settings.defaultTarget ?? "", "@username 或数字 ID"),
-      hint: "指令中未能识别目标时使用，例如 @jerry_bot。",
+      hint: "指令中未能识别目标时使用，例如 @example_bot。",
     }),
   ]);
 
@@ -3284,8 +3309,11 @@ function renderSettings() {
         type: "password",
         autocomplete: "off",
         spellcheck: "false",
-        placeholder: "粘贴机器人 Token，或整条 Webhook 地址",
-        value: WEBHOOK_TOKEN_OF(settings),
+        // 输入框留空表示保持已保存的地址；回显值只放在 placeholder 里。
+        placeholder: settings.notifyWebhookConfigured
+          ? `已配置：${settings.notifyWebhook || "（已隐藏）"}（留空表示不修改）`
+          : "粘贴机器人 Token，或整条 Webhook 地址",
+        value: "",
       }),
       el("p", { class: "field-hint", id: "settings-webhook-url-hint" }, WEBHOOK_URL_HINT[settings.notifyWebhookKind || "generic"] || ""),
     ),
@@ -3358,11 +3386,14 @@ function renderSettings() {
                 return Boolean(node && node.checked);
               };
               const kind = read("notifyWebhookKind") || "generic";
+              const token = read("notifyWebhookToken");
               const overlay = {
                 notifyWebhookKind: kind,
-                ...(kind === "generic"
+                ...(kind === "generic" || !kind
                   ? { notifyWebhook: read("notifyWebhook") }
-                  : { notifyWebhookToken: read("notifyWebhookToken") }),
+                  : token
+                    ? { notifyWebhookToken: token }
+                    : {}),
                 notifyOnFailure: checked("notifyOnFailure"),
                 notifyEvents: [...(form ? form.querySelectorAll('input[name="notifyEvents"]:checked') : [])].map(
                   (node) => node.value,
@@ -3418,7 +3449,7 @@ function renderSettings() {
           { class: "about-build" },
           `出口机房 ${runtime.colo || "未记录"}` + (runtime.locationHint ? ` · 部署区域 ${runtime.locationHint}` : ""),
         ),
-        updateNotice(),
+        el("div", { id: "about-update" }, updateNotice()),
         usagePanel(),
         el(
           "div",
@@ -3454,9 +3485,7 @@ function renderSettings() {
         {
           class: "btn",
           type: "button",
-          onclick: (event) => {
-            const node = event.currentTarget.closest("form");
-            if (node) node.dataset.dirty = "";
+          onclick: () => {
             paint({ force: true });
           },
         },
@@ -3606,10 +3635,17 @@ async function checkUpdate() {
   try {
     const info = await api("/api/update-check");
     state.updateInfo = info || null;
-    if (state.view === "settings") paint({ force: true });
   } catch {
     state.updateInfo = null;
   }
+  // 只替换「版本检查」区域，保留设置表单的编辑状态。
+  paintUpdateNotice();
+}
+
+/** 只刷新关于页的版本检查区域 */
+function paintUpdateNotice() {
+  const slot = document.getElementById("about-update");
+  if (slot) slot.replaceChildren(updateNotice());
 }
 
 /** 关于页的「版本检查」一行 */
@@ -3617,13 +3653,15 @@ function updateNotice() {
   const info = state.updateInfo;
   if (!info) return el("div", { class: "about-build muted" }, "版本检查：读取中…");
   if (info.hasUpdate && info.latest) {
+    // 只接受 GitHub 的 https 地址（服务端来自 Release 的 html_url，仍做一层协议白名单）
+    const url = /^https:\/\/github\.com\//i.test(String(info.url || "")) ? info.url : "";
     return el(
       "div",
       { class: "update-notice is-new" },
       icon("bolt", { size: 14 }),
       el("span", {}, `有新版本 ${info.latest}（当前 ${info.current}）`),
-      info.url
-        ? el("a", { class: "link", href: info.url, target: "_blank", rel: "noopener noreferrer" }, "查看更新")
+      url
+        ? el("a", { class: "link", href: url, target: "_blank", rel: "noopener noreferrer" }, "查看更新")
         : null,
       el(
         "button",
@@ -3711,23 +3749,6 @@ const WEBHOOK_URL_HINT = {
   generic: "自建服务：填完整地址，内容是一份通用 JSON。",
 };
 
-/** 已保存的完整地址 → 回填到输入框的 token */
-function WEBHOOK_TOKEN_OF(settings) {
-  const kind = settings.notifyWebhookKind || "generic";
-  const url = String(settings.notifyWebhook || "");
-  if (!url) return "";
-  if (kind === "generic") return url;
-  try {
-    const parsed = new URL(url);
-    if (kind === "wecom") return parsed.searchParams.get("key") || "";
-    if (kind === "dingtalk") return parsed.searchParams.get("access_token") || "";
-    const parts = parsed.pathname.split("/").filter(Boolean);
-    return parts[parts.length - 1] || "";
-  } catch {
-    return url;
-  }
-}
-
 function selectControl(name, value, options) {
   const node = el("select", { class: "input", id: `settings-${name}`, name });
   for (const [optionValue, label] of options) {
@@ -3798,7 +3819,9 @@ async function saveSettings(event) {
     notifyOnFailure: checked("notifyOnFailure"),
     ...(read("notifyWebhookKind") === "generic" || !read("notifyWebhookKind")
       ? { notifyWebhook: read("notifyWebhook").trim() }
-      : { notifyWebhookToken: read("notifyWebhookToken").trim() }),
+      : read("notifyWebhookToken").trim()
+        ? { notifyWebhookToken: read("notifyWebhookToken").trim() }
+        : {}),
     ...(checked("clearNotifyWebhook") ? { clearNotifyWebhook: true } : {}),
     notifyWebhookKind: read("notifyWebhookKind") || "generic",
     notifyEvents: [...form.querySelectorAll('input[name="notifyEvents"]:checked')].map((node) => node.value),
@@ -3820,7 +3843,6 @@ async function saveSettings(event) {
   await withLoading(form.querySelector('[type="submit"]'), async () => {
     try {
       await api("/api/settings", { method: "POST", body });
-      form.dataset.dirty = "";
       // 让下一次进登录页时重新读 site key
       state.turnstileSiteKey = null;
       state.turnstileWidget = null;
@@ -3838,7 +3860,7 @@ async function saveSettings(event) {
 const PARSE_EXAMPLES = [
   "9.30 签到",
   "每30分 签到 btn:立即签到 #kw:签到成功|已签到",
-  "9.30-10.30 rand:早安|晚上好 #jitter:120 @jerry_bot",
+  "9.30-10.30 rand:早安|晚上好 #jitter:120 @example_bot",
 ];
 
 function testerCard() {
@@ -4052,7 +4074,7 @@ function triggerHelp() {
         helpBlock("修饰符", [
           ["#kw:签到成功|已签到", "成功关键词，任一命中即算成功"],
           ["#jitter:120", "执行前随机延迟最多 120 秒"],
-          ["@jerry_bot", "指定目标账号 / 群组"],
+          ["@example_bot", "指定目标账号 / 群组"],
           ["#once", "只执行一次"],
         ]),
         helpBlock("命令", [
@@ -4199,7 +4221,7 @@ function usagePanel() {
     el(
     "div",
     { class: "usage-grid" },
-    item("首次登录", events.firstLoginAt ? formatDateTime(events.firstLoginAt) : "—", null),
+    item("首次登录", events.firstLoginAt ? formatDateTime(events.firstLoginAt, tzOffset()) : "—", null),
     item("任务", String(totalCreated), totalCreated ? `指令建 ${share}%` : "还没有任务"),
     item("执行", String(runs.ok + runs.fail), `成功 ${runs.ok} · 失败 ${runs.fail}`),
     item("故障已处理", String(events.failureHandled || 0), null),
@@ -4212,18 +4234,6 @@ function usagePanel() {
     })(),
     ),
   );
-}
-
-/** 关于里的用量统计（纯文本版，保留给别处用） */
-function usageSummary() {
-  const events = (state.data && state.data.events) || null;
-  if (!events) return "用量统计：暂无";
-  const created = events.tasksCreated || { ui: 0, trigger: 0 };
-  const runs = events.runs || { ok: 0, fail: 0 };
-  const totalCreated = created.ui + created.trigger;
-  const share = totalCreated ? Math.round((created.trigger / totalCreated) * 100) : 0;
-  const firstLogin = events.firstLoginAt ? formatDateTime(events.firstLoginAt) : "未登录过";
-  return `首次登录 ${firstLogin} · 任务 ${totalCreated} 个（指令 ${share}%）· 执行 ${runs.ok + runs.fail} 次（失败 ${runs.fail}）· 故障已处理 ${events.failureHandled || 0} 次`;
 }
 
 function kv(label, value) {

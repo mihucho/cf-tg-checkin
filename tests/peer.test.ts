@@ -51,7 +51,7 @@ test("pickFirstPeerReply：群组场景（别人发的都算，我自己发的�
 import { oneLine } from "../src/telegram/executor.ts";
 
 test("oneLine：机器人回复的换行折成 /，不把日志拆行", () => {
-  assert.equal(oneLine("您已经签到过了！\n当前有 342 点积分"), "您已经签到过了！ / 当前有 342 点积分");
+  assert.equal(oneLine("签到成功！\n当前积分 3 点"), "签到成功！ / 当前积分 3 点");
   assert.equal(oneLine("第一行\n\n  第二行  "), "第一行 / 第二行");
   assert.equal(oneLine("单行回复"), "单行回复");
 });

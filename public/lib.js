@@ -14,7 +14,6 @@ export function el(tag, attrs = {}, ...children) {
     if (key === "class") node.className = value;
     else if (key === "dataset") Object.assign(node.dataset, value);
     else if (key === "style" && typeof value === "object") Object.assign(node.style, value);
-    else if (key === "html") node.innerHTML = value;
     else if (key === "text") node.textContent = value;
     else if (key.startsWith("on") && typeof value === "function") {
       node.addEventListener(key.slice(2).toLowerCase(), value);
@@ -185,25 +184,52 @@ export function serverNow() {
   return Date.now() - serverOffset;
 }
 
-export function formatClock(ts = serverNow()) {
-  const d = new Date(toMillis(ts) || Date.now());
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+export function formatClock(ts = serverNow(), timezone = null) {
+  const p = timeParts(toMillis(ts) || Date.now(), timezone);
+  return `${pad2(p.hour)}:${pad2(p.minute)}:${pad2(p.second)}`;
 }
 
-export function formatDateTime(ts) {
+export function formatDateTime(ts, timezone = null) {
   const ms = toMillis(ts);
   if (!ms) return "—";
-  const d = new Date(ms);
-  return `${d.getMonth() + 1}/${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  const p = timeParts(ms, timezone);
+  return `${p.month}/${pad2(p.day)} ${pad2(p.hour)}:${pad2(p.minute)}`;
 }
 
-export function formatFullTime(ts) {
+export function formatFullTime(ts, timezone = null) {
   const ms = toMillis(ts);
   if (!ms) return "—";
-  const d = new Date(ms);
-  return `${d.getFullYear()}/${d.getMonth() + 1}/${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(
-    d.getMinutes(),
-  )}:${pad2(d.getSeconds())}`;
+  const p = timeParts(ms, timezone);
+  return `${p.year}/${p.month}/${pad2(p.day)} ${pad2(p.hour)}:${pad2(p.minute)}:${pad2(p.second)}`;
+}
+
+/**
+ * 按「设置里的时区偏移」取时间字段。
+ *
+ * 服务端所有调度都按 Settings.timezone 计算，界面使用同一个偏移。
+ * timezone 传 null 时回落到浏览器本地时区（登录前/没有设置数据时）。
+ */
+function timeParts(ms, timezone) {
+  const offset = Number(timezone);
+  const shifted = Number.isFinite(offset) ? new Date(ms + offset * 3_600_000) : new Date(ms);
+  if (Number.isFinite(offset)) {
+    return {
+      year: shifted.getUTCFullYear(),
+      month: shifted.getUTCMonth() + 1,
+      day: shifted.getUTCDate(),
+      hour: shifted.getUTCHours(),
+      minute: shifted.getUTCMinutes(),
+      second: shifted.getUTCSeconds(),
+    };
+  }
+  return {
+    year: shifted.getFullYear(),
+    month: shifted.getMonth() + 1,
+    day: shifted.getDate(),
+    hour: shifted.getHours(),
+    minute: shifted.getMinutes(),
+    second: shifted.getSeconds(),
+  };
 }
 
 export function formatRelative(ts, now = serverNow()) {
@@ -341,6 +367,82 @@ export function toast(message, { kind = "info", duration = 4200 } = {}) {
     node.remove();
   });
   while (region.children.length > 4) region.firstElementChild.remove();
+}
+
+/* ------------------------------------------------------------- 复制 */
+
+/**
+ * 复制文本，三种方式依次尝试：
+ *  1. navigator.clipboard（需要 HTTPS / localhost）
+ *  2. 临时 textarea + document.execCommand("copy")（http、不支持 Clipboard API 的浏览器、iframe 里可用）
+ *  3. 兜底弹窗，让用户手动选中复制
+ *
+ * 放在 lib.js 供 app.js 与 editor.js 共用。
+ */
+export async function copyText(text, hint = "已复制") {
+  const value = String(text ?? "");
+  if (!value) return false;
+
+  if (typeof navigator !== "undefined" && navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast(hint, { kind: "ok" });
+      return true;
+    } catch {
+      /* 落到 execCommand */
+    }
+  }
+
+  try {
+    const area = document.createElement("textarea");
+    area.value = value;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.top = "-1000px";
+    area.style.left = "0";
+    area.style.opacity = "0";
+    document.body.append(area);
+
+    const selection = document.getSelection();
+    const previousRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+    area.select();
+    area.setSelectionRange(0, value.length);
+    const ok = document.execCommand("copy");
+    area.remove();
+    if (previousRange && selection) {
+      selection.removeAllRanges();
+      selection.addRange(previousRange);
+    }
+    if (ok) {
+      toast(hint, { kind: "ok" });
+      return true;
+    }
+  } catch {
+    /* 落到手动弹窗 */
+  }
+
+  // 都失败：给一个可选中的弹窗，比 toast 好用
+  const area = el("textarea", { class: "textarea code-input", rows: "4", readonly: "" });
+  area.value = value;
+  openModal({
+    title: "复制这段内容",
+    body: el(
+      "div",
+      { class: "stack-sm" },
+      el("p", { class: "hint" }, "浏览器不允许自动复制，选中后按 ⌘/Ctrl+C 即可。"),
+      area,
+    ),
+    footer: el(
+      "div",
+      { class: "dialog-actions" },
+      el("button", { class: "btn btn-primary", type: "button", onclick: () => closeModal() }, "关闭"),
+    ),
+  });
+  requestAnimationFrame(() => {
+    area.focus();
+    area.select();
+  });
+  return false;
 }
 
 /* ------------------------------------------------------------- 弹窗 */

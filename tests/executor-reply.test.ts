@@ -9,7 +9,7 @@ import { test } from "./harness.ts";
 import { executeTask } from "../src/telegram/executor.ts";
 import type { Task } from "../src/types.ts";
 
-const MULTI_LINE = "您已经签到过了！\n当前有 342 点积分";
+const MULTI_LINE = "签到成功！\n当前积分 3 点";
 
 /** 假 client：第一次 getMessages 只有旧消息，sendMessage 之后能读到机器人回复 */
 function fakeClient(reply: { id: number; text: string; out?: boolean }) {
@@ -78,11 +78,11 @@ test("执行器：多行回复折成一行，日志里只出现一次", async ()
 
   assert.equal(outcome.ok, true);
   assert.equal(outcome.replyId, 200);
-  assert.equal(outcome.replyText, "您已经签到过了！ / 当前有 342 点积分", "回复要折成一行");
+  assert.equal(outcome.replyText, "签到成功！ / 当前积分 3 点", "回复要折成一行");
   const replyLines = outcome.detail.split("\n").filter((line) => line.includes("收到机器人回复"));
   assert.equal(replyLines.length, 1, "回复只该记一条");
-  assert.match(replyLines[0], /收到机器人回复 #200：您已经签到过了！ \/ 当前有 342 点积分/);
-  assert.match(outcome.message, /收到回复「您已经签到过了！ \/ 当前有 342 点积分」/);
+  assert.match(replyLines[0], /收到机器人回复 #200：签到成功！ \/ 当前积分 3 点/);
+  assert.match(outcome.message, /收到回复「签到成功！ \/ 当前积分 3 点」/);
 });
 
 test("执行器：回复来自别人（群组场景）也能拿到", async () => {

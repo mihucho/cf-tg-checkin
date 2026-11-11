@@ -119,7 +119,9 @@ tg 9.30 签到 btn:"每日签到" #kw:签到成功
 | `#keep` | 保留上一次发的消息（**默认是每次执行前删掉上次发的**） |
 | `#delete:30` | 发送后 30 秒删掉自己发的消息 |
 | `#thread:12` | 发到群组话题 |
+| `#group:日常` | 把任务放进分组（列表左侧按分组筛选/批量操作） |
 | `#once` / `#name:xxx` | 只执行一次 / 自定义任务名 |
+| `#clean` / `#keep` | 执行前清理上次消息（默认）/ 保留上次消息 |
 | `@here` | 目标是**当前会话**（在群里发配置时不用再指定） |
 
 **目标识别顺序**
@@ -292,11 +294,12 @@ npx wrangler deploy --var DO_LOCATION_HINT:apac   # apac/enam/weur/eeur/me/afr/o
 
 发布说明就是 `releases/unreleased.md`。改它并 push 到 `main`，`.github/workflows/release.yml` 会自动：
 
-1. 解析文档头部的 `version` / `title`
+1. 解析文档头部的 `version` / `title` / `tag`
 2. **版本号 > 当前版本** → 跑 typecheck + 单测 + 打包自检，通过后写 `package.json`、插入 `CHANGELOG.md`、
    把文档归档到 `releases/archive/vX.Y.Z.md` 并重置模板，提交、打 annotated tag、建 GitHub Release、触发部署
 3. **版本号 = 当前版本** → 只补 tag / GitHub Release（代码已发布、说明写晚了的情况）
-4. **还是模板（`version: 0.0.0`）** → 直接跳过
+4. **`tag: false`** → 版本号、CHANGELOG、归档与部署照常，跳过 tag 与 GitHub Release
+5. **还是模板（`version: 0.0.0`）** → 直接跳过
 
 ```bash
 # 日常发版就三步
@@ -312,15 +315,15 @@ node scripts/release.mjs --dry-run
 ```
 
 > 只有这个文件会触发发布工作流，其它改动走普通 CI。
-> 若配了 `RELEASE_TOKEN`（带 `repo` 权限的 PAT）就用它 push，这样部署工作流会被正常触发；
-> 没配时改用 `gh workflow run deploy.yml` 兜底。
+> 配置 `RELEASE_TOKEN`（带 `repo` 权限的 PAT）时由 push 级联触发部署；
+> 未配置时由 workflow 显式执行 `gh workflow run deploy.yml`。
 
 ## 开发
 
 ```bash
 cp .dev.vars.example .dev.vars   # 填 ADMIN_PASSWORD
 npm run dev                      # wrangler dev（自定义构建自动打包 + watch src/）
-npm test                         # 93 个单测（纯函数层）
+npm test                         # 185 个单测（纯函数 + 执行器假 client）
 npm run test:integration         # 端到端集成测试：真起 wrangler dev，打 Worker → DO → SQLite
 npm run check                    # typecheck + test + build + 产物导出自检
 ```
@@ -334,7 +337,7 @@ npm run check                    # typecheck + test + build + 产物导出自检
   `wrangler dev`（独立端口 + 临时持久化目录）验证路由/登录/Origin 校验/DO 内 SQLite/去重/分页，
   跑完自动清理进程组，约 45 秒
 - 版本号只在 `package.json`：构建时注入产物，页面底部与 `GET /api/version` 都用它；
-  发版跑 `npm version patch`（详见 [CHANGELOG.md](CHANGELOG.md)）
+  发版改 `releases/unreleased.md` 并 push 到 main（详见 [CHANGELOG.md](CHANGELOG.md)），**不要手跑 `npm version`**
 
 > 本地 workerd 能真的连 Telegram（`cloudflare:sockets` 本地可用），登录流程可在本地跑通。
 
@@ -346,12 +349,15 @@ src/
 ├── index.ts              Worker 入口：登录 Cookie、/api 路由、Cron 兜底
 ├── agent.ts              Durable Object：session、调度、触发器、执行、API
 ├── db.ts                 内嵌 SQLite：tasks / logs / kv / 登录限速 / 延迟删除
-├── types.ts env.ts version.ts
+├── types.ts env.ts version.ts settings.ts task.ts events.ts
 ├── telegram/             socket / transport / client / executor / targets
-└── schedule/             time.ts（调度计算）dsl.ts（触发语法）
+├── schedule/             time.ts（调度计算）dsl.ts / command.ts（触发语法与指令往返）guard.ts
+├── notify/               webhook / digest / rate / events / test（通知渠道与日报）
+├── util/version.ts       版本号比较（新版本提示）
+└── shims/                Workers 里不存在的 node 内建模块桩
 public/                   管理界面（纯静态）
 build/patches/            teleproto 的 no-eval 补丁
-tests/                    纯逻辑单测（time / dsl / buttons / targets / guard / task）
+tests/                    纯逻辑单测（time / dsl / buttons / targets / guard / task / executor …）
 docs/API.md               前后端接口契约
 docs/UI_COPY.md           界面文案规范（术语表 / 命名规则）
 docs/DEPLOY.md            部署、secrets、排查表

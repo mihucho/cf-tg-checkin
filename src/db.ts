@@ -27,6 +27,7 @@ const SCHEMA = [
       next_run_at INTEGER,
       last_run_at INTEGER,
       last_result TEXT,
+      last_run_source TEXT,
       last_message TEXT,
       last_detail TEXT,
       fail_streak INTEGER NOT NULL DEFAULT 0,
@@ -67,6 +68,7 @@ const SCHEMA = [
       msg_ids TEXT NOT NULL,
       due_at INTEGER NOT NULL
     )`,
+  `CREATE INDEX IF NOT EXISTS idx_deletions_due ON deletions(due_at)`,
 ];
 
 type Row = Record<string, SqlStorageValue>;
@@ -90,6 +92,7 @@ interface TaskRow extends Row {
   next_run_at: number | null;
   last_run_at: number | null;
   last_result: string | null;
+  last_run_source: string | null;
   last_message: string | null;
   last_detail: string | null;
   fail_streak: number | null;
@@ -161,6 +164,7 @@ export function rowToTask(row: TaskRow): Task {
     nextRunAt: row.next_run_at,
     lastRunAt: row.last_run_at,
     lastResult: (row.last_result as Task["lastResult"]) ?? null,
+    lastRunSource: (row.last_run_source as Task["lastRunSource"]) ?? null,
     lastMessage: row.last_message,
     lastDetail: row.last_detail,
     failStreak: row.fail_streak ?? 0,
@@ -216,6 +220,11 @@ export class Store {
     }
     try {
       this.sql.exec("ALTER TABLE tasks ADD COLUMN fail_streak INTEGER NOT NULL DEFAULT 0");
+    } catch {
+      /* 列已存在 */
+    }
+    try {
+      this.sql.exec("ALTER TABLE tasks ADD COLUMN last_run_source TEXT");
     } catch {
       /* 列已存在 */
     }
@@ -411,13 +420,21 @@ export class Store {
     this.sql.exec("UPDATE tasks SET next_run_at = ? WHERE id = ?", nextRunAt, id);
   }
 
-  recordRun(id: number, result: "ok" | "fail", message: string, detail: string | null, now: number): void {
+  recordRun(
+    id: number,
+    result: "ok" | "fail",
+    message: string,
+    detail: string | null,
+    now: number,
+    source: "auto" | "manual" = "auto",
+  ): void {
     this.sql.exec(
-      `UPDATE tasks SET last_run_at = ?, last_result = ?, last_message = ?, last_detail = ?,
+      `UPDATE tasks SET last_run_at = ?, last_result = ?, last_run_source = ?, last_message = ?, last_detail = ?,
          fail_streak = CASE WHEN ? = 'ok' THEN 0 ELSE fail_streak + 1 END, updated_at = ?
        WHERE id = ?`,
       now,
       result,
+      source,
       message,
       detail,
       result,
@@ -436,9 +453,10 @@ export class Store {
     this.sql.exec("DELETE FROM tasks WHERE id = ?", id);
     this.sql.exec("DELETE FROM logs WHERE task_id = ?", id);
     this.deleteKv(`task:${id}:sent`);
-    // 多目标时按目标分键存过 sent，还有失败提醒的节流时间，一并清掉
+    // 多目标时按目标分键存过 sent，还有各类通知的节流时间，一并清掉。
+    // 通知节流的 key 形如 notify:<事件>:<任务 id>:at（见 agent.ts 的 notifyEvent）。
     this.sql.exec("DELETE FROM kv WHERE key LIKE ?", `task:${id}:sent:%`);
-    this.deleteKv(`notify:${id}:at`);
+    this.sql.exec("DELETE FROM kv WHERE key LIKE ?", `notify:%:${id}:at`);
   }
 
   dueTasks(now: number, limit = 20): Task[] {

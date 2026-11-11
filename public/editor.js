@@ -11,6 +11,7 @@ import {
   field,
   openModal,
   withLoading,
+  copyText,
   targetLabel,
   peerKindLabel,
 } from "./lib.js";
@@ -103,12 +104,18 @@ export function openTaskEditor({ task = null, defaultTarget = "", defaultGroup =
   const id = (name) => `${uid}-${name}`;
 
   const initialTargetQuery = targetQueryOf(task && task.target);
+  const initialTargetClean = initialTargetQuery.replace(/#\d{1,12}$/, "").trim();
+  const initialExtraTargets = (task?.targets ?? [])
+    .slice(1)
+    .map((target) => `${target.username ? `@${target.username}` : String(target.id)}${target.threadId ? `#${target.threadId}` : ""}`)
+    .join(" | ");
   const model = {
     name: task?.name || "",
     enabled: task ? task.enabled !== false : true,
     targetQuery: initialTargetQuery,
     resolved: task?.target ? { ...task.target } : null,
-    resolvedFor: initialTargetQuery,
+    // resolvedFor 使用去掉 #话题 的查询串（与 targetQueryClean() 一致）。
+    resolvedFor: initialTargetClean,
     schedule: {
       kind: task?.schedule?.kind || "daily",
       time: timeValue(task?.schedule?.time) || "09:30",
@@ -125,10 +132,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", defaultGroup =
     /** 用户是否手动改过任务名（决定以后目标补全时能不能自动改名） */
     nameTouched: task ? task.nameAuto === false : false,
     // 多目标：第一个是主目标，其余放在这里（`|` 分隔）
-    extraTargets: (task?.targets ?? [])
-      .slice(1)
-      .map((target) => `${target.username ? `@${target.username}` : String(target.id)}${target.threadId ? `#${target.threadId}` : ""}`)
-      .join(" | "),
+    extraTargets: initialExtraTargets,
   };
 
   /* ---------------- 基础字段 ---------------- */
@@ -150,6 +154,8 @@ export function openTaskEditor({ task = null, defaultTarget = "", defaultGroup =
 
   const groupNames = (typeof window.__taskGroups === "function" ? window.__taskGroups() : []) || [];
   const currentGroup = task?.group || defaultGroup || "";
+  // 分组值进入 model，保存时随表单提交。
+  model.group = currentGroup;
   // 当前任务的分组如果不在列表里（比如刚好被改过），补进去，避免下拉没有对应项
   const groupOptionsList = [...new Set([...groupNames, currentGroup].filter(Boolean))];
   const groupSelect = el("select", {
@@ -538,6 +544,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", defaultGroup =
             id: id(`${prefix}-seconds`),
             type: "number",
             min: "0.5",
+            max: "600",
             step: "0.5",
             value: String(step.seconds ?? 0),
             oninput: (event) => {
@@ -602,7 +609,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", defaultGroup =
             id: id("timeout"),
             type: "number",
             min: "5",
-            max: "120",
+            max: "90",
             step: "1",
             value: String(model.timeoutSeconds ?? 30),
             oninput: (event) => {
@@ -618,7 +625,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", defaultGroup =
             id: id("delete-after"),
             type: "number",
             min: "0",
-            max: "86400",
+            max: "3600",
             step: "1",
             value: String(model.deleteAfterSeconds ?? 0),
             oninput: (event) => {
@@ -752,7 +759,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", defaultGroup =
           el("span", { class: "template-label" }, "套用模板"),
           ...window.__openEditorTemplates().map((template) => {
             const apply = () => {
-              modal?.close();
+              // 模板解析失败时保留当前编辑器与草稿。
               void window.__openEditorTemplate(template);
             };
             if (!template.custom) {
@@ -898,16 +905,16 @@ export function openTaskEditor({ task = null, defaultTarget = "", defaultGroup =
           target: buildTarget() || { kind: "user", id: "" },
           targets: buildExtraTargets().length
             ? [buildTarget() || { kind: "user", id: "" }, ...buildExtraTargets()]
-            : undefined,
+            : [],
           schedule: buildSchedule(),
           steps: buildSteps(),
           successKeywords: String(model.successKeywords || "")
             .split(/[,，、\n]+/)
             .map((item) => item.trim())
             .filter(Boolean),
-          timeoutSeconds: clampInt(model.timeoutSeconds, 5, 120, 30),
+          timeoutSeconds: clampInt(model.timeoutSeconds, 5, 90, 30),
           stepDelaySeconds: clampInt(model.stepDelaySeconds, 0, 60, 3),
-          deleteAfterSeconds: clampInt(model.deleteAfterSeconds, 0, 86400, 0),
+          deleteAfterSeconds: clampInt(model.deleteAfterSeconds, 0, 3600, 0),
           cleanupPrevious: Boolean(model.cleanupPrevious),
           group: String(model.group || "").trim() || undefined,
           threadId: model.threadId ?? null,
@@ -950,6 +957,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", defaultGroup =
   refreshCommand();
 
   function closeEditor() {
+    clearTimeout(commandTimer);
     modal?.close();
   }
 
@@ -988,7 +996,8 @@ export function openTaskEditor({ task = null, defaultTarget = "", defaultGroup =
   /** 任务名为空时，用「目标名 + 第一个动作」自动生成 */
   function suggestName() {
     const target = model.resolved && model.resolvedFor === targetQueryClean() ? model.resolved : null;
-    const base = targetDisplayName(target) || targetQueryClean();
+    // 目标留空且设置了默认目标时，名字按默认目标生成。
+    const base = targetDisplayName(target) || targetQueryClean() || String(defaultTarget || "").trim();
     if (!base) return "";
     const firstText = (model.steps.find((step) => step.type === "text") || {}).text || "";
     const firstRandom = (model.steps.find((step) => step.type === "random") || {}).options?.[0] || "";
@@ -999,7 +1008,8 @@ export function openTaskEditor({ task = null, defaultTarget = "", defaultGroup =
 
   /** 主目标输入里允许 `@group#12` 表示「这个目标的话题」 */
   function buildTarget() {
-    const raw = model.targetQuery.trim();
+    // 目标留空时使用设置里的默认目标。
+    const raw = model.targetQuery.trim() || String(defaultTarget || "").trim();
     if (!raw) return null;
     const threadMatch = /^(.*?)#(\d{1,12})$/.exec(raw);
     const query = threadMatch ? threadMatch[1].trim() : raw;
@@ -1070,7 +1080,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", defaultGroup =
       if (step.type === "wait") {
         const seconds = Number(step.seconds);
         if (!Number.isFinite(seconds) || seconds <= 0) throw new Error(`${label}：等待秒数必须大于 0`);
-        return { type: "wait", seconds };
+        return { type: "wait", seconds: Math.min(600, seconds) };
       }
       throw new Error(`${label}：未知的动作类型`);
     });
@@ -1102,18 +1112,25 @@ export function openTaskEditor({ task = null, defaultTarget = "", defaultGroup =
           // 编辑老任务时保持原样（老数据没有标记就继续留空，交由服务端按默认名判断）
           nameAuto: model.nameTouched ? false : isEdit ? task.nameAuto : true,
           enabled: Boolean(model.enabled),
-          target,
-          targets: extraTargets.length ? [target, ...extraTargets] : undefined,
           schedule,
           steps,
           successKeywords: keywords,
-          timeoutSeconds: clampInt(model.timeoutSeconds, 5, 120, 30),
+          timeoutSeconds: clampInt(model.timeoutSeconds, 5, 90, 30),
           stepDelaySeconds: clampInt(model.stepDelaySeconds, 0, 60, 3),
-          deleteAfterSeconds: clampInt(model.deleteAfterSeconds, 0, 86400, 0),
+          deleteAfterSeconds: clampInt(model.deleteAfterSeconds, 0, 3600, 0),
           cleanupPrevious: Boolean(model.cleanupPrevious),
-          group: String(model.group || "").trim() || undefined,
+          group: String(model.group ?? currentGroup).trim(),
         };
         if (task && task.threadId) payload.threadId = task.threadId;
+
+        // 目标未修改时不提交 target/targets；服务端保留已存的目标元信息。
+        const targetChanged = model.targetQuery.trim() !== initialTargetQuery.trim();
+        const extrasChanged = String(model.extraTargets || "").trim() !== initialExtraTargets.trim();
+        if (!isEdit || targetChanged || extrasChanged) {
+          payload.target = target;
+          // 空数组表示「只剩主目标」。
+          payload.targets = extraTargets.length ? [target, ...extraTargets] : [];
+        }
 
         const res = isEdit
           ? await api(`/api/tasks/${task.id}`, { method: "PATCH", body: payload })

@@ -8,6 +8,7 @@ import {
   insertChangelogEntry,
   isNewerVersion,
   parseReleaseDoc,
+  validateTagOption,
 } from "../scripts/release.mjs";
 
 const doc = (version: string, title: string, body: string) =>
@@ -66,4 +67,37 @@ test("buildArchiveAndTemplate：归档保留标题，模板回落到 0.0.0 并�
   assert.match(archived, /^---\nversion: 0\.18\.0\ntitle: v0\.18\.0 — 测试\n---\n\n正文/);
   assert.match(reset, /version: 0\.0\.0/);
   assert.match(reset, /<!-- 这里是说明 -->/, "模板里的使用说明要保留");
+});
+
+test("parseReleaseDoc：tag 开关，默认打 tag", () => {
+  assert.equal(parseReleaseDoc(doc("0.20.0", "t", "b")).tagEnabled, true);
+  assert.equal(parseReleaseDoc(doc("0.20.0", "t", "b").replace("title:", "tag: false\ntitle:")).tagEnabled, false);
+  assert.equal(parseReleaseDoc(doc("0.20.0", "t", "b").replace("title:", "tag: true\ntitle:")).tagEnabled, true);
+});
+
+test("validateTagOption：tag 开关与发布模式兼容", () => {
+  assert.equal(validateTagOption({ version: "0.20.0", current: "0.19.2", tagEnabled: false }), false);
+  assert.throws(
+    () => validateTagOption({ version: "0.20.0", current: "0.19.2", retro: true, tagEnabled: false }),
+    /retro \/ revoke/,
+  );
+  assert.throws(
+    () => validateTagOption({ version: "0.20.0", current: "0.19.2", revoke: true, tagEnabled: false }),
+    /retro \/ revoke/,
+  );
+  assert.throws(
+    () => validateTagOption({ version: "0.19.2", current: "0.19.2", tagEnabled: false }),
+    /只补发布/,
+  );
+});
+
+test("buildArchiveAndTemplate：不打 tag 的版本在归档里保留标记", () => {
+  const { archived } = buildArchiveAndTemplate({
+    version: "0.20.0",
+    title: "v0.20.0 — 测试",
+    body: "正文",
+    template: doc("0.0.0", "t", ""),
+    tagEnabled: false,
+  });
+  assert.match(archived, /^---\nversion: 0\.20\.0\ntitle: v0\.20\.0 — 测试\ntag: false\n---\n\n正文/);
 });

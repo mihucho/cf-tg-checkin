@@ -14,5 +14,5 @@
     "allowJs": false,
     "jsx": "react-jsx"
   },
-  "include": ["src/**/*.ts", "build.mjs"]
+  "include": ["src/**/*.ts"]
 }
