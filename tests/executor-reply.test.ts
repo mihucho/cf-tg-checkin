@@ -162,3 +162,68 @@ test("多步骤：最后一步是点击时也能拿到回复（点完机器人�
   assert.ok(outcome.replyId && outcome.replyId >= 103);
   assert.match(outcome.detail, /收到机器人回复 #10\d：签到成功/);
 });
+
+/* ---------- callback 弹窗回应 ---------- */
+
+/**
+ * 最后一步点按钮时，机器人可能只回一个 callback 弹窗（没有新消息）。
+ * 这条文本要作为最终「收到回复」，并参与关键词判定。
+ */
+function callbackOnlyClient(text: string) {
+  const history: Array<{ id: number; out: boolean; message: string; replyMarkup?: unknown }> = [
+    { id: 100, out: false, message: "旧消息" },
+    {
+      id: 101,
+      out: false,
+      message: "菜单",
+      replyMarkup: { rows: [{ buttons: [{ text: "签到", data: Buffer.from([1]) }] }] },
+    },
+  ];
+  return {
+    async getMessages() {
+      return history.slice();
+    },
+    async getInputEntity() {
+      return { id: 1 };
+    },
+    async invoke() {
+      return { message: text };
+    },
+    async sendMessage() {
+      return { id: 102 };
+    },
+    async deleteMessages() {},
+    get connected() {
+      return true;
+    },
+  };
+}
+
+test("执行器：只有 callback 回应时也作为「收到回复」", async () => {
+  const answer = "您今天已经签到过了，请明天再来!";
+  const outcome = await executeTask(callbackOnlyClient(answer) as never, makeTask({ steps: [{ type: "click", text: "签到" }] }), {
+    entity: { id: 1, className: "User", bot: true } as never,
+    hooks: { log: () => undefined },
+    pollIntervalMs: 100,
+    stepWaitMs: 400,
+  });
+  assert.equal(outcome.ok, true);
+  assert.equal(outcome.replyText, answer);
+  assert.match(outcome.message, /收到回复/);
+  assert.doesNotMatch(outcome.detail, /没有等到新的按钮菜单/);
+});
+
+test("执行器：callback 回应也能命中成功关键词", async () => {
+  const outcome = await executeTask(
+    callbackOnlyClient("签到成功，明天再来") as never,
+    makeTask({ steps: [{ type: "click", text: "签到" }], successKeywords: ["签到成功"] }),
+    {
+      entity: { id: 1, className: "User", bot: true } as never,
+      hooks: { log: () => undefined },
+      pollIntervalMs: 100,
+      stepWaitMs: 400,
+    },
+  );
+  assert.equal(outcome.ok, true);
+  assert.match(outcome.message, /命中关键词/);
+});

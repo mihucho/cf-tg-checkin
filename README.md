@@ -324,7 +324,7 @@ node scripts/release.mjs --dry-run
 ```bash
 cp .dev.vars.example .dev.vars   # 填 ADMIN_PASSWORD
 npm run dev                      # wrangler dev（自定义构建自动打包 + watch src/）
-npm test                         # 185 个单测（纯函数 + 执行器假 client）
+npm test                         # 187 个单测（纯函数 + 执行器假 client）
 npm run test:integration         # 端到端集成测试：真起 wrangler dev，打 Worker → DO → SQLite
 npm run check                    # typecheck + test + build + 产物导出自检
 ```

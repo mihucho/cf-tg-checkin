@@ -149,7 +149,7 @@ npm run deploy                           # 打包 + 部署（wrangler 会先跑 
 cp .dev.vars.example .dev.vars    # 填 ADMIN_PASSWORD
 npm install
 npm run dev                       # = wrangler dev（自定义构建会自动打包并 watch src/）
-npm test                          # 185 个单测（调度 / 触发语法 / 执行器判定 / 通知渲染 / 脱敏）
+npm test                          # 187 个单测（调度 / 触发语法 / 执行器判定 / 通知渲染 / 脱敏）
 npm run typecheck
 ```
 

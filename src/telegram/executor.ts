@@ -468,10 +468,17 @@ async function waitForPeerReply(
   return null;
 }
 
+interface ClickOutcome {
+  /** 写进步骤日志的说明 */
+  note: string;
+  /** 机器人通过 callback 弹窗给出的文本（用于最终回复与关键词判定） */
+  callbackText: string | null;
+}
+
 async function clickWithTeleprotoHelper(
   message: Api.Message,
   button: ButtonInfo,
-): Promise<string | null> {
+): Promise<ClickOutcome | null> {
   const grid = (message as unknown as { buttons?: Array<Array<{ text?: string; click?: () => Promise<unknown> }>> }).buttons;
   if (!Array.isArray(grid) || !grid.length) return null;
 
@@ -485,9 +492,10 @@ async function clickWithTeleprotoHelper(
 
   try {
     const result = (await target.click()) as { message?: string } | undefined;
-    return result && typeof result === "object" && result.message ? `机器人回应：${String(result.message).slice(0, 200)}` : "";
+    const text = result && typeof result === "object" && result.message ? String(result.message).slice(0, 200) : "";
+    return { note: text ? `机器人回应：${text}` : "", callbackText: text || null };
   } catch (error) {
-    return `teleproto 点击失败：${errorMessage(error)}`;
+    return { note: `teleproto 点击失败：${errorMessage(error)}`, callbackText: null };
   }
 }
 
@@ -496,7 +504,7 @@ async function clickButton(
   entity: EntityLike,
   message: Api.Message,
   button: ButtonInfo,
-): Promise<string> {
+): Promise<ClickOutcome> {
   if (button.kind === "callback") {
     try {
       const peer = await client.getInputEntity(entity as never);
@@ -507,30 +515,38 @@ async function clickButton(
           data: button.data,
         }),
       )) as { message?: string };
-      return answer?.message ? `机器人回应：${String(answer.message).slice(0, 200)}` : "";
+      const text = answer?.message ? String(answer.message).slice(0, 200) : "";
+      return { note: text ? `机器人回应：${text}` : "", callbackText: text || null };
     } catch (error) {
       const fallback = await clickWithTeleprotoHelper(message, button);
-      if (fallback !== null) return `直接调用失败（${errorMessage(error)}），改用 teleproto 助手：${fallback || "已点击"}`;
+      if (fallback !== null) {
+        return {
+          note: `直接调用失败（${errorMessage(error)}），改用 teleproto 助手：${fallback.note || "已点击"}`,
+          callbackText: fallback.callbackText,
+        };
+      }
       throw error;
     }
   }
   if (button.kind === "text") {
     // reply keyboard：点它的等价操作就是把按钮文本（含 emoji 前缀）发出去
     await client.sendMessage(entity as never, { message: button.text, parseMode: false });
-    return `已按键盘按钮发送「${button.text}」`;
+    return { note: `已按键盘按钮发送「${button.text}」`, callbackText: null };
   }
-  if (button.kind === "url") return `「${button.text}」是链接按钮，跳过：${button.url ?? ""}`;
-  if (button.kind === "webview") return `「${button.text}」是 webview 按钮，跳过`;
-  if (button.kind === "switch") return `「${button.text}」是 switch_inline 按钮，跳过`;
+  if (button.kind === "url") return { note: `「${button.text}」是链接按钮，跳过：${button.url ?? ""}`, callbackText: null };
+  if (button.kind === "webview") return { note: `「${button.text}」是 webview 按钮，跳过`, callbackText: null };
+  if (button.kind === "switch") return { note: `「${button.text}」是 switch_inline 按钮，跳过`, callbackText: null };
   const fallback = await clickWithTeleprotoHelper(message, button);
-  if (fallback !== null) return `类型未识别，改用 teleproto 助手：${fallback || "已点击"}`;
+  if (fallback !== null) {
+    return { note: `类型未识别，改用 teleproto 助手：${fallback.note || "已点击"}`, callbackText: fallback.callbackText };
+  }
 
   // 最后兜底：当成普通键盘按钮，把文本发出去（多数机器人靠文本匹配）
   if (button.text) {
     await client.sendMessage(entity as never, { message: button.text, parseMode: false });
-    return `类型未识别（${button.typeClassName ?? button.className}），已按键盘按钮发送「${button.text}」`;
+    return { note: `类型未识别（${button.typeClassName ?? button.className}），已按键盘按钮发送「${button.text}」`, callbackText: null };
   }
-  return `「${button.text}」类型不支持点击`;
+  return { note: `「${button.text}」类型不支持点击`, callbackText: null };
 }
 
 function pickRandom(options: string[]): string {
@@ -604,6 +620,8 @@ export async function executeTask(
   const stepWaitDeadline = () => Date.now() + Math.max(pollIntervalMs, Math.min(300_000, options.stepWaitMs ?? 30_000));
   const stepDelayMs = Math.max(0, Math.min(60, task.stepDelaySeconds ?? 3)) * 1000;
   const sent: number[] = [];
+  /** 机器人通过 callback 弹窗给出的文本（最后一步没有新消息时作为回复） */
+  const callbackReplies: string[] = [];
   /**
    * 整任务时间预算：一次 tick/alarm 的可用时间有限，多目标 × 多步骤很容易超。
    * 超出预算就停止后续步骤并如实记账，而不是跑到被驱逐。
@@ -745,26 +763,33 @@ export async function executeTask(
             note("warn", `原始 markup：${describeRawMarkup(candidate.message)}`);
             break;
           }
-          const clickNote = await clickButton(client, entity, buttonMessage, button);
+          const click = await clickButton(client, entity, buttonMessage, button);
           note("info", `步骤${stepNo} 点击「${button.text}」（${button.kind}）`);
-          if (clickNote) note("info", `步骤${stepNo} ${clickNote}`);
+          if (click.note) note("info", `步骤${stepNo} ${click.note}`);
+          if (click.callbackText) callbackReplies.push(click.callbackText);
           cursorId = Math.max(cursorId, buttonMessage.id, candidate.message.id);
 
-          // 点完之后机器人通常是「新发一条消息」或「原地编辑同一条消息」，
-          // 两种都等，但要排除"还是原来那套按钮"（否则下一步会重复点同一个按钮）
+          // 点完之后机器人通常是「新发一条消息」或「原地编辑同一条消息」。
+          // 还有下一步时才需要等新菜单；最后一步只短暂补抓，避免白等一整轮。
+          const hasNextStep = index < task.steps.length - 1;
+          const baseDeadline = Math.min(interactiveDeadline(), stepWaitDeadline(), deadline);
+          const afterClickDeadline = hasNextStep
+            ? baseDeadline
+            : Math.min(baseDeadline, Date.now() + Math.min(3_000, stepDelayMs + 2_000));
+          const waitSeconds = Math.max(1, Math.round((afterClickDeadline - Date.now()) / 1000));
           const next = await waitForInteractive(
             client,
             entity,
             cursorId,
-            Math.min(interactiveDeadline(), stepWaitDeadline(), deadline),
+            afterClickDeadline,
             hooks,
             {
               pollIntervalMs,
               skip: { msgId: candidate.message.id, signature: buttonSignature(candidate.buttons) },
             },
           );
-          if (!next) {
-            note("warn", `步骤${stepNo} 点击后 ${Math.round((options.stepWaitMs ?? 30_000) / 1000)}s 内没有等到新的按钮菜单`);
+          if (!next && hasNextStep) {
+            note("warn", `步骤${stepNo} 点击后 ${waitSeconds}s 内没有等到新的按钮菜单`);
           }
           interactive = next ?? null;
           break;
@@ -838,6 +863,11 @@ export async function executeTask(
     }
   }
 
+  // callback 弹窗也是机器人的回应：没有新消息时用它作为最终回复
+  if (!replyText && callbackReplies.length) {
+    replyText = oneLine(callbackReplies[callbackReplies.length - 1]);
+  }
+
   // ---------- 判定成功 ----------
   let ok = true;
   let message = "执行完成";
@@ -845,7 +875,10 @@ export async function executeTask(
     // 用「最后一步之后的全部回复」判定（回复可能分好几条）
     const messages = await fetchRecent(client, entity).catch(() => [] as Api.Message[]);
     const fresh = messages.filter((item) => item.id > Math.min(baseline, cursorId) && !item.out);
-    const texts = fresh.map((item) => (item.message ?? "").trim()).filter(Boolean);
+    const texts = [
+      ...fresh.map((item) => (item.message ?? "").trim()),
+      ...callbackReplies.map((text) => oneLine(text)),
+    ].filter(Boolean);
     const hit = task.successKeywords.find((keyword) => texts.some((text) => text.includes(keyword)));
     if (hit) {
       message = `命中关键词「${hit}」`;
