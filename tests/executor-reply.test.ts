@@ -2,7 +2,7 @@
  * 执行器：抓「最后一步之后的回复」的格式。
  *
  * 用一个极简的假 client 覆盖真实路径：发文本 → 轮询 → 拿到对方的回复。
- * 重点是**日志格式**：多行回复要折成一行，而且不能重复记两次。
+ * 重点是**日志格式**：摘要折成一行，详情保留原始换行，而且不能重复记两次。
  */
 import assert from "node:assert/strict";
 import { test } from "./harness.ts";
@@ -67,7 +67,7 @@ function makeTask(over: Partial<Task> = {}): Task {
   } as Task;
 }
 
-test("执行器：多行回复折成一行，日志里只出现一次", async () => {
+test("执行器：多行回复在摘要里折成一行，详情保留换行", async () => {
   const client = fakeClient({ id: 200, text: MULTI_LINE });
   const outcome = await executeTask(client as never, makeTask(), {
     entity: { id: 1, username: "bot", className: "User", bot: true } as never,
@@ -78,10 +78,11 @@ test("执行器：多行回复折成一行，日志里只出现一次", async ()
 
   assert.equal(outcome.ok, true);
   assert.equal(outcome.replyId, 200);
-  assert.equal(outcome.replyText, "签到成功！ / 当前积分 3 点", "回复要折成一行");
+  assert.equal(outcome.replyText, "签到成功！ / 当前积分 3 点", "回复摘要要折成一行");
   const replyLines = outcome.detail.split("\n").filter((line) => line.includes("收到机器人回复"));
   assert.equal(replyLines.length, 1, "回复只该记一条");
-  assert.match(replyLines[0], /收到机器人回复 #200：签到成功！ \/ 当前积分 3 点/);
+  assert.match(replyLines[0], /收到机器人回复 #200：$/);
+  assert.match(outcome.detail, /收到机器人回复 #200：\n  签到成功！\n  当前积分 3 点/);
   assert.match(outcome.message, /收到回复「签到成功！ \/ 当前积分 3 点」/);
 });
 

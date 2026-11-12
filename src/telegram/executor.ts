@@ -34,7 +34,7 @@ export interface ExecuteOutcome {
 }
 
 /**
- * 把多行文本压成一行：日志是按行写的，机器人回复里的换行会把一条记录拆成好几行。
+ * 把多行文本压成一行：日志摘要（message）只能占一行，机器人回复里的换行会把它撑开。
  * 换行折成 ` / `，连续空白收成一个空格。
  */
 export function oneLine(text: string, limit = 200): string {
@@ -42,6 +42,21 @@ export function oneLine(text: string, limit = 200): string {
     .replace(/\s*\n+\s*/g, " / ")
     .replace(/[ \t]{2,}/g, " ")
     .trim();
+  return flat.length > limit ? `${flat.slice(0, limit)}…` : flat;
+}
+
+/**
+ * 日志详情（`detail`，按 <pre> 渲染）里的机器人回复：保留换行和缩进，
+ * 只统一换行符、去掉行尾空白和首尾空行，超长时截断。
+ */
+export function formatReply(text: string, limit = 2000): string {
+  const lines = String(text ?? "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+$/g, ""));
+  while (lines.length && !lines[0].trim()) lines.shift();
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  const flat = lines.join("\n");
   return flat.length > limit ? `${flat.slice(0, limit)}…` : flat;
 }
 
@@ -615,9 +630,22 @@ export async function executeTask(
 ): Promise<ExecuteOutcome> {
   const { hooks } = options;
   const detail: string[] = [];
+  const marker = (level: LogLevel) => (level === "error" ? "✗" : level === "warn" ? "!" : "·");
   const note = (level: LogLevel, message: string) => {
-    detail.push(`${level === "error" ? "✗" : level === "warn" ? "!" : "·"} ${message}`);
+    detail.push(`${marker(level)} ${message}`);
     hooks.log(level, message);
+  };
+  /** 机器人回复按原样换行记进详情；单行回复仍然接在标题后面，保持紧凑 */
+  const noteReply = (level: LogLevel, head: string, text: string) => {
+    const body = formatReply(text);
+    const block = body.includes("\n")
+      ? `${head}\n${body
+          .split("\n")
+          .map((line) => (line ? `  ${line}` : ""))
+          .join("\n")}`
+      : `${head}${body}`;
+    detail.push(`${marker(level)} ${block}`);
+    hooks.log(level, block);
   };
 
   const entity = options.entity ?? (await resolveEntity(client, task.target));
@@ -854,7 +882,7 @@ export async function executeTask(
     if (text) {
       replyId = interactive.message.id;
       replyText = oneLine(text);
-      note("info", `收到${peerLabel}回复 #${replyId}：${replyText}`);
+      noteReply("info", `收到${peerLabel}回复 #${replyId}：`, text);
     }
   }
 
@@ -866,10 +894,10 @@ export async function executeTask(
 
     const found = await waitForPeerReply(client, entity, cursorId, replyDeadline, hooks, { pollIntervalMs });
     if (found) {
-      // 原始回复可能有多行，存进日志前压成一行（否则一条日志被拆成好几行）
+      // 摘要用一行；详情里保留原始换行（formatReply 会统一换行并截断）
       replyText = oneLine(found.text) || "（无文本内容）";
       replyId = found.id;
-      note("info", `收到${peerLabel}回复 #${found.id}：${replyText}`);
+      noteReply("info", `收到${peerLabel}回复 #${found.id}：`, found.text || "（无文本内容）");
     } else if (wantsKeyword) {
       note("warn", `等待 ${Math.round((options.stepWaitMs ?? 30_000) / 1000)}s 没等到回复`);
     }

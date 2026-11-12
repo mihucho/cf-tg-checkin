@@ -46,11 +46,11 @@ test("pickFirstPeerReply：群组场景（别人发的都算，我自己发的�
   assert.equal(pickFirstPeerReply(messages, 29)?.message, "群友：今天签过了");
 });
 
-/* ---------- 多行回复压成一行（日志是逐行写的） ---------- */
+/* ---------- 回复格式：摘要一行，详情保留换行 ---------- */
 
-import { oneLine } from "../src/telegram/executor.ts";
+import { formatReply, oneLine } from "../src/telegram/executor.ts";
 
-test("oneLine：机器人回复的换行折成 /，不把日志拆行", () => {
+test("oneLine：机器人回复的换行折成 /，用于单行摘要", () => {
   assert.equal(oneLine("签到成功！\n当前积分 3 点"), "签到成功！ / 当前积分 3 点");
   assert.equal(oneLine("第一行\n\n  第二行  "), "第一行 / 第二行");
   assert.equal(oneLine("单行回复"), "单行回复");
@@ -60,4 +60,18 @@ test("oneLine：超长截断并带省略号", () => {
   const flat = oneLine("字".repeat(300), 20);
   assert.equal(flat.length, 21);
   assert.ok(flat.endsWith("…"));
+});
+
+test("formatReply：保留换行与缩进，去掉行尾空白和首尾空行", () => {
+  assert.equal(formatReply("签到成功！\n当前积分 3 点"), "签到成功！\n当前积分 3 点");
+  assert.equal(formatReply("\n\n第一行  \n\n  第二行\t\n\n"), "第一行\n\n  第二行");
+  assert.equal(formatReply("a\r\nb\rc"), "a\nb\nc");
+  assert.equal(formatReply("单行回复"), "单行回复");
+  assert.equal(formatReply("  \n\n  "), "");
+});
+
+test("formatReply：超长按字符截断并带省略号", () => {
+  const text = formatReply("字".repeat(300), 20);
+  assert.equal(text.length, 21);
+  assert.ok(text.endsWith("…"));
 });
