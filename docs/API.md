@@ -48,6 +48,7 @@
     "defaultTarget": "",         // 触发消息解析不到目标时的兜底目标
     "stepPollSeconds": 3,        // 等下一步按钮/回复时，每隔多少秒查一次（1–30）
     "stepWaitSeconds": 30,       // 单次最多等多久（5–300）
+    "cleanupPrevious": true,     // 全局：执行前是否删除上一次自己发的消息（任务里的开关仍可单独关闭）
     "notifyOnFailure": true,     // 任务失败时给自己发一条 Telegram 消息
     "notifyWebhook": "",         // 脱敏值（如 ?access_token=abcd****cdef）；留空保存 = 不修改
     "notifyWebhookConfigured": false, // 只读：地址是否已配置

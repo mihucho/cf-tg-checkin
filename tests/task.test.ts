@@ -1,7 +1,7 @@
 /** 任务输入规范化 + 去重指纹 + 设置脱敏（正反例） */
 import assert from "node:assert/strict";
 import { test } from "./harness.ts";
-import { applyTargetPatch, normalizeTaskInput, preserveTargetMeta, shouldAutoRename, taskFingerprint, taskToExport } from "../src/task.ts";
+import { applyTargetPatch, normalizeTaskInput, preserveTargetMeta, shouldAutoRename, shouldCleanupPrevious, taskFingerprint, taskToExport } from "../src/task.ts";
 import { taskToCommand } from "../src/schedule/command.ts";
 import { parseTrigger } from "../src/schedule/dsl.ts";
 import { redactSettings, shouldAutoFillAdminId } from "../src/settings.ts";
@@ -156,7 +156,17 @@ test("DEFAULT_SETTINGS：触发前缀默认 tg，安全默认值", () => {
   assert.equal(DEFAULT_SETTINGS.triggerPrefix, "tg");
   assert.equal(DEFAULT_SETTINGS.stepPollSeconds, 3);
   assert.equal(DEFAULT_SETTINGS.stepWaitSeconds, 30);
+  assert.equal(DEFAULT_SETTINGS.cleanupPrevious, true);
   assert.equal(DEFAULT_SETTINGS.triggerEnabled, true);
+});
+
+test("shouldCleanupPrevious：全局与任务开关任一关闭就不清理", () => {
+  assert.equal(shouldCleanupPrevious(true, true), true);
+  assert.equal(shouldCleanupPrevious(undefined, true), true);
+  assert.equal(shouldCleanupPrevious(true, undefined), true);
+  assert.equal(shouldCleanupPrevious(false, true), false);
+  assert.equal(shouldCleanupPrevious(true, false), false);
+  assert.equal(shouldCleanupPrevious(false, false), false);
 });
 
 /* ---------- 审计补丁：多目标补全只写回自己那一格 ---------- */

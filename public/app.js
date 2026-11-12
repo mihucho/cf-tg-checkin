@@ -3364,6 +3364,23 @@ function renderSettings() {
       control: numberControl("stepWaitSeconds", settings.stepWaitSeconds ?? 30, { step: "5", min: "5", max: "300" }),
       hint: "超过该时长仍无下一步按钮，则判定这一步失败。",
     }),
+    el(
+      "div",
+      { class: "field" },
+      el("span", { class: "field-label" }, "上一次的消息"),
+      el(
+        "label",
+        { class: "switch" },
+        el("input", {
+          type: "checkbox",
+          name: "cleanupPrevious",
+          checked: settings.cleanupPrevious !== false,
+        }),
+        el("span", { class: "switch-track", "aria-hidden": "true" }),
+        el("span", { class: "switch-text" }, "执行前删除上一次自己发的消息"),
+      ),
+      el("p", { class: "field-hint" }, "关闭后所有任务都不再删除上一次的消息；任务编辑里的开关仍可单独关闭。"),
+    ),
   ]);
 
   const groupTrigger = settingsPanel("trigger", "消息指令", [
@@ -4016,6 +4033,7 @@ async function saveSettings(event) {
     defaultTarget: read("defaultTarget").trim(),
     stepPollSeconds,
     stepWaitSeconds,
+    cleanupPrevious: checked("cleanupPrevious"),
     triggerPrefix: read("triggerPrefix").trim(),
     notifyOnFailure: checked("notifyOnFailure"),
     ...(read("notifyWebhookKind") === "generic" || !read("notifyWebhookKind")

@@ -125,6 +125,9 @@ tg 9.30 签到 btn:"每日签到" #kw:签到成功
 | `#clean` / `#keep` | 执行前清理上次消息（默认）/ 保留上次消息 |
 | `@here` | 目标是**当前会话**（在群里发配置时不用再指定） |
 
+> 设置 → 执行里的「执行前删除上一次自己发的消息」是全局总开关：关闭后所有任务都不删；
+> 单个任务仍可用 `#keep` 关闭（`#clean` 只在总开关打开时生效）。
+
 **目标识别顺序**
 
 ```
@@ -327,7 +330,7 @@ node scripts/release.mjs --dry-run
 ```bash
 cp .dev.vars.example .dev.vars   # 填 ADMIN_PASSWORD
 npm run dev                      # wrangler dev（自定义构建自动打包 + watch src/）
-npm test                         # 200 个单测（纯函数 + 执行器假 client）
+npm test                         # 201 个单测（纯函数 + 执行器假 client）
 npm run test:integration         # 端到端集成测试：真起 wrangler dev，打 Worker → DO → SQLite
 npm run check                    # typecheck + test + build + 产物导出自检
 ```

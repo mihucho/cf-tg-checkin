@@ -148,6 +148,8 @@ export interface Settings {
   stepPollSeconds: number;
   /** 单次最多等待多少秒（默认 30） */
   stepWaitSeconds: number;
+  /** 全局总开关：执行前是否删除上一次自己发送的消息（任务里的开关仍可单独关闭） */
+  cleanupPrevious: boolean;
   /** 触发前缀：只有以它开头的消息才当配置解析（默认 "tg"；设成空字符串表示全部都解析） */
   triggerPrefix: string;
   /** 是否也在 Telegram 里提醒自己（私聊）；关闭后只有 Webhook */
@@ -250,6 +252,7 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultTarget: "",
   stepPollSeconds: 3,
   stepWaitSeconds: 30,
+  cleanupPrevious: true,
   triggerPrefix: "tg",
   notifyOnFailure: true,
   notifyEvents: ["run_failed", "auto_paused", "session_expired", "connection_error", "daily_digest"],

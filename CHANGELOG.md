@@ -43,9 +43,13 @@ push 后 `.github/workflows/release.yml` 会自动：跑检查 →（只有 `ver
 - 平时改代码直接 bump `package.json` / `package-lock.json`，只写 `[Unreleased]`；不动 `releases/unreleased.md`，也不打 tag。
 - 发布文档的版本等于 `package.json` 且 tag 还未创建时，走完整发布（CHANGELOG / 归档 / tag / Release / 部署）；tag 已存在时仍只补 Release 说明。
 
+## 设置
+
+- 「设置 → 执行」新增全局开关「执行前删除上一次自己发的消息」；关闭后所有任务都保留上一次的消息，任务编辑里的开关仍可单独关闭。
+
 ## 工程
 
-- 单测 200 例。
+- 单测 201 例。
 
 ## [0.20.5] - 2026-11-12
 

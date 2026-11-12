@@ -64,7 +64,7 @@ import {
 import { messageTargetHint, usernameFromLink, type MessageLike, type MessageTargetHint } from "./telegram/targets";
 import type { Env } from "./env";
 import { bucketDaily } from "./events";
-import { applyTargetPatch, normalizeTaskInput, preserveTargetMeta, shouldAutoRename, taskFingerprint, taskToExport } from "./task";
+import { applyTargetPatch, normalizeTaskInput, preserveTargetMeta, shouldAutoRename, shouldCleanupPrevious, taskFingerprint, taskToExport } from "./task";
 import { BUILD } from "./version";
 import { redactSettingsForClient, redactState, shouldAutoFillAdminId } from "./settings";
 
@@ -2442,13 +2442,21 @@ export class TgAgent implements DurableObject {
           "info",
           `目标 ${effective.username ? `@${effective.username}` : effective.title || effective.id}`,
         );
-        const outcome = await executeTask(client, { ...prepared.task, target: effective }, {
-          previousSent: previousForTarget,
-          hooks,
-          entity: prepared.entity,
-          pollIntervalMs: (settings.stepPollSeconds ?? 3) * 1000,
-          stepWaitMs: (settings.stepWaitSeconds ?? 30) * 1000,
-        });
+        const outcome = await executeTask(
+          client,
+          {
+            ...prepared.task,
+            target: effective,
+            cleanupPrevious: shouldCleanupPrevious(settings.cleanupPrevious, prepared.task.cleanupPrevious),
+          },
+          {
+            previousSent: previousForTarget,
+            hooks,
+            entity: prepared.entity,
+            pollIntervalMs: (settings.stepPollSeconds ?? 3) * 1000,
+            stepWaitMs: (settings.stepWaitSeconds ?? 30) * 1000,
+          },
+        );
         this.store.setJson(`${sentKey}:${targetKey}`, outcome.sent);
         if (task.deleteAfterSeconds > 0 && outcome.sent.length) {
           this.store.addDeletion(
@@ -2924,6 +2932,7 @@ function sanitizeSettings(patch: Partial<Settings>): Partial<Settings> {
     const value = Number(patch.stepWaitSeconds);
     if (Number.isFinite(value)) clean.stepWaitSeconds = Math.max(5, Math.min(300, value));
   }
+  if (patch.cleanupPrevious !== undefined) clean.cleanupPrevious = !!patch.cleanupPrevious;
   if (patch.notifyOnFailure !== undefined) clean.notifyOnFailure = !!patch.notifyOnFailure;
   if (patch.notifyEvents !== undefined) clean.notifyEvents = normalizeNotifyEvents(patch.notifyEvents);
   if (patch.digestHour !== undefined) {

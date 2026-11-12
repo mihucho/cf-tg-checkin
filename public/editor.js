@@ -663,7 +663,7 @@ export function openTaskEditor({ task = null, defaultTarget = "", defaultGroup =
             model.cleanupPrevious = event.target.checked;
           },
         }),
-        el("span", {}, "每次执行前删掉上一次自己发的消息"),
+        el("span", {}, "每次执行前删掉上一次自己发的消息（总开关在设置 → 执行）"),
       ),
     ),
   );

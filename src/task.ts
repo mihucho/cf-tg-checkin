@@ -223,6 +223,14 @@ export function taskToExport(task: Task): TaskInput {
   };
 }
 
+/** 执行前是否清理上一次的消息：全局总开关与任务开关任一关闭就不清理 */
+export function shouldCleanupPrevious(
+  globalEnabled: boolean | undefined,
+  taskEnabled: boolean | undefined,
+): boolean {
+  return globalEnabled !== false && taskEnabled !== false;
+}
+
 /** 判定"是不是同一个任务"用的指纹（不含 name，name 单独比较） */
 export function taskFingerprint(input: {
   target?: Target | null;

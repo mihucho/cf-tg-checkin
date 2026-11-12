@@ -341,6 +341,11 @@ async function main() {
     const state2 = await get("/api/state");
     check("模板在 /api/state 里可见", state2.settings?.templates?.length === 1);
 
+    const cleanupOff = await post("/api/settings", { cleanupPrevious: false });
+    check("全局清理上次消息开关可关闭", cleanupOff.settings?.cleanupPrevious === false);
+    const cleanupOn = await post("/api/settings", { cleanupPrevious: true });
+    check("全局清理上次消息开关可恢复", cleanupOn.settings?.cleanupPrevious === true);
+
     // ---------- Webhook 渠道 ----------
     const hookSaved = await post("/api/settings", {
       notifyWebhook: "https://oapi.dingtalk.com/robot/send?access_token=abc",
