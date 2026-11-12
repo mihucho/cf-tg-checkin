@@ -293,18 +293,21 @@ npx wrangler deploy --var DO_LOCATION_HINT:apac   # apac/enam/weur/eeur/me/afr/o
 
 ## 发版（改文档即发布）
 
-发布说明就是 `releases/unreleased.md`。改它并 push 到 `main`，`.github/workflows/release.yml` 会自动：
+平时改代码只 bump `package.json` / `package-lock.json` 并写 `CHANGELOG.md` 的 `[Unreleased]`，
+**不要动 `releases/unreleased.md`、不要打 tag**。要发布时，把发布说明写进 `releases/unreleased.md`
+（`version` 填当前 `package.json` 版本），push 到 `main` 后 `.github/workflows/release.yml` 会自动：
 
 1. 解析文档头部的 `version` / `title` / `tag`
-2. **版本号 > 当前版本** → 跑 typecheck + 单测 + 打包自检，通过后写 `package.json`、插入 `CHANGELOG.md`、
+2. **版本号 = 当前版本、tag 还不存在** → 跑 typecheck + 单测 + 打包自检，通过后插入 `CHANGELOG.md`、
    把文档归档到 `releases/archive/vX.Y.Z.md` 并重置模板，提交、打 annotated tag、建 GitHub Release、触发部署
-3. **版本号 = 当前版本** → 只补 tag / GitHub Release（代码已发布、说明写晚了的情况）
-4. **`tag: false`** → 版本号、CHANGELOG、归档与部署照常，跳过 tag 与 GitHub Release
-5. **还是模板（`version: 0.0.0`）** → 直接跳过
+3. **版本号 = 当前版本、tag 已存在** → 只补 tag / GitHub Release（代码已发布、说明写晚了的情况）
+4. **版本号 > 当前版本** → 先补 bump `package.json`，再走上面的完整发布
+5. **`tag: false`** → CHANGELOG、归档与部署照常，跳过 tag 与 GitHub Release
+6. **还是模板（`version: 0.0.0`）** → 直接跳过
 
 ```bash
-# 日常发版就三步
-$EDITOR releases/unreleased.md      # 改 version + 写说明
+# 要发布时
+$EDITOR releases/unreleased.md      # version 填当前 package.json 版本，写说明
 git add releases/unreleased.md
 git commit -m "docs(release): v0.18.0" && git push
 ```
@@ -324,7 +327,7 @@ node scripts/release.mjs --dry-run
 ```bash
 cp .dev.vars.example .dev.vars   # 填 ADMIN_PASSWORD
 npm run dev                      # wrangler dev（自定义构建自动打包 + watch src/）
-npm test                         # 199 个单测（纯函数 + 执行器假 client）
+npm test                         # 200 个单测（纯函数 + 执行器假 client）
 npm run test:integration         # 端到端集成测试：真起 wrangler dev，打 Worker → DO → SQLite
 npm run check                    # typecheck + test + build + 产物导出自检
 ```

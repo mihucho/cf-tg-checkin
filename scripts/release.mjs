@@ -2,11 +2,12 @@
 /**
  * 发布脚本：把 `releases/unreleased.md`（就是 Release notes 本身）变成一次发布。
  *
- * 三种情况：
- *   1. 版本号 > package.json 里的版本  → 完整发版：写 package.json、插 CHANGELOG、归档文档、打 tag
- *   2. 版本号 = 当前版本               → 只补发布：不动代码，用文档内容建 tag / GitHub Release
+ * 四种情况：
+ *   1. 版本号 > package.json 里的版本  → 完整发版：补写 package.json、插 CHANGELOG、归档文档、打 tag
+ *   2. 版本号 = 当前版本、tag 不存在   → 发布：平时已经 bump 过版本号，这里只插 CHANGELOG、归档文档、打 tag
+ *   3. 版本号 = 当前版本、tag 已存在   → 只补发布：不动代码，用文档内容更新 tag / GitHub Release
  *      （给「代码已经发了、说明写晚了」这种情况兜底，重复执行也不会出错）
- *   3. 版本号 = 0.0.0（模板）或 < 当前 → 跳过 / 报错
+ *   4. 版本号 = 0.0.0（模板）或 < 当前 → 跳过 / 报错
  *
  * git / gh 操作留在 workflow 里；这里只做确定性的文件改动，并输出 mode/tag/title 等结果。
  *
@@ -17,6 +18,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { execFileSync } from "node:child_process";
 
 const DOC_PATH = "releases/unreleased.md";
 const PACKAGE_PATH = "package.json";
@@ -66,14 +68,14 @@ export function parseReleaseDoc(raw) {
 /**
  * tag 开关与发布模式必须兼容：
  * - retro / revoke 操作的是已存在的 tag；
- * - 版本号等于当前版本时（只补发布）没有代码改动，只有 tag / Release 可做。
+ * - 版本号等于当前版本、tag 已存在时（只补 Release 说明）没有代码改动，只有 tag / Release 可做。
  */
-export function validateTagOption({ version, current, retro, revoke, tagEnabled }) {
+export function validateTagOption({ version, current, retro, revoke, tagEnabled, tagExists = false }) {
   if ((retro || revoke) && !tagEnabled) {
     throw new Error(`retro / revoke 需要对应 tag；版本 ${version} 设置了 tag: false`);
   }
-  if (version === current && !tagEnabled) {
-    throw new Error("只补发布必须打 tag；跳过 tag 请把 version 改成大于当前版本");
+  if (version === current && tagExists && !tagEnabled) {
+    throw new Error("补发布（tag 已存在）必须打 tag；跳过 tag 请把 version 改成大于当前版本");
   }
   return tagEnabled;
 }
@@ -86,6 +88,28 @@ export function isNewerVersion(a, b) {
   if (aMajor !== bMajor) return aMajor > bMajor;
   if (aMinor !== bMinor) return aMinor > bMinor;
   return aPatch > bPatch;
+}
+
+/**
+ * 发布模式：
+ * - bump：文档版本大于 package.json（老流程，发布时补 bump）
+ * - release：文档版本等于当前版本，且这个 tag 还没打过（平时已经 bump，发布时补 CHANGELOG / 归档）
+ * - release-only：文档版本等于当前版本，tag 已存在（只补 Release 说明）
+ * - error：文档版本小于当前版本
+ */
+export function releaseMode({ version, current, tagExists }) {
+  if (version === current) return tagExists ? "release-only" : "release";
+  return isNewerVersion(version, current) ? "bump" : "error";
+}
+
+/** 本地是否已有这个 tag（CI checkout fetch-depth: 0 会带上 tag） */
+export function hasLocalTag(tag) {
+  try {
+    execFileSync("git", ["rev-parse", "--verify", "--quiet", `refs/tags/${tag}`], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -125,12 +149,13 @@ const TEMPLATE_COMMENT = `<!--
 在这里写这一次发布的说明，写完后 push 到 main 就会自动发版。
 
 规则：
-1. 把上面 front matter 里的 version 改成新的版本号（必须严格大于 package.json 里的当前版本）
+1. 平时改代码只 bump package.json（和 lock），不要动这个文件；要发布时把 version 填成
+   package.json 的当前版本（通常相等；只有需要临时补 bump 时才写更大的版本号）
    —— 只修 bug 用最后一位，新增用户可见能力加中间一位；和 title 一起改。
 2. 分隔线 \`---\` 以下的内容就是 Release notes 正文（Markdown），会写进 CHANGELOG.md
    对应版本段和 releases/archive/vX.Y.Z.md；打 tag 时同时作为 Release 说明与 tag 注释。
 3. 不是每个版本都必须打 tag：在 front matter 加 \`tag: false\`，版本号、CHANGELOG、归档与部署照常，
-   跳过 tag 与 GitHub Release。retro / revoke / 只补发布仍然需要 tag。
+   跳过 tag 与 GitHub Release。retro / revoke / 只补 Release 说明仍然需要 tag。
 4. 只有这个文件被改动才会触发发布；发布完成后会归档到 releases/archive/vX.Y.Z.md 并重置成模板。
 5. 想补改／脱敏一个**已经打 tag** 的版本：把 version 写成那个版本号并加上 \`retro: true\`，
    工作流只会更新它的 Release 说明，不动代码、不重新打 tag。
@@ -225,22 +250,24 @@ function main() {
     return;
   }
 
-  if (!isNewerVersion(doc.version, current) && doc.version !== current) {
+  const tagAlreadyExists = hasLocalTag(`v${doc.version}`);
+  const mode = releaseMode({ version: doc.version, current, tagExists: tagAlreadyExists });
+  if (mode === "error") {
     throw new Error(
-      `版本号不能小于当前版本：文档里是 ${doc.version}，package.json 里是 ${current}（重发请改成更大的版本号，或改成当前版本号走"只补发布"）`,
+      `版本号不能小于当前版本：文档里是 ${doc.version}，package.json 里是 ${current}（重发请改成更大的版本号，或改成当前版本号走"补发布"）`,
     );
   }
-
-  const mode = doc.version === current ? "release-only" : "bump";
-  validateTagOption({ ...doc, current });
+  validateTagOption({ ...doc, current, tagExists: tagAlreadyExists });
   const archiveTag = `v${doc.version}`;
   const tag = doc.tagEnabled ? archiveTag : "";
   const date = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
-  console.log(`${mode === "bump" ? "发版" : "只补发布"}：${current} → ${doc.version}（${doc.title}）`);
-  if (mode === "bump" && !doc.tagEnabled) console.log("本版不打 tag，也不创建 GitHub Release");
+  const modeLabel = mode === "bump" ? "发版" : mode === "release" ? "发布" : "补发布";
+  const versionLabel = mode === "bump" ? `${current} → ${doc.version}` : doc.version;
+  console.log(`${modeLabel}：${versionLabel}（${doc.title}）`);
+  if ((mode === "bump" || mode === "release") && !doc.tagEnabled) console.log("本版不打 tag，也不创建 GitHub Release");
 
   if (dryRun) {
-    if (mode === "bump") {
+    if (mode === "bump" || mode === "release") {
       console.log("--- 将插入 CHANGELOG 的内容 ---");
       console.log(buildChangelogEntry({ version: doc.version, body: doc.body, date }));
     } else {
@@ -260,11 +287,11 @@ function main() {
     return;
   }
 
-  // 两种模式都要产出 Release notes 文件
+  // 三种模式都要产出 Release notes 文件
   fs.mkdirSync(path.dirname(NOTES_OUT), { recursive: true });
   fs.writeFileSync(NOTES_OUT, `${doc.title}\n\n${doc.body}\n`);
 
-  if (mode === "bump") {
+  if (mode === "bump" || mode === "release") {
     const changelog = fs.readFileSync(CHANGELOG_PATH, "utf8");
     const entry = buildChangelogEntry({ version: doc.version, body: doc.body, date });
     const applied = applyChangelog(changelog, entry);
@@ -274,11 +301,13 @@ function main() {
       console.log(applied.leftover.split("\n").slice(0, 20).join("\n"));
     }
 
-    pkg.version = doc.version;
-    fs.writeFileSync(PACKAGE_PATH, `${JSON.stringify(pkg, null, 2)}\n`);
-    if (fs.existsSync(LOCK_PATH)) {
-      const lock = JSON.parse(fs.readFileSync(LOCK_PATH, "utf8"));
-      fs.writeFileSync(LOCK_PATH, `${JSON.stringify(syncLock(lock, doc.version), null, 2)}\n`);
+    if (mode === "bump") {
+      pkg.version = doc.version;
+      fs.writeFileSync(PACKAGE_PATH, `${JSON.stringify(pkg, null, 2)}\n`);
+      if (fs.existsSync(LOCK_PATH)) {
+        const lock = JSON.parse(fs.readFileSync(LOCK_PATH, "utf8"));
+        fs.writeFileSync(LOCK_PATH, `${JSON.stringify(syncLock(lock, doc.version), null, 2)}\n`);
+      }
     }
 
     const { archived, reset } = buildArchiveAndTemplate({
@@ -291,11 +320,12 @@ function main() {
     fs.writeFileSync(path.join("releases", "archive", `${archiveTag}.md`), archived);
     fs.writeFileSync(DOC_PATH, reset);
     console.log(
-      `已更新 package.json / package-lock.json / CHANGELOG.md，归档到 releases/archive/${archiveTag}.md` +
+      `已更新 ${mode === "bump" ? "package.json / package-lock.json / " : ""}CHANGELOG.md，` +
+        `归档到 releases/archive/${archiveTag}.md` +
         (doc.tagEnabled ? "" : "（本版不打 tag）"),
     );
   } else {
-    console.log(`版本号与当前一致（${current}）：只补 tag / Release，不改代码`);
+    console.log(`版本号与当前一致（${current}）且 tag 已存在：只补 tag / Release，不改代码`);
   }
 
   output({

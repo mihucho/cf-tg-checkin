@@ -2,17 +2,20 @@
 
 版本号只在 `package.json` 里维护（构建时注入到产物，页面底部和 `GET /api/version` 都会显示它）。
 
+平时改动：把 `package.json` / `package-lock.json` 的版本号加一，写进本文件的 `[Unreleased]`，
+commit + push 即可；**不要动 `releases/unreleased.md`，也不要打 tag**。只有用户明确要求发布时才走下面的流程。
+
 发版流程（**改文档即发布**，不要手跑 `npm version`）：
 
 ```bash
-$EDITOR releases/unreleased.md   # 改 front matter 的 version / title，正文写这次发布说明
+$EDITOR releases/unreleased.md   # version 填 package.json 的当前版本；title / 正文写发布说明
 node scripts/release.mjs --dry-run   # 可选：预览会做哪些改动
 git add releases/unreleased.md && git commit -m "docs(release): v0.18.0" && git push
 ```
 
-push 后 `.github/workflows/release.yml` 会自动：跑检查 → 写 `package.json`/lock → 插入本文件对应版本段
-→ 归档到 `releases/archive/` 并重置模板 → 打 annotated tag → 建/更新 GitHub Release → 触发部署。
-详见 `AGENTS.md` 的「发版」一节。
+push 后 `.github/workflows/release.yml` 会自动：跑检查 →（只有 `version` 大于当前版本时才写
+`package.json`/lock）→ 插入本文件对应版本段 → 归档到 `releases/archive/` 并重置模板 → 打 annotated tag
+→ 建/更新 GitHub Release → 触发部署。详见 `AGENTS.md` 的「发版」一节。
 
 ### 版本号怎么定
 
@@ -27,13 +30,22 @@ push 后 `.github/workflows/release.yml` 会自动：跑检查 → 写 `package.
 | `major` `1.0.0` 起 | 不兼容变更：删 API / 字段、改数据语义、配置或部署方式不再兼容、需要用户手动迁移 | — |
 
 - 还在 `0.x`：不兼容变更按 semver 允许只 bump `minor`，但 CHANGELOG 该版本下第一行要写 **`BREAKING`** 并说明删了什么 / 怎么迁移。
-- 一次发版只发一个号；同一天多个修复合并进同一个 `patch`（不要 0.12.2、0.12.3、0.12.4 连着发）。
-- 不跳号、不回改已发布的号；平时改动先写进 `[Unreleased]`，发版时整体挪到新号下面。
+- 不跳号、不回改已发布的号；平时每个改动 bump 一个 `patch` 并写进 `[Unreleased]`，发版时用当前
+  `package.json` 版本发布（多个未发布改动自然合并在这一版里）。
 - `1.0.0` 留给「接口、数据、部署方式都稳定、愿意承诺兼容」的时候，不是攒够功能就发。
-- 版本号只改 `package.json`（`npm version` 同时改它、生成 commit 和 tag），别手改 `src/version.ts`。
-- 拿不准就先按 `patch` 发；等真的需要用户「知道」时再 `minor`。
+- 版本号只改 `package.json`，别手改 `src/version.ts`；不要手跑 `npm version`（它会生成 commit 和 tag）。
+- 拿不准就先按 `patch`；等真的需要用户「知道」时再 `minor`。
 
 ## [Unreleased]
+
+## 发版流程
+
+- 平时改代码直接 bump `package.json` / `package-lock.json`，只写 `[Unreleased]`；不动 `releases/unreleased.md`，也不打 tag。
+- 发布文档的版本等于 `package.json` 且 tag 还未创建时，走完整发布（CHANGELOG / 归档 / tag / Release / 部署）；tag 已存在时仍只补 Release 说明。
+
+## 工程
+
+- 单测 200 例。
 
 ## [0.20.5] - 2026-11-12
 

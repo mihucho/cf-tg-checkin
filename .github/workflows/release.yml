@@ -54,11 +54,11 @@ jobs:
           exit 0
 
       - name: 装依赖
-        if: steps.prepare.outputs.mode == 'bump'
+        if: steps.prepare.outputs.mode == 'bump' || steps.prepare.outputs.mode == 'release'
         run: npm ci
 
       - name: 发版前跑一遍检查（不然不发）
-        if: steps.prepare.outputs.mode == 'bump'
+        if: steps.prepare.outputs.mode == 'bump' || steps.prepare.outputs.mode == 'release'
         run: |
           npm run typecheck
           npm test
@@ -66,7 +66,7 @@ jobs:
           npm run check:bundle
 
       - name: 提交版本号 / CHANGELOG / 归档文档
-        if: steps.prepare.outputs.mode == 'bump'
+        if: steps.prepare.outputs.mode == 'bump' || steps.prepare.outputs.mode == 'release'
         env:
           VERSION: ${{ steps.prepare.outputs.version }}
           TITLE: ${{ steps.prepare.outputs.title }}
@@ -83,7 +83,7 @@ jobs:
           fi
 
       - name: 打 tag（已存在则跳过）
-        if: (steps.prepare.outputs.mode == 'bump' || steps.prepare.outputs.mode == 'release-only') && steps.prepare.outputs.tag_enabled == 'true'
+        if: (steps.prepare.outputs.mode == 'bump' || steps.prepare.outputs.mode == 'release' || steps.prepare.outputs.mode == 'release-only') && steps.prepare.outputs.tag_enabled == 'true'
         env:
           VERSION: ${{ steps.prepare.outputs.version }}
           TAG: ${{ steps.prepare.outputs.tag }}
@@ -143,7 +143,7 @@ jobs:
           fi
 
       - name: 创建 GitHub Release（已存在则更新说明）
-        if: (steps.prepare.outputs.mode == 'bump' || steps.prepare.outputs.mode == 'release-only') && steps.prepare.outputs.tag_enabled == 'true'
+        if: (steps.prepare.outputs.mode == 'bump' || steps.prepare.outputs.mode == 'release' || steps.prepare.outputs.mode == 'release-only') && steps.prepare.outputs.tag_enabled == 'true'
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.prepare.outputs.tag }}
@@ -160,7 +160,7 @@ jobs:
 
       - name: 触发部署（把这一版发到线上）
         # 未配置 RELEASE_TOKEN 时显式触发部署；配置后由 push 级联触发。
-        if: steps.prepare.outputs.mode == 'bump' && env.HAS_RELEASE_TOKEN == 'false'
+        if: (steps.prepare.outputs.mode == 'bump' || steps.prepare.outputs.mode == 'release') && env.HAS_RELEASE_TOKEN == 'false'
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         run: gh workflow run deploy.yml --ref main

@@ -22,7 +22,7 @@ MTProto 走 `cloudflare:sockets`（`src/telegram/`），调度靠 DO alarm，数
 | 命令 | 作用 |
 | --- | --- |
 | `npm run typecheck` | `tsc --noEmit`（覆盖 `src/**`，`strict: true`；`build.mjs` 是 `.mjs`，不参与类型检查） |
-| `npm test` | `build.mjs --test` 打包 `tests/index.test.ts` → 在 Node 里跑（当前 199 例，几秒） |
+| `npm test` | `build.mjs --test` 打包 `tests/index.test.ts` → 在 Node 里跑（当前 200 例，几秒） |
 | `npm run check` | typecheck → test → build → 检查产物导出（提 PR 前跑这个） |
 | `npm run dev` | `wrangler dev`（`build.command` 会先跑一遍 esbuild） |
 | `npm run test:integration` | 真起 `wrangler dev`（随机端口 + 临时目录），HTTP 打通 Worker→DO→SQLite，73 项；约 45 秒，带 180 秒看门狗 |
@@ -55,7 +55,11 @@ MTProto 走 `cloudflare:sockets`（`src/telegram/`），调度靠 DO alarm，数
 版本号**只有一个来源：`package.json`**。别手改 `src/version.ts` —— `build.mjs` 会把 version / git commit /
 构建时间注入产物，`GET /api/version` 和页面底部可查。
 
-但**发版不要手跑 `npm version`**：版本号由发布文档驱动（见下一节），`npm version` 会绕过 CHANGELOG 插入与归档。
+**平时改代码就 bump `package.json`（和 `package-lock.json`），不要动 `releases/unreleased.md`、不要打 tag。**
+只有用户明确说「发布版本 / 发版 / 打个 tag」时，才写发布文档并走发布流程。
+
+但**不要手跑 `npm version`**：它会生成 commit / tag、跳过 CHANGELOG 插入与归档。改版本号时直接改
+`package.json`，再同步 lock 里的两处 version（或跑 `npm install --package-lock-only`）。
 
 ---
 
@@ -75,8 +79,9 @@ title: v0.18.0 — 一句话标题
 | 文档里的 front matter | 行为 |
 | --- | --- |
 | **`version` 大于** `package.json` | 跑 typecheck + 单测 + 打包自检 → 写 `package.json`/`package-lock.json` → 把正文插进 `CHANGELOG.md`（`[Unreleased]` 之后）→ 归档到 `releases/archive/vX.Y.Z.md` 并重置模板 → 提交 → 打 annotated tag → 建/更新 GitHub Release → 触发 `deploy.yml` |
-| **`version` 等于**当前版本 | 只补 tag / GitHub Release（代码已发、说明写晚了；重复执行安全） |
-| **`tag: false`**（配合大于当前版本的 `version`） | 版本号、`CHANGELOG.md`、归档与部署照常，跳过 tag 与 GitHub Release；`retro` / `revoke` / 只补发布仍然需要 tag |
+| **`version` 等于**当前版本、tag 还不存在 | 平时已经 bump 过版本号：跑检查 → 插 CHANGELOG、归档、重置模板 → 提交 → 打 tag → 建/更新 GitHub Release → 触发部署 |
+| **`version` 等于**当前版本、tag 已存在 | 只补 tag / GitHub Release（代码已发、说明写晚了；重复执行安全） |
+| **`tag: false`**（配合未打 tag 的 `version`） | 版本号、`CHANGELOG.md`、归档与部署照常，跳过 tag 与 GitHub Release；`retro` / `revoke` / 只补 Release 说明仍然需要 tag |
 | **`version: 0.0.0`**（模板） | 跳过 |
 | 带 **`retro: true`** | 只改这个已存在 tag 的 **GitHub Release 说明**（版本号可以 ≤ 当前版本），
 不动代码、不打 tag。用途：发布说明写错/需要脱敏时回头修 |
@@ -85,12 +90,15 @@ title: v0.18.0 — 一句话标题
 
 规矩：
 
-- **只有用户明确要求时才发版**（说「发版 / 打个 tag / 发布」）：平时的改动只 commit + push，
-  写进 `CHANGELOG.md` 的 `[Unreleased]` 就够；**不要**自己判断"这批改动值得发一版"就动手。
-  发布文档保持模板（`0.0.0`）状态，谁都不会误触发
-- **只有 `releases/unreleased.md` 的变化会触发发布**，别的改动走普通 CI；不要在别处手动 bump 版本号
-- 版本号判断口径见上一节（修 bug = `patch`），文档里写错会被脚本拒掉（必须 ≥ 当前版本：大于走完整发版，等于走「只补发布」；小于当前版本直接报错）
-- 发版默认打 tag；不需要 tag 的版本在 front matter 写 `tag: false`，工作流只更新版本号 / CHANGELOG / 归档并部署
+- **只有用户明确要求时才发版**（说「发版 / 打个 tag / 发布版本」）：平时的改动只 bump
+  `package.json` + 写 `CHANGELOG.md` 的 `[Unreleased]` + commit + push，**不要**动发布文档、
+  不要打 tag；**不要**自己判断"这批改动值得发一版"就动手。发布文档保持模板（`0.0.0`）状态
+- **只有 `releases/unreleased.md` 的变化会触发发布**，别的改动走普通 CI；平时只在 `package.json`
+  手动 bump，不要手打 tag
+- 发布文档的 `version` 填 `package.json` 的当前版本（通常相等）。脚本口径：等于且这个 tag 还没打
+  → 完整发布；等于且 tag 已存在 → 只补 Release 说明；大于当前版本 → 补 bump 后完整发布；
+  小于当前版本直接报错
+- 发版默认打 tag；不需要 tag 的版本在 front matter 写 `tag: false`，工作流只更新 CHANGELOG / 归档并部署
 - 正文要有内容（只写 front matter 会报错）；写完先 `node scripts/release.mjs --dry-run` 预览
 - 发完别手动改 `releases/unreleased.md` 的历史内容 —— 归档副本在 `releases/archive/`
 - 未配置 `RELEASE_TOKEN` 时，workflow 显式执行 `gh workflow run deploy.yml` 触发部署；
@@ -242,7 +250,7 @@ title: v0.18.0 — 一句话标题
 | `scripts/check-bundle.mjs` | 部署前检查产物导出了 `TgAgent` | `npm run deploy` / CI 自动跑 |
 | `docs/API.md` / `docs/DEPLOY.md` / `docs/UI_COPY.md` | 接口契约 / 部署与排查 / 文案规范 | 改契约同步 API.md |
 | `releases/unreleased.md` | 下一次发布的说明（改它即发版） | 格式与三种模式见「发版」一节 |
-| `scripts/release.mjs` | 解析发布文档、校验版本递增、写 CHANGELOG、归档 | 只管文件改动，git/gh 在 workflow 里 |
+| `scripts/release.mjs` | 解析发布文档、校验版本、写 CHANGELOG、归档 | 版本等于当前时按 tag 是否存在决定「完整发布」还是「只补说明」 |
 | `deliverables/` | 审计报告与产品评审（历史决策依据） | 不是运行时产物 |
 
 ---
@@ -262,7 +270,7 @@ title: v0.18.0 — 一句话标题
 
 ## 提交前检查清单
 
-- [ ] `npm run check` 通过（typecheck + 199 例单测 + build + 产物导出检查）
+- [ ] `npm run check` 通过（typecheck + 200 例单测 + build + 产物导出检查）
 - [ ] 改了路由 / DO 行为 / 数据读写 → `npm run test:integration` 通过
 - [ ] 改了 `dsl.ts` 或 `command.ts` → 往返用例已补
 - [ ] 改了 schema → 老数据能升级（`ALTER TABLE` 幂等）

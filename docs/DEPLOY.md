@@ -149,7 +149,7 @@ npm run deploy                           # 打包 + 部署（wrangler 会先跑 
 cp .dev.vars.example .dev.vars    # 填 ADMIN_PASSWORD
 npm install
 npm run dev                       # = wrangler dev（自定义构建会自动打包并 watch src/）
-npm test                          # 199 个单测（调度 / 触发语法 / 执行器判定 / 通知渲染 / 脱敏）
+npm test                          # 200 个单测（调度 / 触发语法 / 执行器判定 / 通知渲染 / 脱敏）
 npm run typecheck
 ```
 
@@ -353,14 +353,16 @@ DO 还在跑旧构建。仓库的 `wrangler.jsonc` 配了
 
 ## 发布新版本
 
-版本说明写在 `releases/unreleased.md`（front matter 里 `version` + `title`，分隔线下面是 Release notes），
-push 到 `main` 后由 `.github/workflows/release.yml` 自动完成：
+平时改代码只 bump `package.json` / `package-lock.json`，写 `CHANGELOG.md` 的 `[Unreleased]`，
+不要动 `releases/unreleased.md`。要发布时，把发布说明写进 `releases/unreleased.md`
+（`version` 填当前 `package.json` 版本），push 到 `main` 后由 `.github/workflows/release.yml` 自动完成：
 
 | 文档里的 front matter | 行为 |
 | --- | --- |
-| `version` 大于 `package.json` | 跑检查 → bump 版本 → 插 CHANGELOG → 归档文档 → 打 tag → 建 Release → 触发部署 |
-| `version` 等于当前版本 | 只补 tag / Release（重复执行安全） |
-| `tag: false`（配合大于当前版本的 version） | bump 版本 → 插 CHANGELOG → 归档文档 → 触发部署；跳过 tag 与 GitHub Release |
+| `version` 等于当前版本、tag 还不存在 | 跑检查 → 插 CHANGELOG → 归档文档 → 打 tag → 建 Release → 触发部署 |
+| `version` 等于当前版本、tag 已存在 | 只补 tag / Release（重复执行安全） |
+| `version` 大于当前版本 | 补 bump 版本号，再走上面的完整发布 |
+| `tag: false`（配合未打 tag 的 version） | 插 CHANGELOG → 归档文档 → 触发部署；跳过 tag 与 GitHub Release |
 | `version: 0.0.0`（模板） | 跳过 |
 
 本地先看一眼：`node scripts/release.mjs --dry-run`。

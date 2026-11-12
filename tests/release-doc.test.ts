@@ -8,6 +8,7 @@ import {
   insertChangelogEntry,
   isNewerVersion,
   parseReleaseDoc,
+  releaseMode,
   validateTagOption,
 } from "../scripts/release.mjs";
 
@@ -34,6 +35,13 @@ test("isNewerVersion：只比 x.y.z", () => {
   assert.equal(isNewerVersion("1.0.0", "0.99.99"), true);
   assert.equal(isNewerVersion("0.17.1", "0.17.1"), false);
   assert.equal(isNewerVersion("0.17.0", "0.17.1"), false);
+});
+
+test("releaseMode：大于当前版本补 bump；等于且没 tag 走完整发布；等于且已有 tag 只补说明", () => {
+  assert.equal(releaseMode({ version: "0.20.6", current: "0.20.5", tagExists: false }), "bump");
+  assert.equal(releaseMode({ version: "0.20.5", current: "0.20.5", tagExists: false }), "release");
+  assert.equal(releaseMode({ version: "0.20.5", current: "0.20.5", tagExists: true }), "release-only");
+  assert.equal(releaseMode({ version: "0.20.4", current: "0.20.5", tagExists: true }), "error");
 });
 
 test("insertChangelogEntry：插到 Unreleased 之后、旧版本之前", () => {
@@ -77,6 +85,7 @@ test("parseReleaseDoc：tag 开关，默认打 tag", () => {
 
 test("validateTagOption：tag 开关与发布模式兼容", () => {
   assert.equal(validateTagOption({ version: "0.20.0", current: "0.19.2", tagEnabled: false }), false);
+  assert.equal(validateTagOption({ version: "0.20.0", current: "0.20.0", tagEnabled: false }), false);
   assert.throws(
     () => validateTagOption({ version: "0.20.0", current: "0.19.2", retro: true, tagEnabled: false }),
     /retro \/ revoke/,
@@ -86,8 +95,8 @@ test("validateTagOption：tag 开关与发布模式兼容", () => {
     /retro \/ revoke/,
   );
   assert.throws(
-    () => validateTagOption({ version: "0.19.2", current: "0.19.2", tagEnabled: false }),
-    /只补发布/,
+    () => validateTagOption({ version: "0.19.2", current: "0.19.2", tagEnabled: false, tagExists: true }),
+    /补发布/,
   );
 });
 
